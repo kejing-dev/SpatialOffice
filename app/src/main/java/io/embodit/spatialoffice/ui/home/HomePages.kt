@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
 import androidx.compose.runtime.Composable
@@ -20,7 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
+import io.embodit.spatialoffice.ui.tr
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -45,25 +47,25 @@ import io.embodit.spatialoffice.ui.Txt
 
 @Composable
 internal fun BrowsePage(graph: Graph) {
-    PageHeader(stringResource(R.string.nav_browse), stringResource(R.string.browse_sub), "browse")
+    PageHeader(tr(R.string.nav_browse), tr(R.string.browse_sub), "browse")
     PageBody {
         val locs = listOf(R.string.loc_device, R.string.loc_feishu, R.string.loc_gdrive, R.string.loc_onedrive, R.string.loc_dropbox)
         // where to look, inside this one page (the page itself is chosen in the side navigation)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Segments(locs.mapIndexed { i, id -> i to stringResource(id) }, graph.browseLoc, "browse/loc", itemWidth = 136.dp) { graph.browseLoc = it; graph.browseDir = null }
+            Segments(locs.mapIndexed { i, id -> i to tr(id) }, graph.browseLoc, "browse/loc", itemWidth = 136.dp) { graph.browseLoc = it; graph.browseDir = null }
         }
         if (graph.browseLoc != 0) {
             // no provider is connected in this version; say so instead of showing made-up folders
             Spacer(Modifier.height(24.dp))
-            InfoRow(R.drawable.ic_cloud, stringResource(R.string.br_off_head, stringResource(locs[graph.browseLoc])), stringResource(R.string.br_off_sub), "browse/off")
+            InfoRow(R.drawable.ic_cloud, tr(R.string.br_off_head, tr(locs[graph.browseLoc])), tr(R.string.br_off_sub), "browse/off")
             return@PageBody
         }
         val dir = graph.browseDir
         val version = graph.filesVersion
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(painter = painterResource(R.drawable.ic_folder), contentDescription = null, modifier = Modifier.size(20.dp), tint = PicoTheme.colorScheme.labelSecondary)
-            Txt(if (dir == null) stringResource(R.string.loc_device) else graph.storage.display(dir), "browse/path", Modifier.weight(1f).padding(horizontal = 10.dp), style = PicoTheme.typography.bodyLarge, maxLines = 2)
-            if (dir != null) SecondaryButton(stringResource(R.string.browse_up), "browse/up", icon = R.drawable.ic_arrow_up, onClick = {
+            Txt(if (dir == null) tr(R.string.loc_device) else graph.storage.display(dir), "browse/path", Modifier.weight(1f).padding(horizontal = 10.dp), style = PicoTheme.typography.bodyLarge, maxLines = 2)
+            if (dir != null) SecondaryButton(tr(R.string.browse_up), "browse/up", icon = R.drawable.ic_arrow_up, onClick = {
                 graph.browseDir = dir.parentFile?.takeIf { it.absolutePath.startsWith(graph.storage.shared.absolutePath) && it != graph.storage.shared }
             })
         }
@@ -73,7 +75,7 @@ internal fun BrowsePage(graph: Graph) {
             }
         } else {
             val entries = remember(dir, version) { graph.storage.list(dir) }
-            if (entries.isEmpty()) InfoRow(R.drawable.ic_info_circle, stringResource(R.string.browse_empty), null, "browse/empty")
+            if (entries.isEmpty()) InfoRow(R.drawable.ic_info_circle, tr(R.string.browse_empty), null, "browse/empty")
             entries.take(40).forEach { e ->
                 if (e.isDir) FileRow(e.file.name, "", e.kind, folder = true, tag = "browse/dir") { graph.browseDir = e.file }
                 else FileRow(e.file.name, kindLabel(e.kind) + " · " + sizeLabel(e.size) + " · " + timeLabel(e.modified), e.kind, tag = "browse/file") { graph.open(FileRef.Path(e.file)) }
@@ -81,8 +83,8 @@ internal fun BrowsePage(graph: Graph) {
         }
         if (!graph.storage.hasAllFiles) {
             Spacer(Modifier.height(4.dp))
-            InfoRow(R.drawable.ic_lock, stringResource(R.string.browse_grant_head), stringResource(R.string.browse_grant_sub), "browse/grant") {
-                SecondaryButton(stringResource(R.string.browse_grant_btn), "browse/grant", onClick = {
+            InfoRow(R.drawable.ic_lock, tr(R.string.browse_grant_head), tr(R.string.browse_grant_sub), "browse/grant") {
+                SecondaryButton(tr(R.string.browse_grant_btn), "browse/grant", onClick = {
                     if (!graph.storage.requestAllFiles()) graph.say(Win.HOME, graph.str(R.string.picker_none))
                 })
             }
@@ -111,35 +113,35 @@ private fun SettingRow(label: String, sub: String?, tag: String, modifier: Modif
 @Composable
 internal fun SettingsPage(graph: Graph) {
     val s = graph.settings.value
-    PageHeader(stringResource(R.string.nav_settings), null, "settings")
+    PageHeader(tr(R.string.nav_settings), null, "settings")
     Column(Modifier.fillMaxWidth().padding(start = 32.dp, end = 32.dp, bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        SettingRow(stringResource(R.string.set_language), null, "settings/lang") {
-            Segments(listOf(Lang.ZH to stringResource(R.string.lang_zh), Lang.EN to stringResource(R.string.lang_en)), s.lang, "settings/lang") { v -> graph.settings.update { it.copy(lang = v) } }
+        SettingRow(tr(R.string.set_language), null, "settings/lang") {
+            Segments(listOf(Lang.ZH to tr(R.string.lang_zh), Lang.EN to tr(R.string.lang_en)), s.lang, "settings/lang") { v -> graph.settings.update { it.copy(lang = v) } }
         }
-        SettingRow(stringResource(R.string.set_open), stringResource(R.string.set_open_sub), "settings/open") {
-            Segments(listOf(OpenMode.WINDOW to stringResource(R.string.open_window), OpenMode.SPREAD to stringResource(R.string.open_spread)), s.openMode, "settings/open") { v -> graph.settings.update { it.copy(openMode = v) } }
+        SettingRow(tr(R.string.set_open), tr(R.string.set_open_sub), "settings/open") {
+            Segments(listOf(OpenMode.WINDOW to tr(R.string.open_window), OpenMode.SPREAD to tr(R.string.open_spread)), s.openMode, "settings/open") { v -> graph.settings.update { it.copy(openMode = v) } }
         }
-        SettingRow(stringResource(R.string.set_store), stringResource(R.string.set_store_sub), "settings/store") {
-            Segments(listOf(LayoutStoreMode.DEVICE to stringResource(R.string.store_device), LayoutStoreMode.FILE to stringResource(R.string.store_file)), s.layoutStore, "settings/store") { v -> graph.settings.update { it.copy(layoutStore = v) } }
+        SettingRow(tr(R.string.set_store), tr(R.string.set_store_sub), "settings/store") {
+            Segments(listOf(LayoutStoreMode.DEVICE to tr(R.string.store_device), LayoutStoreMode.FILE to tr(R.string.store_file)), s.layoutStore, "settings/store") { v -> graph.settings.update { it.copy(layoutStore = v) } }
         }
         // the whole row toggles (the bare Switch is far smaller than 48 dp)
         SettingRow(
-            stringResource(R.string.set_keep), stringResource(R.string.set_keep_sub), "settings/keep",
+            tr(R.string.set_keep), tr(R.string.set_keep_sub), "settings/keep",
             Modifier.clip(RoundedCornerShape(16.dp)).toggleable(value = s.keepBackup, role = Role.Switch) { v -> graph.settings.update { it.copy(keepBackup = v) } },
         ) { Switch(checked = s.keepBackup, onCheckedChange = null) }
-        SettingRow(stringResource(R.string.set_radius), stringResource(R.string.set_radius_sub), "settings/radius") {
+        SettingRow(tr(R.string.set_radius), tr(R.string.set_radius_sub), "settings/radius") {
             Segments(listOf(0 to "1.2 m", 1 to "1.5 m", 2 to "1.8 m"), s.radius, "settings/radius", itemWidth = 88.dp) { v -> graph.settings.update { it.copy(radius = v) } }
         }
-        SettingRow(stringResource(R.string.set_howto), stringResource(R.string.shortcuts_sub), "settings/howto") {
+        SettingRow(tr(R.string.set_howto), tr(R.string.shortcuts_sub), "settings/howto") {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                SecondaryButton(stringResource(R.string.set_howto), "settings/howto", icon = R.drawable.ic_question_fill, onClick = { graph.overlay = Overlay.HowTo() })
-                SecondaryButton(stringResource(R.string.shortcuts), "settings/keys", icon = R.drawable.ic_keyboard_fill, onClick = { graph.overlay = Overlay.Shortcuts(Win.HOME) })
+                SecondaryButton(tr(R.string.set_howto), "settings/howto", icon = R.drawable.ic_question_fill, onClick = { graph.overlay = Overlay.HowTo() })
+                SecondaryButton(tr(R.string.shortcuts), "settings/keys", icon = R.drawable.ic_keyboard_fill, onClick = { graph.overlay = Overlay.Shortcuts(Win.HOME) })
             }
         }
-        SettingRow(stringResource(R.string.about), stringResource(R.string.about_sub, BuildConfig.VERSION_NAME), "settings/about") {
-            SecondaryButton(stringResource(R.string.exit_app), "settings/exit", icon = R.drawable.ic_power, onClick = { graph.requestExit() })
+        SettingRow(tr(R.string.about), tr(R.string.about_sub, BuildConfig.VERSION_NAME), "settings/about") {
+            SecondaryButton(tr(R.string.exit_app), "settings/exit", icon = R.drawable.ic_power, onClick = { graph.requestExit() })
         }
-        Txt(stringResource(R.string.set_legal), "settings/legal", style = PicoTheme.typography.bodySmall, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
+        Txt(tr(R.string.set_legal), "settings/legal", style = PicoTheme.typography.bodySmall, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
     }
 }
 
@@ -151,14 +153,14 @@ internal fun HomeOverlays(graph: Graph) {
             val dirty = graph.dirtyNames
             AlertDialog(
                 onDismissRequest = { graph.overlay = null },
-                title = { Txt(stringResource(R.string.exit_q), "exit/title", style = PicoTheme.typography.headlineSmall, weight = FontWeight.Bold) },
+                title = { Txt(tr(R.string.exit_q), "exit/title", style = PicoTheme.typography.headlineSmall, weight = FontWeight.Bold) },
                 content = {
-                    Txt(if (dirty.isEmpty()) stringResource(R.string.exit_msg) else stringResource(R.string.exit_msg_dirty, dirty.joinToString("、")), "exit/msg", style = PicoTheme.typography.bodyLarge, maxLines = 4)
+                    Txt(if (dirty.isEmpty()) tr(R.string.exit_msg) else tr(R.string.exit_msg_dirty, dirty.joinToString("、")), "exit/msg", style = PicoTheme.typography.bodyLarge, maxLines = 4)
                 },
                 buttons = {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End)) {
-                        SecondaryButton(stringResource(R.string.cancel), "exit/cancel", onClick = { graph.overlay = null })
-                        PrimaryButton(stringResource(R.string.exit), "exit/confirm", onClick = { graph.exit() })
+                        SecondaryButton(tr(R.string.cancel), "exit/cancel", onClick = { graph.overlay = null })
+                        PrimaryButton(tr(R.string.exit), "exit/confirm", onClick = { graph.exit() })
                     }
                 },
             )
@@ -180,24 +182,20 @@ private fun HowToSheet(graph: Graph) {
         listOf(R.drawable.ic_expand, R.string.how_to_move, R.string.how_to_move_keys, R.string.how_to_move_hand, R.string.how_to_move_ctrl),
     )
     Sheet(
-        modifier = Modifier.width(920.dp),
         onDismissRequest = { graph.overlay = null },
-        title = { Txt(stringResource(R.string.how_to_title), "howto/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold) },
+        title = { Txt(tr(R.string.how_to_title), "howto/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold) },
     ) {
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Spacer(Modifier.width(196.dp))
-                HowToHead(R.drawable.ic_keyboard_fill, R.string.how_to_col_keys, Modifier.weight(1f))
-                HowToHead(R.drawable.ic_hand, R.string.how_to_col_hand, Modifier.weight(1f))
-                HowToHead(R.drawable.ic_controller, R.string.how_to_col_ctrl, Modifier.weight(1f))
-            }
+        // the sheet has a fixed width, so each action is a short block: its name, then one line per way of doing it
+        Column(Modifier.fillMaxWidth().heightIn(max = 560.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             rows.forEach { r ->
-                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Row(Modifier.width(196.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(painter = painterResource(r[0]), contentDescription = null, modifier = Modifier.size(22.dp))
-                        Txt(stringResource(r[1]), "howto/action", Modifier.padding(start = 10.dp), style = PicoTheme.typography.titleMedium, maxLines = 2)
+                        Txt(tr(r[1]), "howto/action", Modifier.padding(start = 10.dp), style = PicoTheme.typography.titleMedium, weight = FontWeight.Bold)
                     }
-                    for (i in 2..4) Txt(stringResource(r[i]), "howto/cell", Modifier.weight(1f).padding(end = 12.dp), style = PicoTheme.typography.bodyMedium, maxLines = 4)
+                    HowToLine(R.drawable.ic_keyboard_fill, tr(r[2]))
+                    HowToLine(R.drawable.ic_hand, tr(r[3]))
+                    HowToLine(R.drawable.ic_controller, tr(r[4]))
                 }
             }
         }
@@ -205,9 +203,9 @@ private fun HowToSheet(graph: Graph) {
 }
 
 @Composable
-private fun HowToHead(icon: Int, label: Int, modifier: Modifier) {
-    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        Icon(painter = painterResource(icon), contentDescription = null, modifier = Modifier.size(20.dp), tint = PicoTheme.colorScheme.labelSecondary)
-        Txt(stringResource(label), "howto/head", Modifier.padding(start = 8.dp), style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
+private fun HowToLine(icon: Int, text: String) {
+    Row(Modifier.fillMaxWidth().padding(start = 32.dp), verticalAlignment = Alignment.Top) {
+        Icon(painter = painterResource(icon), contentDescription = null, modifier = Modifier.padding(top = 2.dp).size(18.dp), tint = PicoTheme.colorScheme.labelSecondary)
+        Txt(text, "howto/line", Modifier.weight(1f).padding(start = 10.dp), style = PicoTheme.typography.bodyMedium, maxLines = 3)
     }
 }

@@ -41,7 +41,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.stringResource
+import io.embodit.spatialoffice.ui.tr
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -87,7 +87,7 @@ fun SlidesWindow() {
         if (s == null) { NoFile(graph, Win.SLIDES); return@WindowFrame }
         Column(Modifier.fillMaxSize().onPreviewKeyEvent { e -> commonKeys(graph, Win.SLIDES, e) || slideKeys(s, e) }) {
             EditorTitleBar(graph, Win.SLIDES, s) {
-                ToolButton(stringResource(R.string.rehearse), "slides/rehearse", icon = R.drawable.ic_play, onClick = { graph.rehearse() })
+                ToolButton(tr(R.string.rehearse), "slides/rehearse", icon = R.drawable.ic_play, onClick = { graph.rehearse() })
             }
             Row(Modifier.fillMaxWidth().weight(1f).padding(start = 32.dp, end = 32.dp, bottom = 52.dp)) {
                 Thumbnails(s, Modifier.width(208.dp).fillMaxHeight())
@@ -97,7 +97,7 @@ fun SlidesWindow() {
                     val w = 960.dp
                     SlideCanvas(s, s.current, w, editable = true, modifier = Modifier.align(Alignment.CenterHorizontally))
                     Box(Modifier.height(12.dp))
-                    Txt(stringResource(R.string.notes), "slides/notes-label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
+                    Txt(tr(R.string.notes), "slides/notes-label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
                     Box(Modifier.height(6.dp))
                     val slide = s.deck.slides.getOrNull(s.current)
                     var notes by remember(s.current, s.deck) { mutableStateOf(slide?.notes ?: "") }
@@ -105,7 +105,7 @@ fun SlidesWindow() {
                         value = notes,
                         onValueChange = { notes = it; s.setNotes(s.current, it) },
                         modifier = Modifier.width(w).weight(1f).semantics { contentDescription = "notes-input" },
-                        placeholder = { Txt(stringResource(R.string.notes_ph), "slides/notes-ph", color = PicoTheme.colorScheme.labelTertiary) },
+                        placeholder = { Txt(tr(R.string.notes_ph), "slides/notes-ph", color = PicoTheme.colorScheme.labelTertiary) },
                     )
                 }
             }
@@ -128,7 +128,7 @@ private fun Thumbnails(s: DeckSession, modifier: Modifier) {
     s.version
     val state = rememberLazyListState()
     LaunchedEffect(s.current) { runCatching { state.animateScrollToItem(s.current.coerceAtLeast(0)) } }
-    LazyColumn(modifier, state = state, verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
+    LazyColumn(modifier, state = state, verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
         items(s.deck.slides.size) { i ->
             val on = i == s.current
             Row(Modifier.fillMaxWidth().clickable { s.current = i }.semantics { contentDescription = "slide-thumb-${i + 1}" }, verticalAlignment = Alignment.CenterVertically) {
@@ -160,7 +160,7 @@ fun SlideCanvas(s: DeckSession, index: Int, width: Dp, editable: Boolean, modifi
                 ShapeKind.PICTURE -> sh.imagePart?.let { s.image(it) }?.let { Image(bitmap = it.asImageBitmap(), contentDescription = null, contentScale = ContentScale.FillBounds, modifier = box) }
                 ShapeKind.TITLE, ShapeKind.BODY, ShapeKind.TEXT -> ShapeText(s, index, sh, box, perPt, editable && sh.editable)
                 else -> Box(box.border((width.value / 600f).coerceAtLeast(0.5f).dp, Ink.Line, RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
-                    if (editable) Text(stringResource(R.string.slide_other), style = TextStyle(fontSize = 13.sp, color = Ink.Hint, textAlign = TextAlign.Center), modifier = Modifier.padding(6.dp))
+                    if (editable) Text(tr(R.string.slide_other), style = TextStyle(fontSize = 13.sp, color = Ink.Hint, textAlign = TextAlign.Center), modifier = Modifier.padding(6.dp))
                 }
             }
         }
@@ -191,7 +191,7 @@ private fun ShapeText(s: DeckSession, slide: Int, sh: Shape, box: Modifier, perP
     if (!focused && text != model) text = model
     Box(box.border(1.dp, if (focused) Ink.Select else Color(0x22000000), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp), contentAlignment = align) {
         if (text.isEmpty()) Text(
-            stringResource(if (sh.kind == ShapeKind.TITLE) R.string.slide_title_ph else R.string.slide_body_ph),
+            tr(if (sh.kind == ShapeKind.TITLE) R.string.slide_title_ph else R.string.slide_body_ph),
             style = style.copy(color = Ink.Hint), modifier = Modifier.fillMaxWidth(),
         )
         BasicTextField(
@@ -213,21 +213,21 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
         content = {
             ToolRow {
                 Box {
-                    ToolButton(stringResource(R.string.add_slide), "slides/add", icon = R.drawable.ic_plus, onClick = { layouts = !layouts })
+                    ToolButton(tr(R.string.add_slide), "slides/add", icon = R.drawable.ic_plus, onClick = { layouts = !layouts })
                     if (layouts) {
                         Menu(
                             onDismissRequest = { layouts = false },
                             positionProvider = rememberMenuPositionProvider(horizontalPlacement = HorizontalPlacement.alignStart(), verticalPlacement = VerticalPlacement.above(offset = (-12).dp)),
                         ) {
-                            MenuItem(title = { Txt(stringResource(R.string.lay_title), "slides/layout-item") }, onClick = { layouts = false; s.addSlide(SlideLayoutKind.TITLE) })
-                            MenuItem(title = { Txt(stringResource(R.string.lay_body), "slides/layout-item") }, onClick = { layouts = false; s.addSlide(SlideLayoutKind.TITLE_BODY) })
+                            MenuItem(title = { Txt(tr(R.string.lay_title), "slides/layout-item") }, onClick = { layouts = false; s.addSlide(SlideLayoutKind.TITLE) })
+                            MenuItem(title = { Txt(tr(R.string.lay_body), "slides/layout-item") }, onClick = { layouts = false; s.addSlide(SlideLayoutKind.TITLE_BODY) })
                         }
                     }
                 }
-                ToolIcon(R.drawable.ic_text, stringResource(R.string.text_box), onClick = { s.addTextBox("") })
-                ToolIcon(R.drawable.ic_arrow_up, stringResource(R.string.slide_up), onClick = { s.moveSlide(-1) }, enabled = s.current > 0)
-                ToolIcon(R.drawable.ic_arrow_down, stringResource(R.string.slide_down), onClick = { s.moveSlide(1) }, enabled = s.current < s.deck.slides.size - 1)
-                ToolIcon(R.drawable.ic_delete, stringResource(R.string.delete_slide), onClick = { if (!s.deleteSlide()) graph.say(Win.SLIDES, graph.str(R.string.last_slide)) })
+                ToolIcon(R.drawable.ic_text, tr(R.string.text_box), onClick = { s.addTextBox("") })
+                ToolIcon(R.drawable.ic_arrow_up, tr(R.string.slide_up), onClick = { s.moveSlide(-1) }, enabled = s.current > 0)
+                ToolIcon(R.drawable.ic_arrow_down, tr(R.string.slide_down), onClick = { s.moveSlide(1) }, enabled = s.current < s.deck.slides.size - 1)
+                ToolIcon(R.drawable.ic_delete, tr(R.string.delete_slide), onClick = { if (!s.deleteSlide()) graph.say(Win.SLIDES, graph.str(R.string.last_slide)) })
                 ToolDivider()
                 UndoRedo(s)
             }

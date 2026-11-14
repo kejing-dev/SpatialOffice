@@ -40,7 +40,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
+import io.embodit.spatialoffice.ui.tr
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -173,7 +173,7 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
     ) {
         if (all.isEmpty() && focus != null && !s.readOnly) item("empty") {
             Text(
-                stringResource(R.string.doc_placeholder), style = paraStyle(ParaStyle.BODY).copy(color = Ink.Hint),
+                tr(R.string.doc_placeholder), style = paraStyle(ParaStyle.BODY).copy(color = Ink.Hint),
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { focus.want = s.insertAfter(-1, emptyList(), ParaStyle.BODY) },
             )
         }
@@ -194,7 +194,7 @@ private fun ParaView(b: UiBlock.Para) {
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         if (b.style == ParaStyle.BULLET || b.style == ParaStyle.NUMBERED) Text("•", style = paraStyle(b.style), modifier = Modifier.width(22.dp))
         Text(annotated(b.spans), style = paraStyle(b.style), modifier = Modifier.weight(1f))
-        if (b.why != null && b.why != "html") Txt(stringResource(R.string.ph_readonly), "doc/readonly", Modifier.padding(start = 8.dp), style = PicoTheme.typography.labelMedium, color = Ink.Hint)
+        if (b.why != null && b.why != "html") Txt(tr(R.string.ph_readonly), "doc/readonly", Modifier.padding(start = 8.dp), style = PicoTheme.typography.labelMedium, color = Ink.Hint)
     }
 }
 
@@ -206,8 +206,8 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
     val text = RichText.text(b.spans)
     val styled = annotated(b.spans)
     if (value.annotatedString != styled) {
-        val sel = if (value.text == text) value.selection else TextRange(text.length)
-        value = TextFieldValue(styled, TextRange(sel.start.coerceIn(0, text.length), sel.end.coerceIn(0, text.length)))
+        // same text: only the styling moved, so the caret and the input method's composing range stay as they are
+        value = if (value.text == text) value.copy(annotatedString = styled) else TextFieldValue(styled, TextRange(text.length))
     }
     LaunchedEffect(focus.want) {
         if (focus.want == b.id) {
@@ -236,7 +236,8 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
                 } else {
                     val spans = RichText.applyEdit(b.spans, nv.text)
                     s.setParagraph(b.id, spans, b.style)
-                    value = TextFieldValue(annotated(spans), nv.selection)
+                    // keep what the input method handed over (caret, composing range); only the styling is ours
+                    value = nv.copy(annotatedString = annotated(spans))
                     focus.selection = nv.selection
                 }
             },
@@ -264,7 +265,7 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
                 },
             decorationBox = { inner ->
                 Box {
-                    if (value.text.isEmpty() && all.size == 1) Text(stringResource(R.string.doc_placeholder), style = paraStyle(b.style).copy(color = Ink.Hint))
+                    if (value.text.isEmpty() && all.size == 1) Text(tr(R.string.doc_placeholder), style = paraStyle(b.style).copy(color = Ink.Hint))
                     inner()
                 }
             },
@@ -299,7 +300,7 @@ private fun TableView(b: UiBlock.Table) {
 
 @Composable
 private fun OpaqueView(b: UiBlock.Opaque) {
-    val name = stringResource(
+    val name = tr(
         when (b.kind) { "smart-graphic" -> R.string.ph_smart; "chart" -> R.string.ph_chart; "text-box" -> R.string.ph_text_box; else -> R.string.ph_other },
     )
     Row(
@@ -308,8 +309,8 @@ private fun OpaqueView(b: UiBlock.Opaque) {
     ) {
         Icon(painter = painterResource(R.drawable.ic_image_unavailable), contentDescription = null, modifier = Modifier.size(24.dp), tint = Ink.TextSoft)
         Column(Modifier.padding(start = 12.dp)) {
-            Text(name + stringResource(R.string.ph_readonly), style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Ink.Text))
-            Text(stringResource(R.string.ph_sub), style = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, color = Ink.TextSoft))
+            Text(name + tr(R.string.ph_readonly), style = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Ink.Text))
+            Text(tr(R.string.ph_sub), style = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, color = Ink.TextSoft))
         }
     }
 }
@@ -340,21 +341,21 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                         }
                     }
                 }
-                ToolToggle(R.drawable.ic_text_bold, stringResource(R.string.bold), hasAttr(s, focus, Attr.BOLD), { toggle(s, focus, Attr.BOLD) }, enabled = canEdit && s.richText)
-                ToolToggle(R.drawable.ic_text_italic, stringResource(R.string.italic), hasAttr(s, focus, Attr.ITALIC), { toggle(s, focus, Attr.ITALIC) }, enabled = canEdit && s.richText)
-                ToolToggle(R.drawable.ic_text_underline, stringResource(R.string.underline), hasAttr(s, focus, Attr.UNDERLINE), { toggle(s, focus, Attr.UNDERLINE) }, enabled = canEdit && s.richText)
-                ToolToggle(R.drawable.ic_list_bulleted, stringResource(R.string.bullets), para?.style == ParaStyle.BULLET, { on ->
+                ToolToggle(R.drawable.ic_text_bold, tr(R.string.bold), hasAttr(s, focus, Attr.BOLD), { toggle(s, focus, Attr.BOLD) }, enabled = canEdit && s.richText)
+                ToolToggle(R.drawable.ic_text_italic, tr(R.string.italic), hasAttr(s, focus, Attr.ITALIC), { toggle(s, focus, Attr.ITALIC) }, enabled = canEdit && s.richText)
+                ToolToggle(R.drawable.ic_text_underline, tr(R.string.underline), hasAttr(s, focus, Attr.UNDERLINE), { toggle(s, focus, Attr.UNDERLINE) }, enabled = canEdit && s.richText)
+                ToolToggle(R.drawable.ic_list_bulleted, tr(R.string.bullets), para?.style == ParaStyle.BULLET, { on ->
                     if (para != null) { s.setParagraph(para.id, para.spans, if (on) ParaStyle.BULLET else ParaStyle.BODY); focus.want = para.id }
                 }, enabled = canEdit && s.styled)
                 ToolDivider()
                 UndoRedo(s)
-            } else Txt(stringResource(R.string.readonly_note), "doc/readonly-note", Modifier.padding(horizontal = 12.dp), style = PicoTheme.typography.bodyMedium)
+            } else Txt(tr(R.string.readonly_note), "doc/readonly-note", Modifier.padding(horizontal = 12.dp), style = PicoTheme.typography.bodyMedium)
         },
     )
 }
 
 @Composable
-private fun styleName(st: ParaStyle): String = stringResource(
+private fun styleName(st: ParaStyle): String = tr(
     when (st) {
         ParaStyle.TITLE -> R.string.style_title
         ParaStyle.H1 -> R.string.style_h1

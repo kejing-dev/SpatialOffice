@@ -30,7 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
+import io.embodit.spatialoffice.ui.tr
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pico.spatial.ui.design.Icon
@@ -63,7 +63,7 @@ fun HomeWindow() {
                 modifier = Modifier.width(316.dp).fillMaxHeight(),
                 header = {
                     Box(Modifier.fillMaxWidth().height(96.dp).padding(start = 8.dp, top = 31.dp, bottom = 31.dp), contentAlignment = Alignment.CenterStart) {
-                        Txt(stringResource(R.string.app_name), "home/nav-title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold)
+                        Txt(tr(R.string.app_name), "home/nav-title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold)
                     }
                 },
             ) {
@@ -97,7 +97,7 @@ private fun NavItem(graph: Graph, page: HomePage, icon: Int, label: Int) {
         modifier = Modifier.heightIn(min = 56.dp).clickable { graph.homePage = page; Log.i(TAG, "PAGE $page") },
         leading = { Icon(painter = painterResource(icon), contentDescription = null, modifier = Modifier.size(22.dp)) },
     ) {
-        Txt(stringResource(label), "home/nav", style = PicoTheme.typography.titleMedium)
+        Txt(tr(label), "home/nav", style = PicoTheme.typography.titleMedium)
     }
 }
 
@@ -146,7 +146,7 @@ internal fun FileTile(kind: FileKind, folder: Boolean = false) {
 }
 
 @Composable
-internal fun kindLabel(kind: FileKind): String = stringResource(
+internal fun kindLabel(kind: FileKind): String = tr(
     when (kind) {
         FileKind.DOC -> R.string.meta_doc
         FileKind.SHEET, FileKind.CSV -> R.string.meta_sheet
@@ -167,8 +167,8 @@ internal fun timeLabel(time: Long): String {
     now.add(Calendar.DAY_OF_YEAR, -1)
     val yesterday = now.get(Calendar.YEAR) == then.get(Calendar.YEAR) && now.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
     return when {
-        sameDay -> stringResource(R.string.today) + " " + hm
-        yesterday -> stringResource(R.string.yesterday) + " " + hm
+        sameDay -> tr(R.string.today) + " " + hm
+        yesterday -> tr(R.string.yesterday) + " " + hm
         else -> SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).format(Date(time))
     }
 }
@@ -188,27 +188,27 @@ internal fun FileRow(name: String, meta: String, kind: FileKind, folder: Boolean
 private fun RecentPage(graph: Graph) {
     val context = LocalContext.current
     LaunchedEffect(graph.filesVersion) { graph.recents.prune() }
-    PageHeader(stringResource(R.string.nav_recent), stringResource(R.string.recent_sub), "recent") {
-        SecondaryButton(stringResource(R.string.open_file), "recent/open", icon = R.drawable.ic_folder, onClick = {
+    PageHeader(tr(R.string.nav_recent), tr(R.string.recent_sub), "recent") {
+        SecondaryButton(tr(R.string.open_file), "recent/open", icon = R.drawable.ic_folder, onClick = {
             runCatching { context.startActivity(Intent(context, PickerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 .onFailure { graph.say(Win.HOME, graph.str(R.string.picker_none)) }
         })
     }
     PageBody {
         val items = graph.recents.items
-        GroupLabel(stringResource(R.string.group_device), "recent")
+        GroupLabel(tr(R.string.group_device), "recent")
         if (items.isEmpty()) {
-            InfoRow(R.drawable.ic_info_circle, stringResource(R.string.recent_empty), stringResource(R.string.first_hint), "recent/empty")
+            InfoRow(R.drawable.ic_info_circle, tr(R.string.recent_empty), tr(R.string.first_hint), "recent/empty")
         } else {
             items.take(6).forEach { r ->
                 FileRow(r.name, kindLabel(r.kind) + " · " + r.display.substringBeforeLast('/', "").ifEmpty { r.display } + " · " + timeLabel(r.time), r.kind, tag = "recent/row") { graph.open(r.ref()) }
             }
         }
         if (!graph.settings.value.hintSeen && items.isNotEmpty()) LaunchedEffect(Unit) { graph.settings.update { it.copy(hintSeen = true) } }
-        GroupLabel(stringResource(R.string.group_cloud), "recent")
-        InfoRow(R.drawable.ic_cloud, stringResource(R.string.cloud_none), null, "recent/cloud")
+        GroupLabel(tr(R.string.group_cloud), "recent")
+        InfoRow(R.drawable.ic_cloud, tr(R.string.cloud_none), null, "recent/cloud")
         Spacer(Modifier.height(4.dp))
-        InfoRow(R.drawable.ic_info_circle, stringResource(R.string.entry_head), stringResource(R.string.entry_sub), "recent/entry")
+        InfoRow(R.drawable.ic_info_circle, tr(R.string.entry_head), tr(R.string.entry_sub), "recent/entry")
     }
 }
 
@@ -227,15 +227,15 @@ internal fun InfoRow(icon: Int, head: String, sub: String?, tag: String, trailin
 
 @Composable
 private fun NewPage(graph: Graph) {
-    PageHeader(stringResource(R.string.nav_new), stringResource(R.string.new_sub), "new")
+    PageHeader(tr(R.string.nav_new), tr(R.string.new_sub), "new")
     PageBody {
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            NewCard(R.drawable.cover_doc, stringResource(R.string.new_doc), ".docx", "new/doc") { graph.newFile(FileKind.DOC) }
-            NewCard(R.drawable.cover_sheet, stringResource(R.string.new_sheet), ".xlsx", "new/sheet") { graph.newFile(FileKind.SHEET) }
-            NewCard(R.drawable.cover_slides, stringResource(R.string.new_slides), ".pptx", "new/slides") { graph.newFile(FileKind.SLIDES) }
+            NewCard(R.drawable.cover_doc, tr(R.string.new_doc), ".docx", "new/doc") { graph.newFile(FileKind.DOC) }
+            NewCard(R.drawable.cover_sheet, tr(R.string.new_sheet), ".xlsx", "new/sheet") { graph.newFile(FileKind.SHEET) }
+            NewCard(R.drawable.cover_slides, tr(R.string.new_slides), ".pptx", "new/slides") { graph.newFile(FileKind.SLIDES) }
         }
         Spacer(Modifier.height(12.dp))
-        Txt(stringResource(R.string.new_note), "new/note", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
+        Txt(tr(R.string.new_note), "new/note", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
     }
 }
 
@@ -253,23 +253,23 @@ private fun NewCard(cover: Int, label: String, ext: String, tag: String, onClick
 
 @Composable
 private fun AccountPage(graph: Graph) {
-    PageHeader(stringResource(R.string.nav_account), stringResource(R.string.account_sub), "account")
+    PageHeader(tr(R.string.nav_account), tr(R.string.account_sub), "account")
     PageBody {
         // No app identity is registered with any provider yet, so nothing here pretends to sign in.
         listOf(R.string.loc_feishu, R.string.loc_gdrive, R.string.loc_onedrive, R.string.loc_dropbox).forEach { name ->
             ListItem(
-                headlineContent = { Txt(stringResource(name), "account/name", style = PicoTheme.typography.titleMedium) },
-                supportingContent = { Txt(stringResource(R.string.acct_off), "account/state", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2) },
+                headlineContent = { Txt(tr(name), "account/name", style = PicoTheme.typography.titleMedium) },
+                supportingContent = { Txt(tr(R.string.acct_off), "account/state", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2) },
                 leadingContent = {
                     Box(Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(PicoTheme.colorScheme.fillSecondary), contentAlignment = Alignment.Center) {
                         Icon(painter = painterResource(R.drawable.ic_cloud), contentDescription = null, modifier = Modifier.size(24.dp))
                     }
                 },
-                trailingContent = { io.embodit.spatialoffice.ui.Tag(stringResource(R.string.acct_soon), "account") },
+                trailingContent = { io.embodit.spatialoffice.ui.Tag(tr(R.string.acct_soon), "account") },
                 modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp),
             )
         }
         Spacer(Modifier.height(4.dp))
-        InfoRow(R.drawable.ic_lock, stringResource(R.string.scope_head), stringResource(R.string.scope_sub), "account/scope")
+        InfoRow(R.drawable.ic_lock, tr(R.string.scope_head), tr(R.string.scope_sub), "account/scope")
     }
 }

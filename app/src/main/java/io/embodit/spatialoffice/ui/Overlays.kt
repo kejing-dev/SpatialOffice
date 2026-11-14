@@ -26,7 +26,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pico.spatial.ui.design.Icon
@@ -69,13 +68,13 @@ fun SharedOverlays(graph: Graph, win: Win) {
 private fun UnsavedDialog(graph: Graph, s: Session) {
     AlertDialog(
         onDismissRequest = { graph.answerUnsaved("cancel") },
-        title = { Txt(stringResource(R.string.unsaved_title, s.ref.name), "unsaved/title", style = PicoTheme.typography.headlineSmall, weight = FontWeight.Bold, maxLines = 3) },
-        content = { Txt(stringResource(R.string.unsaved_msg), "unsaved/msg", style = PicoTheme.typography.bodyLarge, maxLines = 3) },
+        title = { Txt(tr(R.string.unsaved_title, s.ref.name), "unsaved/title", style = PicoTheme.typography.headlineSmall, weight = FontWeight.Bold, maxLines = 3) },
+        content = { Txt(tr(R.string.unsaved_msg), "unsaved/msg", style = PicoTheme.typography.bodyLarge, maxLines = 3) },
         buttons = {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End)) {
-                SecondaryButton(stringResource(R.string.cancel), "unsaved/cancel", onClick = { graph.answerUnsaved("cancel") })
-                SecondaryButton(stringResource(R.string.discard), "unsaved/discard", onClick = { graph.answerUnsaved("discard") })
-                PrimaryButton(stringResource(R.string.save), "unsaved/save", onClick = { graph.answerUnsaved("save") })
+                SecondaryButton(tr(R.string.cancel), "unsaved/cancel", onClick = { graph.answerUnsaved("cancel") })
+                SecondaryButton(tr(R.string.discard), "unsaved/discard", onClick = { graph.answerUnsaved("discard") })
+                PrimaryButton(tr(R.string.save), "unsaved/save", onClick = { graph.answerUnsaved("save") })
             }
         },
     )
@@ -89,23 +88,23 @@ private fun SaveFirstSheet(graph: Graph, win: Win, s: Session) {
     Sheet(
         modifier = Modifier.width(680.dp),
         onDismissRequest = { graph.overlay = null },
-        title = { Txt(stringResource(R.string.save_first_title, s.ref.name), "savefirst/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold, maxLines = 2) },
+        title = { Txt(tr(R.string.save_first_title, s.ref.name), "savefirst/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold, maxLines = 2) },
         bottom = {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End)) {
-                SecondaryButton(stringResource(R.string.save_copy), "savefirst/copy", onClick = { graph.saveAs(win, SaveAsTarget.COPY) })
-                PrimaryButton(stringResource(R.string.backup_and_save), "savefirst/go", onClick = { graph.confirmFirstSave(win) })
+                SecondaryButton(tr(R.string.save_copy), "savefirst/copy", onClick = { graph.saveAs(win, SaveAsTarget.COPY) })
+                PrimaryButton(tr(R.string.backup_and_save), "savefirst/go", onClick = { graph.confirmFirstSave(win) })
             }
         },
     ) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Txt(stringResource(R.string.save_first_lead), "savefirst/lead", style = PicoTheme.typography.bodyLarge, maxLines = 3)
-            FateRow(R.drawable.ic_check_circle, stringResource(R.string.sf_changed, s.changedCount().coerceAtLeast(1)), stringResource(R.string.sf_changed_sub), stringResource(R.string.tag_written))
-            FateRow(R.drawable.ic_lock, stringResource(R.string.sf_rest), stringResource(R.string.sf_rest_sub), stringResource(R.string.tag_untouched))
-            FateRow(R.drawable.ic_spread, stringResource(R.string.sf_layout), stringResource(R.string.sf_layout_sub), stringResource(R.string.tag_notinfile))
+            Txt(tr(R.string.save_first_lead), "savefirst/lead", style = PicoTheme.typography.bodyLarge, maxLines = 3)
+            FateRow(R.drawable.ic_check_circle, tr(R.string.sf_changed, s.changedCount().coerceAtLeast(1)), tr(R.string.sf_changed_sub), tr(R.string.tag_written))
+            FateRow(R.drawable.ic_lock, tr(R.string.sf_rest), tr(R.string.sf_rest_sub), tr(R.string.tag_untouched))
+            FateRow(R.drawable.ic_spread, tr(R.string.sf_layout), tr(R.string.sf_layout_sub), tr(R.string.tag_notinfile))
             ListItem(
-                headlineContent = { Txt(stringResource(R.string.backup_to), "savefirst/backup-label", style = PicoTheme.typography.titleMedium) },
+                headlineContent = { Txt(tr(R.string.backup_to), "savefirst/backup-label", style = PicoTheme.typography.titleMedium) },
                 supportingContent = {
-                    Txt(if (beside) graph.storage.display(backup) else stringResource(R.string.backup_private, backup.name), "savefirst/backup-path", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
+                    Txt(if (beside) graph.storage.display(backup) else tr(R.string.backup_private, backup.name), "savefirst/backup-path", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
                 },
                 leadingContent = { Icon(painter = painterResource(R.drawable.ic_folder), contentDescription = null, modifier = Modifier.size(24.dp)) },
                 modifier = Modifier.fillMaxWidth(),
@@ -136,23 +135,23 @@ private fun SaveAsSheet(graph: Graph, win: Win, s: Session) {
     Sheet(
         modifier = Modifier.width(680.dp),
         onDismissRequest = { graph.overlay = null },
-        title = { Txt(stringResource(R.string.saveas_title, s.ref.name), "saveas/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold, maxLines = 2) },
+        title = { Txt(tr(R.string.saveas_title, s.ref.name), "saveas/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold, maxLines = 2) },
         bottom = {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Txt(stringResource(R.string.saveas_note), "saveas/note", Modifier.weight(1f), style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2)
-                PrimaryButton(stringResource(R.string.saveas_go), "saveas/go", onClick = { graph.saveAs(win, picked) })
+                Txt(tr(R.string.saveas_note), "saveas/note", Modifier.weight(1f), style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2)
+                PrimaryButton(tr(R.string.saveas_go), "saveas/go", onClick = { graph.saveAs(win, picked) })
             }
         },
     ) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Txt(stringResource(R.string.saveas_label), "saveas/label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
+            Txt(tr(R.string.saveas_label), "saveas/label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
             targets.forEach { t ->
                 val (head, sub) = when (t) {
-                    SaveAsTarget.COPY -> stringResource(R.string.sa_copy, s.ref.name.substringAfterLast('.')) to stringResource(R.string.sa_copy_sub)
-                    SaveAsTarget.PDF -> stringResource(R.string.sa_pdf) to stringResource(R.string.sa_pdf_sub)
-                    SaveAsTarget.CSV -> stringResource(R.string.sa_csv) to stringResource(R.string.sa_csv_sub)
-                    SaveAsTarget.TXT -> stringResource(R.string.sa_txt) to stringResource(R.string.sa_txt_sub)
-                    SaveAsTarget.PNG -> stringResource(R.string.sa_png) to stringResource(R.string.sa_png_sub)
+                    SaveAsTarget.COPY -> tr(R.string.sa_copy, s.ref.name.substringAfterLast('.')) to tr(R.string.sa_copy_sub)
+                    SaveAsTarget.PDF -> tr(R.string.sa_pdf) to tr(R.string.sa_pdf_sub)
+                    SaveAsTarget.CSV -> tr(R.string.sa_csv) to tr(R.string.sa_csv_sub)
+                    SaveAsTarget.TXT -> tr(R.string.sa_txt) to tr(R.string.sa_txt_sub)
+                    SaveAsTarget.PNG -> tr(R.string.sa_png) to tr(R.string.sa_png_sub)
                 }
                 val on = t == picked
                 Row(
@@ -172,15 +171,15 @@ private fun SaveAsSheet(graph: Graph, win: Win, s: Session) {
             Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(painter = painterResource(R.drawable.ic_cloud), contentDescription = null, modifier = Modifier.size(20.dp), tint = PicoTheme.colorScheme.labelTertiary)
                 Column(Modifier.weight(1f).padding(start = 14.dp)) {
-                    Txt(stringResource(R.string.sa_cloud), "saveas/cloud", style = PicoTheme.typography.titleMedium, color = PicoTheme.colorScheme.labelTertiary)
-                    Txt(stringResource(R.string.sa_cloud_sub), "saveas/cloud-sub", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelTertiary)
+                    Txt(tr(R.string.sa_cloud), "saveas/cloud", style = PicoTheme.typography.titleMedium, color = PicoTheme.colorScheme.labelTertiary)
+                    Txt(tr(R.string.sa_cloud_sub), "saveas/cloud-sub", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelTertiary)
                 }
             }
             Spacer(Modifier.height(4.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Icon(painter = painterResource(R.drawable.ic_folder), contentDescription = null, modifier = Modifier.size(22.dp))
                 Column(Modifier.padding(start = 12.dp)) {
-                    Txt(stringResource(R.string.save_to), "saveas/dest-label", style = PicoTheme.typography.titleMedium)
+                    Txt(tr(R.string.save_to), "saveas/dest-label", style = PicoTheme.typography.titleMedium)
                     Txt(graph.storage.display(dest), "saveas/dest", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
                 }
             }
@@ -205,12 +204,12 @@ private fun ShortcutsSheet(graph: Graph) {
     Sheet(
         modifier = Modifier.width(560.dp),
         onDismissRequest = { graph.overlay = null },
-        title = { Txt(stringResource(R.string.shortcuts), "keys/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold) },
+        title = { Txt(tr(R.string.shortcuts), "keys/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold) },
     ) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             rows.forEach { (label, keys) ->
                 Row(Modifier.fillMaxWidth().heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Txt(stringResource(label), "keys/label", Modifier.weight(1f).padding(end = 12.dp), style = PicoTheme.typography.bodyLarge, maxLines = 2)
+                    Txt(tr(label), "keys/label", Modifier.weight(1f).padding(end = 12.dp), style = PicoTheme.typography.bodyLarge, maxLines = 2)
                     Tag(keys, "keys")
                 }
             }
@@ -226,14 +225,14 @@ private fun CompatPanel(graph: Graph, s: Session) {
         Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 24.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = { graph.overlay = null }, modifier = Modifier.size(48.dp)) {
-                    Icon(painter = painterResource(R.drawable.ic_cross), contentDescription = stringResource(R.string.close), modifier = Modifier.size(20.dp))
+                    Icon(painter = painterResource(R.drawable.ic_cross), contentDescription = tr(R.string.close), modifier = Modifier.size(20.dp))
                 }
-                Txt(stringResource(R.string.compat_title), "compat/title", Modifier.padding(start = 8.dp), style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold)
+                Txt(tr(R.string.compat_title), "compat/title", Modifier.padding(start = 8.dp), style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold)
             }
             Spacer(Modifier.height(8.dp))
-            Txt(stringResource(R.string.compat_src, s.ref.name), "compat/src", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
+            Txt(tr(R.string.compat_src, s.ref.name), "compat/src", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
             Txt(
-                if (notes.isEmpty()) stringResource(R.string.compat_none) else stringResource(R.string.compat_sum, notes.approx(), notes.held()),
+                if (notes.isEmpty()) tr(R.string.compat_none) else tr(R.string.compat_sum, notes.approx(), notes.held()),
                 "compat/sum", Modifier.padding(top = 4.dp, bottom = 12.dp), style = PicoTheme.typography.titleMedium, maxLines = 3,
             )
             Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -246,18 +245,18 @@ private fun CompatPanel(graph: Graph, s: Session) {
 @Composable
 private fun CompatRow(n: CompatNote, kind: FileKind) {
     val (head, sub) = when {
-        n.code == "columns" -> stringResource(R.string.c_columns) to stringResource(R.string.c_columns_s)
-        n.code == "text-box" -> stringResource(R.string.c_text_box) to stringResource(R.string.c_text_box_s)
-        n.code.startsWith("font") -> stringResource(R.string.c_font) to stringResource(R.string.c_font_s)
-        n.code == "smart-graphic" -> stringResource(R.string.c_smart, n.count) to stringResource(R.string.c_smart_s)
-        n.code == "tracked-changes" -> stringResource(R.string.c_tracked, n.count) to stringResource(R.string.c_tracked_s)
-        n.code == "comments" -> stringResource(R.string.c_comments, n.count) to stringResource(R.string.c_comments_s)
-        n.code == "chart" && kind.editor != FileKind.SHEET -> stringResource(R.string.c_chart, n.count) to stringResource(R.string.c_chart_s)
-        n.code == "table" -> stringResource(R.string.c_table, n.count) to stringResource(R.string.c_table_s)
-        else -> stringResource(R.string.c_other, n.count) + " · " + n.code to stringResource(R.string.c_other_s)
+        n.code == "columns" -> tr(R.string.c_columns) to tr(R.string.c_columns_s)
+        n.code == "text-box" -> tr(R.string.c_text_box) to tr(R.string.c_text_box_s)
+        n.code.startsWith("font") -> tr(R.string.c_font) to tr(R.string.c_font_s)
+        n.code == "smart-graphic" -> tr(R.string.c_smart, n.count) to tr(R.string.c_smart_s)
+        n.code == "tracked-changes" -> tr(R.string.c_tracked, n.count) to tr(R.string.c_tracked_s)
+        n.code == "comments" -> tr(R.string.c_comments, n.count) to tr(R.string.c_comments_s)
+        n.code == "chart" && kind.editor != FileKind.SHEET -> tr(R.string.c_chart, n.count) to tr(R.string.c_chart_s)
+        n.code == "table" -> tr(R.string.c_table, n.count) to tr(R.string.c_table_s)
+        else -> tr(R.string.c_other, n.count) + " · " + n.code to tr(R.string.c_other_s)
     }
     Column(Modifier.fillMaxWidth()) {
-        Tag(stringResource(if (n.kind == CompatKind.APPROX) R.string.k_approx else R.string.k_hold), "compat")
+        Tag(tr(if (n.kind == CompatKind.APPROX) R.string.k_approx else R.string.k_hold), "compat")
         Txt(head, "compat/head", Modifier.padding(top = 4.dp), style = PicoTheme.typography.titleMedium, maxLines = 3)
         Txt(sub, "compat/sub", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 4)
     }

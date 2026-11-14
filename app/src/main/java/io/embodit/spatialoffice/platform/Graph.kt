@@ -123,7 +123,9 @@ class Graph(val app: Application) {
         open(ref)
     }
 
-    fun open(ref: FileRef) {
+    fun open(file: FileRef) {
+        // /sdcard/… and /storage/emulated/0/… are the same file: use one spelling, so paths display and compare the same
+        val ref = if (file is FileRef.Path) FileRef.Path(runCatching { file.file.canonicalFile }.getOrDefault(file.file)) else file
         val kind = FileKind.ofName(ref.name)
         if (kind == FileKind.UNKNOWN) { say(Win.HOME, str(R.string.open_unknown)); return }
         val cur = session(kind)

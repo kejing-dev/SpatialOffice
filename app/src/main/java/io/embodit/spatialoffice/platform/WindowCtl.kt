@@ -28,13 +28,12 @@ object Containers {
 /**
  * Opens and closes the window containers and the Stage. Every editor window is declared with a placement beside
  * a window that already exists (Main.kt), so no window is ever placed from the head pose. Entering the Stage
- * minimizes the app's windows (they would stand in the middle of the spread layout) and leaving restores them.
+ * closes the app's windows (they would stand in the middle of the spread layout) and leaving reopens them.
  */
 class WindowCtl(private val graph: Graph) {
     private val navigators = LinkedHashMap<Win, SpatialNavigator>()
     /** Lifecycle of each container as last reported by its content ("ON_RESUME", "ON_DESTROY", …). */
     val state = mutableStateMapOf<Win, String>()
-    private val minimized = LinkedHashSet<Win>()
     private val main = Handler(Looper.getMainLooper())
     var exiting = false
         private set
@@ -60,7 +59,7 @@ class WindowCtl(private val graph: Graph) {
 
     fun open(win: Win) {
         if (exiting || win == Win.HOME || win == Win.STAGE) return
-        if (graph.stageMode != null && win != Win.CHART) return // editors stay minimized while the Stage is up
+        if (graph.stageMode != null) return // windows stay closed while the Stage is up
         val n = nav() ?: run { Log.i(TAG, "WINDOW open ${win.name}: waiting for a navigator"); wanted.add(win); return }
         if (isOpen(win)) { runCatching { n.restoreWindowContainer(Containers.id(win), Containers.TAG_MAIN) }; return }
         Log.i(TAG, "WINDOW open ${win.name}")
@@ -73,38 +72,58 @@ class WindowCtl(private val graph: Graph) {
         runCatching { nav()?.closeWindowContainer(Containers.id(win), Containers.TAG_MAIN) }.onFailure { Log.w(TAG, "WINDOW close: $it") }
     }
 
+    /**
+     * Full Space keeps this app's own windows up, and they would stand in the middle of the spread layout. The SDK's
+     * minimize is refused for them (emulator 6.3: returns false), so they are closed here and reopened on leaving.
+     */
     fun enterStage() {
         val n = nav() ?: return
-        minimized.clear()
-        for (w in listOf(Win.CHART, Win.DOC, Win.SHEET, Win.SLIDES)) if (isOpen(w)) {
-            val ok = runCatching { n.minimizeWindowContainer(Containers.id(w), Containers.TAG_MAIN) }.getOrDefault(false)
-            Log.i(TAG, "WINDOW minimize ${w.name} ok=$ok")
-            if (ok) minimized.add(w) else runCatching { n.closeWindowContainer(Containers.id(w), Containers.TAG_MAIN) }
-        }
-        val homeMin = runCatching { n.minimizeWindowContainer() }.getOrDefault(false)
-        Log.i(TAG, "WINDOW minimize HOME ok=$homeMin")
+        closedForStage.clear()
         graph.scope.launch {
-            runCatching { n.openStage(Containers.STAGE, StageStyle.Mixed) }
-                .onSuccess { Log.i(TAG, "STAGE open result=$it") }
-                .onFailure { Log.e(TAG, "STAGE open failed", it) }
+            val r = runCatching { n.openStage(Containers.STAGE, StageStyle.Mixed) }
+            Log.i(TAG, "STAGE open result=${r.getOrNull() ?: r.exceptionOrNull()}")
+            if (r.isFailure) return@launch
+            for (w in listOf(Win.CHART, Win.DOC, Win.SHEET, Win.SLIDES)) if (isOpen(w)) {
+                closedForStage.add(w)
+                runCatching { n.closeWindowContainer(Containers.id(w), Containers.TAG_MAIN) }
+            }
+            if (isOpen(Win.HOME)) { closedForStage.add(Win.HOME); runCatching { (navigators[Win.HOME] ?: n).closeWindowContainer() }.onFailure { Log.w(TAG, "close home: $it") } }
+            Log.i(TAG, "STAGE entered, closed windows=$closedForStage")
         }
     }
+
+    private val closedForStage = LinkedHashSet<Win>()
 
     fun leaveStage(back: Win) {
         val n = navigators[Win.STAGE] ?: nav() ?: return
-        graph.scope.launch {
-            runCatching { n.closeStage() }.onFailure { Log.w(TAG, "STAGE close: $it") }
-            stageClosed(back)
+        // the home window comes back first, so the app is never left without a container
+        reopenHome(n)
+        main.postDelayed({
+            graph.scope.launch {
+                runCatching { n.closeStage() }.onFailure { Log.w(TAG, "STAGE close: $it") }
+                stageClosed(back)
+            }
+        }, 350)
+    }
+
+    private fun reopenHome(n: SpatialNavigator) {
+        if (isOpen(Win.HOME)) return
+        Log.i(TAG, "WINDOW reopen HOME")
+        val ok = runCatching { n.openWindowContainer(Containers.HOME, homeTag, null) }.onFailure { Log.w(TAG, "reopen home by id failed: $it") }.isSuccess
+        if (!ok) runCatching {
+            val i = graph.app.packageManager.getLaunchIntentForPackage(graph.app.packageName)
+            graph.app.startActivity(i?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         }
     }
 
-    /** Restores what was minimized. An editor that had to be closed instead is reopened through the level gate. */
+    /** Tag the system gave the default container (learned from the placement context; empty until then). */
+    var homeTag: String = ""
+
+    /** Reopens what was closed for the Stage. Editors go through the level gate. */
     fun stageClosed(back: Win) {
-        Log.i(TAG, "STAGE closed, restoring windows")
-        val home = navigators[Win.HOME] ?: nav() ?: return
-        runCatching { home.restoreWindowContainer() }
-        for (w in minimized) runCatching { home.restoreWindowContainer(Containers.id(w), Containers.TAG_MAIN) }
-        minimized.clear()
+        Log.i(TAG, "STAGE closed, reopening windows closed=$closedForStage back=$back")
+        nav()?.let { reopenHome(it) }
+        closedForStage.clear()
         main.postDelayed({
             if (!isOpen(back) && graph.session(back) != null) {
                 // a window opened while the head is pitched can come up tilted: wait for a level head (LevelGate),
@@ -113,7 +132,7 @@ class WindowCtl(private val graph: Graph) {
                 gateWin = back
                 main.post(gateTick)
             }
-        }, 400)
+        }, 600)
     }
 
     private val gate = LevelGate()

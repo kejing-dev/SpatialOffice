@@ -39,7 +39,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
+import io.embodit.spatialoffice.ui.tr
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -126,7 +126,7 @@ private fun Pooled(graph: Graph, scene: StageScene, id: String, content: @Compos
     val base = LocalContext.current
     val lang = graph.settings.value.lang
     val localized = remember(base, lang) { base.localized(lang) }
-    CompositionLocalProvider(LocalContext provides localized) {
+    CompositionLocalProvider(LocalContext provides localized, io.embodit.spatialoffice.ui.LocalRes provides localized.resources) {
         key(gen) { PicoTheme { Box(Modifier.onPreviewKeyEvent { e -> stageKeys(graph, e) }) { content() } } }
     }
 }
@@ -207,15 +207,15 @@ private fun LayoutBar(graph: Graph) {
     Glass(1000, 112) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Segments(
-                listOf(Arr.ROW to stringResource(R.string.arr_row), Arr.ARC to stringResource(R.string.arr_arc), Arr.LAYERS to stringResource(R.string.arr_layers)),
+                listOf(Arr.ROW to tr(R.string.arr_row), Arr.ARC to tr(R.string.arr_arc), Arr.LAYERS to tr(R.string.arr_layers)),
                 graph.arrangement, "stage/arr", itemWidth = 92.dp,
             ) { graph.arrange(it) }
-            ToolIcon(R.drawable.ic_arrow_left, stringResource(R.string.focus_prev), onClick = { graph.focusBy(-1) }, enabled = graph.focus > 0)
-            Txt(stringResource(R.string.piece_n, graph.focus + 1, count), "stage/piece-n", Modifier.width(72.dp), style = PicoTheme.typography.titleMedium, align = androidx.compose.ui.text.style.TextAlign.Center)
-            ToolIcon(R.drawable.ic_arrow_right, stringResource(R.string.focus_next), onClick = { graph.focusBy(1) }, enabled = graph.focus < count - 1)
+            ToolIcon(R.drawable.ic_arrow_left, tr(R.string.focus_prev), onClick = { graph.focusBy(-1) }, enabled = graph.focus > 0)
+            Txt(tr(R.string.piece_n, graph.focus + 1, count), "stage/piece-n", Modifier.width(72.dp), style = PicoTheme.typography.titleMedium, align = androidx.compose.ui.text.style.TextAlign.Center)
+            ToolIcon(R.drawable.ic_arrow_right, tr(R.string.focus_next), onClick = { graph.focusBy(1) }, enabled = graph.focus < count - 1)
             Box(Modifier.weight(1f))
-            SecondaryButton(stringResource(R.string.recenter), "stage/recenter", icon = R.drawable.ic_rotate, onClick = { graph.recenter() })
-            PrimaryButton(stringResource(R.string.collapse), "stage/collapse", icon = R.drawable.ic_collapse, onClick = { graph.collapse() })
+            SecondaryButton(tr(R.string.recenter), "stage/recenter", icon = R.drawable.ic_rotate, onClick = { graph.recenter() })
+            PrimaryButton(tr(R.string.collapse), "stage/collapse", icon = R.drawable.ic_collapse, onClick = { graph.collapse() })
         }
     }
 }
@@ -234,13 +234,13 @@ private fun RehearsalBar(graph: Graph) {
     d.version
     Glass(820, 112) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            ToolIcon(R.drawable.ic_arrow_left, stringResource(R.string.rh_prev), onClick = { rehearsalStep(graph, -1) }, enabled = d.current > 0)
-            Txt(stringResource(R.string.piece_n, d.current + 1, d.deck.slides.size), "rehearsal/page", Modifier.width(88.dp), style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold, align = androidx.compose.ui.text.style.TextAlign.Center)
-            ToolIcon(R.drawable.ic_arrow_right, stringResource(R.string.rh_next), onClick = { rehearsalStep(graph, 1) }, enabled = d.current < d.deck.slides.size - 1)
+            ToolIcon(R.drawable.ic_arrow_left, tr(R.string.rh_prev), onClick = { rehearsalStep(graph, -1) }, enabled = d.current > 0)
+            Txt(tr(R.string.piece_n, d.current + 1, d.deck.slides.size), "rehearsal/page", Modifier.width(88.dp), style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold, align = androidx.compose.ui.text.style.TextAlign.Center)
+            ToolIcon(R.drawable.ic_arrow_right, tr(R.string.rh_next), onClick = { rehearsalStep(graph, 1) }, enabled = d.current < d.deck.slides.size - 1)
             Txt(elapsedLabel(graph.rehearsalStart), "rehearsal/timer", Modifier.width(96.dp), style = PicoTheme.typography.titleLarge, align = androidx.compose.ui.text.style.TextAlign.Center)
             Box(Modifier.weight(1f))
-            SecondaryButton(stringResource(R.string.recenter), "rehearsal/recenter", icon = R.drawable.ic_rotate, onClick = { graph.recenter() })
-            PrimaryButton(stringResource(R.string.end_rehearsal), "rehearsal/end", onClick = { graph.collapse() })
+            SecondaryButton(tr(R.string.recenter), "rehearsal/recenter", icon = R.drawable.ic_rotate, onClick = { graph.recenter() })
+            PrimaryButton(tr(R.string.end_rehearsal), "rehearsal/end", onClick = { graph.collapse() })
         }
     }
 }
@@ -259,9 +259,9 @@ private fun RehearsalNotes(graph: Graph) {
     val notes = d.deck.slides.getOrNull(d.current)?.notes.orEmpty()
     Box(Modifier.size(568.dp, 704.dp).clip(RoundedCornerShape(28.dp)).backgroundMaterial(enable = true, style = Material.Regular)) {
         Column(Modifier.fillMaxSize().padding(28.dp).verticalScroll(rememberScrollState())) {
-            Txt(stringResource(R.string.notes), "rehearsal/notes-label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2)
+            Txt(tr(R.string.notes), "rehearsal/notes-label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2)
             Box(Modifier.height(12.dp))
-            Txt(notes.ifBlank { stringResource(R.string.rh_notes_empty) }, "rehearsal/notes", style = PicoTheme.typography.headlineSmall, maxLines = 40)
+            Txt(notes.ifBlank { tr(R.string.rh_notes_empty) }, "rehearsal/notes", style = PicoTheme.typography.headlineSmall, maxLines = 40)
         }
     }
 }
@@ -274,7 +274,7 @@ private fun RehearsalNext(graph: Graph) {
     Box(Modifier.size(568.dp, 704.dp).clip(RoundedCornerShape(28.dp)).backgroundMaterial(enable = true, style = Material.Regular)) {
         Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Txt(elapsedLabel(graph.rehearsalStart), "rehearsal/clock", style = PicoTheme.typography.displaySmall, weight = FontWeight.Bold)
-            Txt(stringResource(if (last) R.string.rh_last else R.string.rh_next_label), "rehearsal/next-label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
+            Txt(tr(if (last) R.string.rh_last else R.string.rh_next_label), "rehearsal/next-label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
             if (!last) SlideCanvas(d, d.current + 1, 512.dp, editable = false)
         }
     }

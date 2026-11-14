@@ -21,7 +21,6 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -50,14 +49,14 @@ fun statusLine(graph: Graph, s: Session): String {
     s.version
     val path = graph.storage.display(s.ref)
     val head = when {
-        s.isNew -> stringResource(R.string.status_new, path, s.ref.name.substringAfterLast('.'))
-        s.readOnly -> stringResource(R.string.status_readonly, path)
-        s.dirty -> stringResource(R.string.status_dirty, path)
-        else -> stringResource(R.string.status_saved, path)
+        s.isNew -> tr(R.string.status_new, path, s.ref.name.substringAfterLast('.'))
+        s.readOnly -> tr(R.string.status_readonly, path)
+        s.dirty -> tr(R.string.status_dirty, path)
+        else -> tr(R.string.status_saved, path)
     }
     if (s.isNew) return head
     val side = graph.filesVersion.let { graph.storage.sidecar(s.ref)?.exists() == true } || graph.settings.value.layoutStore == LayoutStoreMode.FILE
-    return head + " · " + stringResource(if (side) R.string.status_layout_file else R.string.status_layout_device)
+    return head + " · " + tr(if (side) R.string.status_layout_file else R.string.status_layout_device)
 }
 
 /**
@@ -72,7 +71,7 @@ fun EditorTitleBar(graph: Graph, win: Win, s: Session, extra: (@Composable () ->
         modifier = Modifier.fillMaxWidth(),
         leadingActions = {
             IconButton(onClick = { graph.requestClose(win) }, modifier = Modifier.size(48.dp).semantics { contentDescription = "close-file" }) {
-                Icon(painter = painterResource(R.drawable.ic_cross), contentDescription = stringResource(R.string.close_file), modifier = Modifier.size(20.dp))
+                Icon(painter = painterResource(R.drawable.ic_cross), contentDescription = tr(R.string.close_file), modifier = Modifier.size(20.dp))
             }
         },
         title = {
@@ -84,20 +83,20 @@ fun EditorTitleBar(graph: Graph, win: Win, s: Session, extra: (@Composable () ->
         },
         trailingActions = {
             ToolRow {
-                if (notes.isNotEmpty()) ToolButton(stringResource(R.string.compat_btn, notes.approx() + notes.held()), "editor/compat", icon = R.drawable.ic_info_circle, onClick = {
+                if (notes.isNotEmpty()) ToolButton(tr(R.string.compat_btn, notes.approx() + notes.held()), "editor/compat", icon = R.drawable.ic_info_circle, onClick = {
                     graph.overlay = if (graph.overlay is Overlay.Compat) null else Overlay.Compat(win)
                 })
                 extra?.invoke()
                 Box {
-                    ToolIcon(R.drawable.ic_ellipsis, stringResource(R.string.more), onClick = { menu = !menu })
+                    ToolIcon(R.drawable.ic_ellipsis, tr(R.string.more), onClick = { menu = !menu })
                     if (menu) {
                         Menu(
                             onDismissRequest = { menu = false },
                             positionProvider = rememberMenuPositionProvider(horizontalPlacement = HorizontalPlacement.alignEnd(), verticalPlacement = VerticalPlacement.below(offset = 8.dp)),
                         ) {
-                            MenuItem(title = { Txt(stringResource(R.string.menu_layout_file), "editor/menu") }, onClick = { menu = false; graph.layoutWithFile(win) })
-                            MenuItem(title = { Txt(stringResource(R.string.menu_open_backup), "editor/menu") }, onClick = { menu = false; graph.openBackup(win) })
-                            MenuItem(title = { Txt(stringResource(R.string.menu_shortcuts), "editor/menu") }, onClick = { menu = false; graph.overlay = Overlay.Shortcuts(win) })
+                            MenuItem(title = { Txt(tr(R.string.menu_layout_file), "editor/menu") }, onClick = { menu = false; graph.layoutWithFile(win) })
+                            MenuItem(title = { Txt(tr(R.string.menu_open_backup), "editor/menu") }, onClick = { menu = false; graph.openBackup(win) })
+                            MenuItem(title = { Txt(tr(R.string.menu_shortcuts), "editor/menu") }, onClick = { menu = false; graph.overlay = Overlay.Shortcuts(win) })
                         }
                     }
                 }
@@ -110,9 +109,9 @@ fun EditorTitleBar(graph: Graph, win: Win, s: Session, extra: (@Composable () ->
 @Composable
 fun FileTools(graph: Graph, win: Win, s: Session, spreadLabel: Int = R.string.spread) {
     ToolRow {
-        ToolButton(stringResource(spreadLabel), "tools/spread", icon = R.drawable.ic_spread, onClick = { graph.spread(s.kind) })
-        ToolButton(stringResource(R.string.save_as), "tools/saveas", icon = R.drawable.ic_folder_arrow_right, onClick = { graph.overlay = Overlay.SaveAs(win) })
-        if (!s.readOnly) ToolButton(stringResource(R.string.save), "tools/save", primary = true, onClick = { graph.save(win) })
+        ToolButton(tr(spreadLabel), "tools/spread", icon = R.drawable.ic_spread, onClick = { graph.spread(s.kind) })
+        ToolButton(tr(R.string.save_as), "tools/saveas", icon = R.drawable.ic_folder_arrow_right, onClick = { graph.overlay = Overlay.SaveAs(win) })
+        if (!s.readOnly) ToolButton(tr(R.string.save), "tools/save", primary = true, onClick = { graph.save(win) })
     }
 }
 
@@ -132,14 +131,14 @@ fun commonKeys(graph: Graph, win: Win, e: KeyEvent): Boolean {
 @Composable
 fun UndoRedo(s: Session) {
     s.version
-    ToolIcon(R.drawable.ic_undo, stringResource(R.string.undo), onClick = { s.undo() }, enabled = s.canUndo)
-    ToolIcon(R.drawable.ic_redo, stringResource(R.string.redo), onClick = { s.redo() }, enabled = s.canRedo)
+    ToolIcon(R.drawable.ic_undo, tr(R.string.undo), onClick = { s.undo() }, enabled = s.canUndo)
+    ToolIcon(R.drawable.ic_redo, tr(R.string.redo), onClick = { s.redo() }, enabled = s.canRedo)
 }
 
 /** Shown in an editor window whose file was closed (for example after "Don't save"). */
 @Composable
 fun NoFile(graph: Graph, win: Win) {
     Row(Modifier.fillMaxWidth().padding(32.dp), verticalAlignment = Alignment.CenterVertically) {
-        Txt(stringResource(R.string.recent_empty), "editor/empty", style = PicoTheme.typography.bodyLarge, maxLines = 3)
+        Txt(tr(R.string.recent_empty), "editor/empty", style = PicoTheme.typography.bodyLarge, maxLines = 3)
     }
 }

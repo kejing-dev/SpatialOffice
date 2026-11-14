@@ -19,6 +19,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,7 +44,7 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.res.stringResource
+import io.embodit.spatialoffice.ui.tr
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
@@ -90,7 +93,8 @@ class CellEdit {
 
     fun load(s: SheetSession) {
         val t = s.book.cell(s.sheet, s.row, s.col).input
-        value = TextFieldValue(t, TextRange(t.length)); editing = false
+        // the whole value is selected: typing replaces it (as in every spreadsheet); F2 or a click in the bar edits it
+        value = TextFieldValue(t, TextRange(0, t.length)); editing = false
     }
 
     fun commit(s: SheetSession) {
@@ -145,7 +149,7 @@ fun sheetKeys(graph: Graph, s: SheetSession, edit: CellEdit, e: KeyEvent): Boole
         e.key == Key.Enter || e.key == Key.NumPadEnter -> { move(if (e.isShiftPressed) -1 else 1, 0); true }
         e.key == Key.Tab -> { move(0, if (e.isShiftPressed) -1 else 1); true }
         e.key == Key.Escape -> { if (edit.editing) { edit.load(s); true } else false }
-        e.key == Key.F2 -> { edit.editing = true; true }
+        e.key == Key.F2 -> { edit.editing = true; edit.value = edit.value.copy(selection = TextRange(edit.value.text.length)); true }
         e.key == Key.Delete && !edit.editing -> { s.setCell(s.row, s.col, ""); edit.load(s); true }
         edit.editing -> false // arrows move the caret while typing
         e.key == Key.DirectionUp -> { move(-1, 0); true }
@@ -159,18 +163,25 @@ fun sheetKeys(graph: Graph, s: SheetSession, edit: CellEdit, e: KeyEvent): Boole
 @Composable
 fun FormulaBar(s: SheetSession, edit: CellEdit, modifier: Modifier = Modifier) {
     LaunchedEffect(s.sheet, s.row, s.col, s.version) { if (!edit.editing) edit.load(s) }
-    LaunchedEffect(s) { runCatching { edit.focus.requestFocus() } }
+    // the keyboard belongs to the selected cell: take focus when the surface appears (the window may not be ready at once)
+    LaunchedEffect(s) { repeat(3) { runCatching { edit.focus.requestFocus() }; kotlinx.coroutines.delay(400) } }
     Row(modifier.height(52.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.width(84.dp).height(52.dp).clip(RoundedCornerShape(12.dp)).background(Ink.Header), contentAlignment = Alignment.Center) {
             Text(A1.name(s.row, s.col), style = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Ink.Text))
         }
         Box(Modifier.width(10.dp))
         Box(Modifier.weight(1f).height(52.dp).clip(RoundedCornerShape(12.dp)).background(Ink.Paper).border(1.5.dp, if (edit.editing) Ink.Select else Ink.Line, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp), contentAlignment = Alignment.CenterStart) {
-            if (edit.value.text.isEmpty()) Text(stringResource(R.string.formula_ph), style = TextStyle(fontSize = 17.sp, color = Ink.Hint))
+            if (edit.value.text.isEmpty()) Text(tr(R.string.formula_ph), style = TextStyle(fontSize = 17.sp, color = Ink.Hint))
             BasicTextField(
                 value = edit.value,
-                onValueChange = { nv -> if (nv.text != edit.value.text) edit.editing = true; edit.value = nv.copy(text = nv.text.replace("\n", "")) },
+                onValueChange = { nv ->
+                    if (nv.text.contains('\n')) { edit.commit(s); s.select(s.row + 1, s.col); edit.load(s) } // Enter arriving as text
+                    else { if (nv.text != edit.value.text) edit.editing = true; edit.value = nv }
+                },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                // Enter from a keyboard that the system routes through the input method
+                keyboardActions = KeyboardActions(onDone = { edit.commit(s); s.select(s.row + 1, s.col); edit.load(s) }),
                 textStyle = TextStyle(fontSize = 17.sp, color = Ink.Text),
                 cursorBrush = SolidColor(Ink.Select),
                 modifier = Modifier.fillMaxWidth().focusRequester(edit.focus).semantics { contentDescription = "formula-input" },
@@ -219,6 +230,7 @@ fun SheetGrid(
                                         edit?.commit(s); s.select(r, c); edit?.load(s)
                                         runCatching { edit?.focus?.requestFocus() }
                                     }
+                                    .semantics { contentDescription = "cell-" + A1.name(r, c) }
                                     .padding(horizontal = 8.dp),
                                 contentAlignment = if (cell.kind == CellKind.NUMBER) Alignment.CenterEnd else Alignment.CenterStart,
                             ) {
@@ -251,14 +263,14 @@ private fun SheetPicker(graph: Graph, s: SheetSession, edit: CellEdit) {
     val names = s.book.sheetNames
     val chart = remember(s.version, s.sheet) { runCatching { s.book.charts().firstOrNull { it.sheet == s.sheet } }.getOrNull() }
     Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
-        Txt(stringResource(R.string.sheet_label), "sheet/picker-label", Modifier.padding(end = 12.dp), style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
-        Row(Modifier.horizontalScroll(rememberScrollState())) {
-            Segments(names.mapIndexed { i, n -> i to n }, s.sheet, "sheet/picker", itemWidth = 132.dp) { i ->
+        Txt(tr(R.string.sheet_label), "sheet/picker-label", Modifier.padding(end = 12.dp), style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Segments(names.take(6).mapIndexed { i, n -> i to n }, s.sheet, "sheet/picker", itemWidth = 132.dp) { i ->
                 edit.commit(s); s.sheet = i; s.select(0, 0); edit.load(s)
             }
         }
         if (chart?.range != null) Txt(
-            stringResource(R.string.range_hint, chart.title.ifEmpty { stringResource(R.string.chart_3d) }, chart.range ?: ""), "sheet/range-hint",
+            tr(R.string.range_hint, chart.title.ifEmpty { tr(R.string.chart_3d) }, chart.range ?: ""), "sheet/range-hint",
             Modifier.weight(1f).padding(start = 16.dp), style = PicoTheme.typography.bodySmall, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2,
         )
     }
@@ -307,10 +319,10 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
         supportingContent = { FileTools(graph, Win.SHEET, s) },
         content = {
             ToolRow {
-                ToolToggle(R.drawable.ic_text_bold, stringResource(R.string.bold), cell.bold, { on -> edit.commit(s); s.setBold(on) }, enabled = !s.isCsv)
+                ToolToggle(R.drawable.ic_text_bold, tr(R.string.bold), cell.bold, { on -> edit.commit(s); s.setBold(on) }, enabled = !s.isCsv)
                 Box {
                     ToolButton(
-                        stringResource(when (cell.fmt) { NumFmt.CURRENCY -> R.string.fmt_currency; NumFmt.PERCENT -> R.string.fmt_percent; else -> R.string.fmt_general }),
+                        tr(when (cell.fmt) { NumFmt.CURRENCY -> R.string.fmt_currency; NumFmt.PERCENT -> R.string.fmt_percent; else -> R.string.fmt_general }),
                         "sheet/fmt", onClick = { fmtMenu = !fmtMenu }, enabled = !s.isCsv,
                     )
                     if (fmtMenu) {
@@ -319,21 +331,21 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
                             positionProvider = rememberMenuPositionProvider(horizontalPlacement = HorizontalPlacement.alignStart(), verticalPlacement = VerticalPlacement.above(offset = (-12).dp)),
                         ) {
                             listOf(NumFmt.GENERAL to R.string.fmt_general, NumFmt.CURRENCY to R.string.fmt_currency, NumFmt.PERCENT to R.string.fmt_percent).forEach { (f, label) ->
-                                MenuItem(title = { Txt(stringResource(label), "sheet/fmt-item") }, onClick = { fmtMenu = false; edit.commit(s); s.setFmt(f) })
+                                MenuItem(title = { Txt(tr(label), "sheet/fmt-item") }, onClick = { fmtMenu = false; edit.commit(s); s.setFmt(f) })
                             }
                         }
                     }
                 }
-                ToolIcon(R.drawable.ic_sigma, stringResource(R.string.autosum), onClick = {
+                ToolIcon(R.drawable.ic_sigma, tr(R.string.autosum), onClick = {
                     edit.commit(s); if (s.autoSum() == null) graph.say(Win.SHEET, graph.str(R.string.no_num)); edit.load(s)
                 })
-                ToolIcon(R.drawable.ic_list_sort_down, stringResource(R.string.sort_asc), onClick = {
+                ToolIcon(R.drawable.ic_list_sort_down, tr(R.string.sort_asc), onClick = {
                     edit.commit(s)
                     graph.say(Win.SHEET, if (s.sortByColumn()) graph.str(R.string.sorted, A1.colName(s.col)) else graph.str(R.string.sort_refused))
                     edit.load(s)
                 })
-                ToolButton(stringResource(R.string.insert_row), "sheet/insert-row", onClick = { edit.commit(s); s.insertRowBelow(); edit.load(s) })
-                ToolButton(stringResource(R.string.chart_3d), "sheet/chart", icon = R.drawable.ic_chart_3d, onClick = { edit.commit(s); openChart(graph, s) }, enabled = !s.isCsv)
+                ToolButton(tr(R.string.insert_row), "sheet/insert-row", onClick = { edit.commit(s); s.insertRowBelow(); edit.load(s) })
+                ToolButton(tr(R.string.chart_3d), "sheet/chart", icon = R.drawable.ic_chart_3d, onClick = { edit.commit(s); openChart(graph, s) }, enabled = !s.isCsv)
                 ToolDivider()
                 UndoRedo(s)
             }

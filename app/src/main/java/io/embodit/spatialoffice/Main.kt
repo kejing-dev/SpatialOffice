@@ -21,8 +21,10 @@ import io.embodit.spatialoffice.ui.slides.SlidesWindow
 import io.embodit.spatialoffice.ui.space.StageScreen
 
 /** The first of [ids] that is open, as the window to stand beside. */
-private fun beside(containers: List<ContainerProxy>, vararg ids: String): ContainerProxy? =
-    ids.firstNotNullOfOrNull { id -> containers.firstOrNull { it.id == id } } ?: containers.firstOrNull()
+private fun beside(containers: List<ContainerProxy>, vararg ids: String): ContainerProxy? {
+    android.util.Log.i("SpatialOffice", "PLACE among " + containers.joinToString { "${it.id}/${it.tag}/${it.state}" })
+    return ids.firstNotNullOfOrNull { id -> containers.firstOrNull { it.id == id } } ?: containers.firstOrNull()
+}
 
 /**
  * Containers (design 2.1). Shared Space: the home window (default container, 1120 × 800 dp from the manifest), one
@@ -52,6 +54,7 @@ fun mainApp(scope: SpatialAppScope) =
         WindowContainer(
             Containers.CHART, form = Form.Volumetric,
             defaultSize = WindowContainerSize(0.76f, 0.60f, 0.48f, LengthUnit.Meters),
+            enableMaterialBackground = false,
             placement = { beside(containers, Containers.SHEET, Containers.HOME)?.let { Placement.right(it) } ?: Placement.none() },
         ) { ChartVolume() }
         Stage(Containers.STAGE) { StageScreen() }

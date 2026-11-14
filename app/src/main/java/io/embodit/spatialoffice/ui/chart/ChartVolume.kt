@@ -25,7 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
+import io.embodit.spatialoffice.ui.tr
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -245,13 +245,13 @@ fun ChartVolume() {
         )
         Toolbar {
             ToolRow {
-                Row {
-                    Segments(listOf(false to stringResource(R.string.chart_columns), true to stringResource(R.string.chart_scatter)), graph.chartScatter, "chart/type", itemWidth = 96.dp) { graph.chartScatter = it }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Segments(listOf(false to tr(R.string.chart_columns), true to tr(R.string.chart_scatter)), graph.chartScatter, "chart/type", itemWidth = 96.dp) { graph.chartScatter = it }
                 }
-                ToolIcon(R.drawable.ic_arrow_left, stringResource(R.string.chart_turn_left), onClick = { graph.chartYaw -= 30f })
-                ToolIcon(R.drawable.ic_arrow_right, stringResource(R.string.chart_turn_right), onClick = { graph.chartYaw += 30f })
-                ToolIcon(R.drawable.ic_rotate, stringResource(R.string.chart_reset), onClick = { graph.chartYaw = 0f })
-                ToolIcon(R.drawable.ic_cross, stringResource(R.string.chart_close), onClick = { graph.windows.close(Win.CHART) })
+                ToolIcon(R.drawable.ic_arrow_left, tr(R.string.chart_turn_left), onClick = { graph.chartYaw -= 30f })
+                ToolIcon(R.drawable.ic_arrow_right, tr(R.string.chart_turn_right), onClick = { graph.chartYaw += 30f })
+                ToolIcon(R.drawable.ic_rotate, tr(R.string.chart_reset), onClick = { graph.chartYaw = 0f })
+                ToolIcon(R.drawable.ic_cross, tr(R.string.chart_close), onClick = { graph.windows.close(Win.CHART) })
             }
         }
     }
@@ -262,7 +262,7 @@ private fun PanelTheme(graph: Graph, content: @Composable () -> Unit) {
     val base = LocalContext.current
     val lang = graph.settings.value.lang
     val localized = remember(base, lang) { base.localized(lang) }
-    androidx.compose.runtime.CompositionLocalProvider(LocalContext provides localized) { PicoTheme { content() } }
+    androidx.compose.runtime.CompositionLocalProvider(LocalContext provides localized, io.embodit.spatialoffice.ui.LocalRes provides localized.resources) { PicoTheme { content() } }
 }
 
 /** Title, source range and legend. Dark pill so it reads on any room behind the volume. */
@@ -270,9 +270,9 @@ private fun PanelTheme(graph: Graph, content: @Composable () -> Unit) {
 private fun ChartLabel(graph: Graph, s: SheetSession?, chart: ChartInfo?) {
     s?.version
     Column(Modifier.width(360.dp).clip(RoundedCornerShape(20.dp)).background(Color(0xE61B1D22)).padding(horizontal = 18.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (s == null || chart == null) { Txt(stringResource(R.string.chart_closed_file), "chart/none", color = Color.White, maxLines = 2); return@Column }
-        Txt(chart.title.ifEmpty { stringResource(R.string.chart_window) }, "chart/title", style = PicoTheme.typography.titleMedium, color = Color.White, weight = FontWeight.Bold, maxLines = 2)
-        Txt(stringResource(R.string.chart_src, s.book.sheetNames.getOrElse(chart.sheet) { "" } + (chart.range?.let { "!$it" } ?: "")), "chart/src", style = PicoTheme.typography.bodySmall, color = Color(0xFFD5D9E0), maxLines = 2)
+        if (s == null || chart == null) { Txt(tr(R.string.chart_closed_file), "chart/none", color = Color.White, maxLines = 2); return@Column }
+        Txt(chart.title.ifEmpty { tr(R.string.chart_window) }, "chart/title", style = PicoTheme.typography.titleMedium, color = Color.White, weight = FontWeight.Bold, maxLines = 2)
+        Txt(tr(R.string.chart_src, s.book.sheetNames.getOrElse(chart.sheet) { "" } + (chart.range?.let { "!$it" } ?: "")), "chart/src", style = PicoTheme.typography.bodySmall, color = Color(0xFFD5D9E0), maxLines = 2)
         chart.series.take(6).forEachIndexed { i, se ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(12.dp).clip(RoundedCornerShape(3.dp)).background(Ink.Series[i % Ink.Series.size]))
@@ -302,6 +302,6 @@ private fun ChartTip(graph: Graph, s: SheetSession?, chart: ChartInfo?) {
             Txt(name, "chart/tip-name", style = PicoTheme.typography.bodyMedium, color = Color(0xFFD5D9E0), maxLines = 2)
             Txt(value, "chart/tip-value", style = PicoTheme.typography.headlineSmall, color = Color.White, weight = FontWeight.Bold)
         }
-        Txt(stringResource(if (graph.chartScatter) R.string.tip_dot else R.string.tip_bar), "chart/tip-hint", style = PicoTheme.typography.bodySmall, color = Color(0xFFD5D9E0), maxLines = 2)
+        Txt(tr(if (graph.chartScatter) R.string.tip_dot else R.string.tip_bar), "chart/tip-hint", style = PicoTheme.typography.bodySmall, color = Color(0xFFD5D9E0), maxLines = 2)
     }
 }

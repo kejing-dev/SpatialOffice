@@ -21,6 +21,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -85,6 +86,19 @@ fun Context.localized(lang: Lang): Context {
 }
 
 /**
+ * The app-language resources. Dialogs, sheets and attachment panels are composed in their own windows, where
+ * LocalContext is the system's again; this local travels into them, so their text follows the in-app language too.
+ */
+val LocalRes = staticCompositionLocalOf<Resources?> { null }
+
+/** A string in the app language (use instead of stringResource everywhere). */
+@Composable
+fun tr(id: Int, vararg args: Any): String {
+    val r = LocalRes.current ?: LocalContext.current.resources
+    return if (args.isEmpty()) r.getString(id) else r.getString(id, *args)
+}
+
+/**
  * Root of every container's content: registers the navigator and lifecycle with the window controller, applies the
  * in-app language and theme, and hosts this window's snackbars and shared dialogs.
  */
@@ -105,7 +119,7 @@ fun WindowFrame(win: Win, content: @Composable (Graph) -> Unit) {
     }
     val lang = graph.settings.value.lang
     val localized = remember(base, lang) { base.localized(lang) }
-    CompositionLocalProvider(LocalContext provides localized) {
+    CompositionLocalProvider(LocalContext provides localized, LocalRes provides localized.resources) {
         PicoTheme {
             SnackbarHost {
                 ToastPump(graph, win)
@@ -240,7 +254,8 @@ fun ToolDivider() {
 /** Options of one setting, inside a labelled row (never used to change pages). 52 dp high. */
 @Composable
 fun <T> Segments(options: List<Pair<T, String>>, selected: T, tag: String, modifier: Modifier = Modifier, itemWidth: Dp = 120.dp, onSelect: (T) -> Unit) {
-    SegmentControl(modifier = modifier.height(52.dp)) {
+    // an explicit width: left alone, the control takes all the width its row offers (or none inside a scroller)
+    SegmentControl(modifier = modifier.width(itemWidth * options.size + 12.dp).height(52.dp)) {
         options.forEach { (value, label) ->
             SegmentItem(
                 selected = value == selected,
