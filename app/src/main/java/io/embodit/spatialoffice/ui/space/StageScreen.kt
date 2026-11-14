@@ -1,0 +1,281 @@
+package io.embodit.spatialoffice.ui.space
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.pico.spatial.ui.design.PicoTheme
+import com.pico.spatial.ui.foundation.content.SpatialView
+import com.pico.spatial.ui.foundation.dsl.registerSystem
+import com.pico.spatial.ui.foundation.dsl.unregisterSystem
+import com.pico.spatial.ui.foundation.material.backgroundMaterial
+import com.pico.spatial.ui.platform.Material
+import io.embodit.spatialoffice.R
+import io.embodit.spatialoffice.core.layout.Arrangement as Arr
+import io.embodit.spatialoffice.platform.DeckSession
+import io.embodit.spatialoffice.platform.DocSession
+import io.embodit.spatialoffice.platform.Graph
+import io.embodit.spatialoffice.platform.Head
+import io.embodit.spatialoffice.platform.SheetSession
+import io.embodit.spatialoffice.platform.StageMode
+import io.embodit.spatialoffice.platform.Win
+import io.embodit.spatialoffice.ui.Ink
+import io.embodit.spatialoffice.ui.PrimaryButton
+import io.embodit.spatialoffice.ui.SecondaryButton
+import io.embodit.spatialoffice.ui.Segments
+import io.embodit.spatialoffice.ui.ToolIcon
+import io.embodit.spatialoffice.ui.Txt
+import io.embodit.spatialoffice.ui.WindowFrame
+import io.embodit.spatialoffice.ui.commonKeys
+import io.embodit.spatialoffice.ui.doc.DocFocus
+import io.embodit.spatialoffice.ui.doc.Paper
+import io.embodit.spatialoffice.ui.localized
+import io.embodit.spatialoffice.ui.sheet.CellEdit
+import io.embodit.spatialoffice.ui.sheet.FormulaBar
+import io.embodit.spatialoffice.ui.sheet.SheetGrid
+import io.embodit.spatialoffice.ui.sheet.sheetKeys
+import io.embodit.spatialoffice.ui.slides.SlideCanvas
+import kotlinx.coroutines.delay
+
+/** S1 / S2: the Stage (Mixed). Spread layout of one file, or slide rehearsal. */
+@Composable
+fun StageScreen() {
+    WindowFrame(Win.STAGE) { graph ->
+        val scene = remember(graph) { StageScene(graph) }
+        DisposableEffect(scene) {
+            Head.start()
+            registerSystem<StageFrameSystem>()
+            onDispose {
+                unregisterSystem<StageFrameSystem>()
+                scene.detach()
+                Head.stop()
+                graph.stageGone()
+            }
+        }
+        SpatialView(
+            modifier = Modifier.fillMaxSize(),
+            attachments = {
+                for (slot in 0 until StagePanels.MAX_PIECES) {
+                    val id = StagePanels.piece(slot)
+                    AttachmentPanel(id) { Pooled(graph, scene, id) { PiecePanel(graph, scene.assigned[slot]) } }
+                }
+                AttachmentPanel(StagePanels.BAR) { Pooled(graph, scene, StagePanels.BAR) { if (graph.stageMode == StageMode.REHEARSAL) RehearsalBar(graph) else LayoutBar(graph) } }
+                AttachmentPanel(StagePanels.SCREEN) { Pooled(graph, scene, StagePanels.SCREEN) { RehearsalScreen(graph) } }
+                AttachmentPanel(StagePanels.NOTES) { Pooled(graph, scene, StagePanels.NOTES) { RehearsalNotes(graph) } }
+                AttachmentPanel(StagePanels.NEXT) { Pooled(graph, scene, StagePanels.NEXT) { RehearsalNext(graph) } }
+            },
+            update = { _, attachments -> scene.bind(attachments) },
+            initial = { content, attachments -> scene.attach(content, attachments) },
+        )
+    }
+}
+
+/**
+ * A pooled panel composes its content only while shown, in the app language and theme, and is recomposed shortly
+ * after it appears (an idle emulator can keep a half-drawn first frame of an attachment panel).
+ */
+@Composable
+private fun Pooled(graph: Graph, scene: StageScene, id: String, content: @Composable () -> Unit) {
+    val visible = scene.shown[id] == true
+    var gen by remember { mutableIntStateOf(0) }
+    LaunchedEffect(visible) {
+        if (!visible) return@LaunchedEffect
+        for (w in longArrayOf(1_200L, 2_500L)) { delay(w); gen++ }
+    }
+    if (!visible) return
+    val base = LocalContext.current
+    val lang = graph.settings.value.lang
+    val localized = remember(base, lang) { base.localized(lang) }
+    CompositionLocalProvider(LocalContext provides localized) {
+        key(gen) { PicoTheme { Box(Modifier.onPreviewKeyEvent { e -> stageKeys(graph, e) }) { content() } } }
+    }
+}
+
+/** Keys that work on every Stage panel: change the piece in front, change arrangement, collapse / end. */
+fun stageKeys(graph: Graph, e: KeyEvent): Boolean {
+    if (e.type != KeyEventType.KeyDown) return false
+    val rehearsal = graph.stageMode == StageMode.REHEARSAL
+    if (e.key == Key.Escape) { graph.collapse(); return true }
+    if (rehearsal) return when (e.key) {
+        Key.DirectionRight, Key.Spacebar, Key.PageDown -> { rehearsalStep(graph, 1); true }
+        Key.DirectionLeft, Key.PageUp -> { rehearsalStep(graph, -1); true }
+        else -> false
+    }
+    if (!(e.isCtrlPressed && e.isAltPressed)) return false
+    when (e.key) {
+        Key.DirectionLeft -> graph.focusBy(-1)
+        Key.DirectionRight -> graph.focusBy(1)
+        Key.One -> graph.arrange(Arr.ROW)
+        Key.Two -> graph.arrange(Arr.ARC)
+        Key.Three -> graph.arrange(Arr.LAYERS)
+        else -> return false
+    }
+    return true
+}
+
+private fun rehearsalStep(graph: Graph, delta: Int) {
+    val d = graph.deck ?: return
+    d.current = (d.current + delta).coerceIn(0, d.deck.slides.size - 1)
+}
+
+/** One piece of the file. The focused piece is edited in place; any other piece comes to the front when clicked. */
+@Composable
+private fun PiecePanel(graph: Graph, index: Int?) {
+    index ?: return
+    val s = graph.session(graph.stageKind) ?: return
+    s.version
+    val focused = index == graph.focus
+    val (w, h) = StagePanels.pieceDp(graph.stageKind)
+    val far = graph.arrangement == Arr.LAYERS && kotlin.math.abs(index - graph.focus) > 1
+    Box(
+        Modifier.size(w.dp, h.dp).alpha(if (far) 0.72f else 1f).clip(RoundedCornerShape(20.dp)).background(Ink.Paper)
+            .border(if (focused) 4.dp else 1.dp, if (focused) Ink.Select else Ink.Line, RoundedCornerShape(20.dp))
+            .semantics { contentDescription = "piece-${index + 1}" },
+    ) {
+        when (s) {
+            is DocSession -> {
+                val focus = remember(s) { DocFocus() }
+                val section = s.sections().getOrNull(index) ?: emptyList()
+                Paper(s, if (focused) focus else null, Modifier.fillMaxSize().onPreviewKeyEvent { e -> focused && commonKeys(graph, Win.DOC, e) }, blocks = section)
+            }
+            is SheetSession -> {
+                val edit = remember(s) { CellEdit() }
+                Column(Modifier.fillMaxSize().padding(12.dp).onPreviewKeyEvent { e -> focused && (commonKeys(graph, Win.SHEET, e) || sheetKeys(graph, s, edit, e)) }) {
+                    if (focused) { FormulaBar(s, edit, Modifier.fillMaxWidth()); Box(Modifier.height(8.dp)) }
+                    SheetGrid(s, if (focused) edit else null, index * SheetSession.COLS_PER_PIECE, SheetSession.COLS_PER_PIECE, Modifier.fillMaxWidth().weight(1f))
+                }
+            }
+            is DeckSession -> Box(Modifier.fillMaxSize().onPreviewKeyEvent { e -> focused && commonKeys(graph, Win.SLIDES, e) }, contentAlignment = Alignment.Center) {
+                SlideCanvas(s, index, w.dp, editable = focused)
+            }
+            else -> {}
+        }
+        // a piece that is not in front is one big target: click it and it turns to the front
+        if (!focused) Box(Modifier.fillMaxSize().clickable { graph.focusOn(index) })
+    }
+}
+
+@Composable
+private fun Glass(width: Int, height: Int, content: @Composable () -> Unit) {
+    Box(Modifier.size(width.dp, height.dp).clip(RoundedCornerShape(36.dp)).backgroundMaterial(enable = true, style = Material.Regular), contentAlignment = Alignment.Center) { content() }
+}
+
+/** Layout bar under the focused piece: arrangement, previous / next piece, bring back to front, collapse. */
+@Composable
+private fun LayoutBar(graph: Graph) {
+    val count = graph.session(graph.stageKind)?.pieceCount ?: 0
+    Glass(1000, 112) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Segments(
+                listOf(Arr.ROW to stringResource(R.string.arr_row), Arr.ARC to stringResource(R.string.arr_arc), Arr.LAYERS to stringResource(R.string.arr_layers)),
+                graph.arrangement, "stage/arr", itemWidth = 92.dp,
+            ) { graph.arrange(it) }
+            ToolIcon(R.drawable.ic_arrow_left, stringResource(R.string.focus_prev), onClick = { graph.focusBy(-1) }, enabled = graph.focus > 0)
+            Txt(stringResource(R.string.piece_n, graph.focus + 1, count), "stage/piece-n", Modifier.width(72.dp), style = PicoTheme.typography.titleMedium, align = androidx.compose.ui.text.style.TextAlign.Center)
+            ToolIcon(R.drawable.ic_arrow_right, stringResource(R.string.focus_next), onClick = { graph.focusBy(1) }, enabled = graph.focus < count - 1)
+            Box(Modifier.weight(1f))
+            SecondaryButton(stringResource(R.string.recenter), "stage/recenter", icon = R.drawable.ic_rotate, onClick = { graph.recenter() })
+            PrimaryButton(stringResource(R.string.collapse), "stage/collapse", icon = R.drawable.ic_collapse, onClick = { graph.collapse() })
+        }
+    }
+}
+
+@Composable
+private fun elapsedLabel(startMs: Long): String {
+    var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
+    LaunchedEffect(startMs) { while (true) { delay(500); now = android.os.SystemClock.elapsedRealtime() } }
+    val sec = ((now - startMs) / 1000).coerceAtLeast(0)
+    return String.format(java.util.Locale.ROOT, "%02d:%02d", sec / 60, sec % 60)
+}
+
+@Composable
+private fun RehearsalBar(graph: Graph) {
+    val d = graph.deck ?: return
+    d.version
+    Glass(820, 112) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            ToolIcon(R.drawable.ic_arrow_left, stringResource(R.string.rh_prev), onClick = { rehearsalStep(graph, -1) }, enabled = d.current > 0)
+            Txt(stringResource(R.string.piece_n, d.current + 1, d.deck.slides.size), "rehearsal/page", Modifier.width(88.dp), style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold, align = androidx.compose.ui.text.style.TextAlign.Center)
+            ToolIcon(R.drawable.ic_arrow_right, stringResource(R.string.rh_next), onClick = { rehearsalStep(graph, 1) }, enabled = d.current < d.deck.slides.size - 1)
+            Txt(elapsedLabel(graph.rehearsalStart), "rehearsal/timer", Modifier.width(96.dp), style = PicoTheme.typography.titleLarge, align = androidx.compose.ui.text.style.TextAlign.Center)
+            Box(Modifier.weight(1f))
+            SecondaryButton(stringResource(R.string.recenter), "rehearsal/recenter", icon = R.drawable.ic_rotate, onClick = { graph.recenter() })
+            PrimaryButton(stringResource(R.string.end_rehearsal), "rehearsal/end", onClick = { graph.collapse() })
+        }
+    }
+}
+
+@Composable
+private fun RehearsalScreen(graph: Graph) {
+    val d = graph.deck ?: return
+    d.version
+    SlideCanvas(d, d.current, 960.dp, editable = false)
+}
+
+@Composable
+private fun RehearsalNotes(graph: Graph) {
+    val d = graph.deck ?: return
+    d.version
+    val notes = d.deck.slides.getOrNull(d.current)?.notes.orEmpty()
+    Box(Modifier.size(568.dp, 704.dp).clip(RoundedCornerShape(28.dp)).backgroundMaterial(enable = true, style = Material.Regular)) {
+        Column(Modifier.fillMaxSize().padding(28.dp).verticalScroll(rememberScrollState())) {
+            Txt(stringResource(R.string.notes), "rehearsal/notes-label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2)
+            Box(Modifier.height(12.dp))
+            Txt(notes.ifBlank { stringResource(R.string.rh_notes_empty) }, "rehearsal/notes", style = PicoTheme.typography.headlineSmall, maxLines = 40)
+        }
+    }
+}
+
+@Composable
+private fun RehearsalNext(graph: Graph) {
+    val d = graph.deck ?: return
+    d.version
+    val last = d.current >= d.deck.slides.size - 1
+    Box(Modifier.size(568.dp, 704.dp).clip(RoundedCornerShape(28.dp)).backgroundMaterial(enable = true, style = Material.Regular)) {
+        Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Txt(elapsedLabel(graph.rehearsalStart), "rehearsal/clock", style = PicoTheme.typography.displaySmall, weight = FontWeight.Bold)
+            Txt(stringResource(if (last) R.string.rh_last else R.string.rh_next_label), "rehearsal/next-label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
+            if (!last) SlideCanvas(d, d.current + 1, 512.dp, editable = false)
+        }
+    }
+}

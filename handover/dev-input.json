@@ -1,0 +1,13 @@
+{
+  "request": "Implement Spatial Office (空间办公), a keyboard-and-mouse-first spatial office app for PICO (Spatial SDK + SpatialUI) that opens, edits and saves standard .docx / .xlsx / .pptx files directly and presents them spatially. The design is already approved by the user; do not redesign. Follow handover/development-context.md for scope and order (v0.1.0: local standard files first, then spatial presentation, then 3D charts, then honest not-available states for cloud accounts) and handover/factory-constraints.md for hard rules that a script checks. Expected result: a debug APK (package io.embodit.spatialoffice, versionName 0.1.0) that builds with ./gradlew assembleDebug, passes its unit tests, runs on a borrowed emulator, matches the approved preview's screens and bilingual copy, plus the evidence files and handover/build-report.md listed in factory-constraints.md.",
+  "projectRoot": "/Users/bytedance/Downloads/spatial-office",
+  "materials": [
+    "handover/development-context.md",
+    "handover/factory-constraints.md",
+    ".scratch/prd_v07_body.html",
+    ".scratch/design-doc.md",
+    ".scratch/preview.html"
+  ],
+  "startAt": "impl-planner",
+  "existingDesign": "Accepted design (user passed the design gate on 2026-11-14): PRD v0.7 at /Users/bytedance/Desktop/Spatial Apps/spatial-app-factory/apps/spatial-office/prd.html (same text without inlined images: .scratch/prd_v07_body.html in the project) and the interactive sample at /Users/bytedance/Desktop/Spatial Apps/spatial-app-factory/apps/spatial-office/sample.html (readable source: .scratch/src/01-head.html, 02-body.html, 03-app.html; assembled .scratch/preview.html; screenshots .scratch/review/). Direction: standard .docx / .xlsx / .pptx for new and existing files, no app-specific format, spatial layout is a presentation layer stored outside the document. The review chrome in the sample (tab strip, yellow banner, orange frames, captions) is not part of the app. Read handover/development-context.md for the confirmed decisions."
+}

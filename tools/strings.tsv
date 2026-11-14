@@ -1,0 +1,292 @@
+app_name	空间办公	Spatial Office
+nav_recent	最近	Recent
+nav_browse	浏览	Browse
+nav_new	新建	New
+nav_account	账号与云盘	Accounts & drives
+nav_settings	设置	Settings
+recent_sub	点一下就打开，打开就是空间化的样子；改完保存回同一个文件	One click opens a file, already presented spatially; Save writes back to the same file
+open_file	打开文件…	Open file…
+group_device	这台设备	On this device
+group_cloud	云端（需要登录）	Cloud (sign-in required)
+recent_empty	还没有打开过文件。点「新建」开一个，或点「浏览」找这台设备上的文件。	Nothing opened yet. Use New to start a file, or Browse to find files on this device.
+first_hint	接下来：点左边「新建」开一个文档，或点一个文件打开它。	Next: choose New on the left to start a document, or click a file to open it.
+cloud_none	这一版还没有接入云盘。本机文件全部可用。	Cloud drives are not available in this version. Local files all work.
+entry_head	别的地方也能直接打开到这里	Files open here from other places too
+entry_sub	浏览器下载的文件 · 系统「分享」和「打开方式」。都是点一下直接打开，不用先转换。	Browser downloads · system Share and Open with. One click opens them; nothing is converted first.
+meta_doc	文档	Document
+meta_sheet	表格	Spreadsheet
+meta_slides	演示	Presentation
+meta_pdf	PDF · 只读	PDF · read-only
+meta_image	图片 · 只读	Image · read-only
+meta_text	文本	Text
+meta_html	网页 · 只读	Web page · read-only
+today	今天	Today
+yesterday	昨天	Yesterday
+new_sub	新建的就是标准文件：.docx / .xlsx / .pptx，存在 Documents/SpatialOffice，别的软件直接能打开	New files are standard .docx / .xlsx / .pptx in Documents/SpatialOffice; other software opens them directly
+new_doc	文档	Document
+new_sheet	表格	Spreadsheet
+new_slides	演示	Presentation
+new_note	.docx / .xlsx / .pptx 是公开的国际标准格式（ISO/IEC 29500）。新文件直接存成这三种，不另造格式。	.docx / .xlsx / .pptx are open international standard formats (ISO/IEC 29500). New files are saved in them directly; there is no app-specific format.
+new_made	已新建 %1$s	Created %1$s
+browse_sub	这台设备和已连接的云盘。打开后保存写回原来的位置	This device and connected drives. Save writes back in place
+loc_device	本机	Device
+loc_feishu	飞书	Feishu
+loc_gdrive	Google Drive	Google Drive
+loc_onedrive	OneDrive	OneDrive
+loc_dropbox	Dropbox	Dropbox
+browse_up	上一级	Up
+browse_empty	这个文件夹里没有能打开的文件	No files that can be opened in this folder
+browse_grant_head	只看得到这个应用自己建的文件	Only files this app created are visible
+browse_grant_sub	允许「所有文件访问」后，这里会列出 Download 和 Documents 里别的应用放进来的文件。也可以点「打开文件…」单独选一个。	Allow “All files access” to list files that other apps put in Download and Documents. Or use “Open file…” to pick a single file.
+browse_grant_btn	去允许	Allow
+br_off_head	这一版还没有接入%1$s	%1$s is not available in this version
+br_off_sub	等应用身份登记好之后再开放。本机文件不受影响。	It opens once the app identity is registered. Local files are not affected.
+account_sub	可选。不连接也能打开、编辑、保存本机文件	Optional. Local files open, edit and save without any account
+acct_off	这一版还没有接入。之后可以：浏览和直接打开云端文件，改完保存回去	Not available in this version. Later: browse and open cloud files directly and save changes back
+acct_soon	还没开放	Not yet
+scope_head	连接后应用能做什么	What the app can do once connected
+scope_sub	浏览你的文件夹，打开你点的文件，把改动保存回原处。授权在对方的官方页面上完成，密码不经过这个应用；登录凭证加密存在这台设备上，退出就删除。	Browse your folders, open the files you pick and save changes back in place. Approval happens on the provider’s own page; your password never passes through this app. The token is encrypted on this device and deleted on sign-out.
+set_language	语言 Language	语言 Language
+lang_zh	中文	中文
+lang_en	English	English
+set_open	打开文件时	When a file opens
+set_open_sub	窗口：和别的应用并排。直接铺开：进全空间，别的应用暂时隐藏	Window: beside other apps. Spread out: enters Full Space and hides other apps for now
+open_window	窗口	Window
+open_spread	直接铺开	Spread out
+set_store	空间布局记在	Where spatial layouts are kept
+set_store_sub	两种都不改文件本身。跟文件走：在文件旁边放一个同名的 .spatial.json	Neither changes the file. With the file: a same-named .spatial.json is placed beside it
+store_device	这台头显	This headset
+store_file	跟文件走	With the file
+set_keep	第一次保存前备份原件	Back up the original before the first save
+set_keep_sub	在原文件旁边留一份「文件名（原件）」，以后不再重复备份	Keeps “name (original)” beside the file once; never repeated
+set_radius	铺开时离你多远	Distance when spread out
+set_radius_sub	新布局的默认半径；每个文件可以再单独调	Default radius for new layouts; each file can override it
+set_howto	怎么操作	How to use
+set_howto_sub	键盘鼠标、手势、手柄各怎么做	With keyboard and mouse, hands, or a controller
+shortcuts	键盘快捷键	Keyboard shortcuts
+shortcuts_sub	蓝牙键盘鼠标是主要输入；手柄、手势、眼手也都能点	Keyboard and mouse are the main input; controller, hand ray and gaze-pinch work too
+about	关于	About
+about_sub	版本 %1$s · 兼容 .docx / .xlsx / .pptx（开放标准）· 本机文件全部离线可用，账号是可选的	Version %1$s · compatible with .docx / .xlsx / .pptx (open standard) · local files work fully offline; accounts are optional
+exit_app	退出应用	Quit app
+set_legal	提到的文件格式和云服务名称，只用来说明兼容和连接。本应用和这些名称的权利人没有隶属或背书关系。	File format and cloud service names are used only to describe compatibility and connections. This app is not affiliated with or endorsed by their owners.
+exit_q	退出空间办公？	Quit Spatial Office?
+exit_msg	所有窗口都会关闭。	All windows will close.
+exit_msg_dirty	所有窗口都会关闭。%1$s 还有没保存的改动，退出后会丢。	All windows will close. %1$s has unsaved changes that will be lost.
+cancel	取消	Cancel
+exit	退出	Quit
+close	关闭	Close
+done	完成	Done
+back	返回	Back
+how_to_title	怎么操作	How to use
+how_to_col_keys	键盘鼠标	Keyboard & mouse
+how_to_col_hand	手势 / 眼手	Hands / gaze-pinch
+how_to_col_ctrl	手柄	Controller
+how_to_open	打开文件	Open a file
+how_to_open_keys	点文件那一行	Click the file row
+how_to_open_hand	看着那一行，捏一下	Look at the row and pinch
+how_to_open_ctrl	射线指着那一行，按扳机	Point the ray at the row and pull the trigger
+how_to_edit	改内容	Edit
+how_to_edit_keys	点进去直接打字；表格里方向键移动，Enter 确认	Click and type; in a sheet, arrow keys move and Enter confirms
+how_to_edit_hand	捏一下要改的地方，用系统键盘输入	Pinch the place to edit and type on the system keyboard
+how_to_edit_ctrl	扳机点要改的地方，用系统键盘输入	Trigger on the place to edit and type on the system keyboard
+how_to_save	保存	Save
+how_to_save_keys	Ctrl+S，或点底部工具条的 [保存]	Ctrl+S, or [Save] on the bottom toolbar
+how_to_save_hand	捏底部工具条的 [保存]	Pinch [Save] on the bottom toolbar
+how_to_save_ctrl	扳机点底部工具条的 [保存]	Trigger on [Save] on the bottom toolbar
+how_to_spread	铺开和收起	Spread out and collapse
+how_to_spread_keys	点 [铺开]；Ctrl+Alt+← → 换面前的那一块；Esc 收起	Click [Spread out]; Ctrl+Alt+← → changes the piece in front; Esc collapses
+how_to_spread_hand	捏 [铺开]；捏哪一块，哪一块转到面前；捏 [收起]	Pinch [Spread out]; pinch a piece to bring it in front; pinch [Collapse]
+how_to_spread_ctrl	扳机点 [铺开]；点哪一块，哪一块转到面前；点 [收起]	Trigger on [Spread out]; trigger on a piece to bring it in front; trigger on [Collapse]
+how_to_move	挪窗口	Move a window
+how_to_move_keys	拖窗口下面的小圆点	Drag the small dot under the window
+how_to_move_hand	捏住窗口下面的小圆点拖	Pinch and drag the small dot under the window
+how_to_move_ctrl	扳机按住窗口下面的小圆点拖	Hold the trigger on the small dot under the window and drag
+how_to_chart	3D 图表	3D chart
+how_to_chart_keys	表格里点 [3D 图表]；点柱子选中对应单元格	Click [3D chart] in a sheet; click a bar to select its cell
+how_to_chart_hand	捏 [3D 图表]；捏柱子选中对应单元格	Pinch [3D chart]; pinch a bar to select its cell
+how_to_chart_ctrl	扳机点 [3D 图表]；点柱子选中对应单元格	Trigger on [3D chart]; trigger on a bar to select its cell
+key_save	保存	Save
+key_undo	撤销 / 重做	Undo / redo
+key_bold	粗体 / 斜体 / 下划线	Bold / italic / underline
+key_move	表格：移动选中格	Sheet: move the selection
+key_edit	表格：编辑 / 确认 / 取消	Sheet: edit / confirm / cancel
+key_sum	表格：自动求和	Sheet: AutoSum
+key_slide	演示：上一页 / 下一页	Slides: previous / next
+key_focus	铺开：换面前的那一块	Spread: change the piece in front
+key_arr	铺开：并排 / 环绕 / 分层	Spread: row / arc / layers
+key_collapse	铺开 / 预演：收起、结束	Spread / rehearsal: collapse, end
+doc_title	文档	Document
+sheet_title	表格	Spreadsheet
+slides_title	演示	Presentation
+close_file	关闭文件	Close file
+more	更多	More
+status_saved	已保存 · %1$s	Saved · %1$s
+status_dirty	有改动没保存 · %1$s	Unsaved changes · %1$s
+status_new	新文件 · %1$s · 标准 .%2$s	New file · %1$s · standard .%2$s
+status_readonly	只读 · %1$s	Read-only · %1$s
+status_layout_device	布局记在这台头显	layout kept on this headset
+status_layout_file	布局跟文件走	layout kept with the file
+compat_btn	兼容性 %1$d	Compatibility %1$d
+compat_title	兼容性	Compatibility
+compat_src	%1$s · 文件里的内容一项不少	%1$s · nothing in the file is dropped
+compat_sum	%1$d 处显示近似 · %2$d 处只读 · 没有内容丢失	%1$d shown approximately · %2$d read-only · nothing lost
+compat_none	这个文件里的内容这里都能显示和编辑。	Everything in this file can be shown and edited here.
+k_approx	显示近似	Approx. view
+k_hold	只读	Read-only
+c_columns	多栏排版 → 这里按单栏显示	Columns → shown as one column here
+c_columns_s	文件里还是多栏，电脑上打开不变。	The file keeps its columns; it is unchanged on a computer.
+c_text_box	文本框 → 按阅读顺序显示在正文里	Text box → shown inline in reading order
+c_text_box_s	文本框在文件里位置没变，只是这里不浮着显示。	The text box keeps its position in the file; it is just not shown floating here.
+c_font	缺的字体 → 用系统字体显示	Missing font → shown in a system font
+c_font_s	文件里的字体名没有动。	The font name in the file is unchanged.
+c_smart	智能图形 %1$d 个	%1$d smart graphic(s)
+c_smart_s	显示成只读块。文件里原样不动。	Shown as a read-only block. Untouched in the file.
+c_tracked	带修订的段落 %1$d 段	%1$d paragraph(s) with tracked changes
+c_tracked_s	只读，显示修订后的样子。修订都留在文件里。	Read-only, shown in their final form. The changes stay in the file.
+c_comments	批注 %1$d 条	%1$d comment(s)
+c_comments_s	这里不显示。都留在文件里。	Not shown here. They stay in the file.
+c_chart	图表 %1$d 个	%1$d chart(s)
+c_chart_s	这里显示成只读块；表格里的图表可以按 3D 看。文件里原样不动。	Shown as a read-only block here; charts in a spreadsheet can be viewed in 3D. Untouched in the file.
+c_table	表格 %1$d 个	%1$d table(s)
+c_table_s	这一版只读。文件里原样不动。	Read-only in this version. Untouched in the file.
+c_other	别的对象 %1$d 个	%1$d other object(s)
+c_other_s	这里不显示或只读。文件里原样不动，保存不会碰它。	Not shown or read-only here. Untouched in the file; saving never alters it.
+ph_readonly	（只读）	(read-only)
+ph_smart	智能图形	Smart graphic
+ph_chart	图表	Chart
+ph_text_box	文本框	Text box
+ph_other	这里还不能显示的对象	An object that cannot be shown here yet
+ph_sub	它在文件里原样不动，保存不会碰它。	It stays untouched in the file; saving never alters it.
+doc_placeholder	从这里开始写	Start writing here
+style_body	正文	Body
+style_title	标题	Title
+style_h1	标题 1	Heading 1
+style_h2	标题 2（新的一章）	Heading 2 (new section)
+style_h3	标题 3	Heading 3
+style_bullet	项目符号	Bulleted list
+bold	粗体 Ctrl+B	Bold Ctrl+B
+italic	斜体 Ctrl+I	Italic Ctrl+I
+underline	下划线 Ctrl+U	Underline Ctrl+U
+bullets	项目符号	Bullets
+undo	撤销 Ctrl+Z	Undo Ctrl+Z
+redo	重做 Ctrl+Y	Redo Ctrl+Y
+spread	铺开	Spread out
+storyline	故事线	Storyline
+save_as	另存为	Save as
+save	保存	Save
+menu_layout_file	让布局跟文件走…	Keep the layout with the file…
+menu_open_backup	打开备份的原件	Open the backed-up original
+menu_shortcuts	键盘快捷键	Keyboard shortcuts
+no_backup	这个文件还没有备份的原件	This file has no backed-up original yet
+layout_with_file	已在文件旁边放了 %1$s；文件本身不变	Placed %1$s beside the file; the file itself is unchanged
+layout_with_file_fail	这个位置不能在文件旁边写东西，布局继续记在这台头显	Cannot write beside the file here; the layout stays on this headset
+formula_ph	输入数值、文字，或以 = 开头的公式	Type a value, text, or a formula starting with =
+sheet_label	工作表	Sheet
+fmt_general	常规	General
+fmt_currency	货币 ¥	Currency ¥
+fmt_percent	百分比 %	Percent %
+autosum	自动求和 Alt+=	AutoSum Alt+=
+sort_asc	按当前列升序排序	Sort ascending by this column
+insert_row	插入行	Insert row
+chart_3d	3D 图表	3D chart
+no_num	上方没有可求和的数字	No numbers above to sum
+sorted	已按 %1$s 列升序排列数据行	Sorted the data rows by column %1$s
+sort_refused	这几行里有公式指向别的行，没有排序	Formulas in these rows point at other rows; nothing was sorted
+no_chart	这张工作表里还没有图表。先选中一块数据（第一行是类别，第一列是系列名），再点一次就会新建一个标准图表。	No chart in this sheet yet. Select a block of data (first row = categories, first column = series names) and click again to create a standard chart.
+chart_made	已新建标准图表「%1$s」，保存后写进文件	Created the standard chart “%1$s”; it is written to the file on save
+chart_fail	这块数据建不了图表：需要至少两行两列	Cannot chart this block: it needs at least two rows and two columns
+range_hint	蓝色底：图表「%1$s」的数据区 %2$s。改一个数，3D 图跟着变	Blue: data range %2$s of the chart “%1$s”. Change a number and the 3D chart follows
+chart_window	空间图表	Spatial chart
+chart_src	%1$s · 改单元格，柱子跟着变	%1$s · edit a cell and the bar follows
+tip_bar	点柱子 = 选中对应单元格	Click a bar to select its cell
+tip_dot	点一个点 = 选中那一行	Click a dot to select its row
+chart_columns	柱状	Columns
+chart_scatter	散点	Scatter
+chart_reset	复位视角	Reset view
+chart_turn_left	向左转	Turn left
+chart_turn_right	向右转	Turn right
+chart_close	关闭图表	Close chart
+chart_closed_file	表格已关闭	The spreadsheet was closed
+rehearse	预演	Rehearse
+notes	讲者备注（预演时浮在你左手边）	Speaker notes (float on your left during rehearsal)
+notes_ph	写下这一页要讲的话	What you will say on this slide
+add_slide	新建页	New slide
+layout_btn	版式	Layout
+lay_title	标题页	Title
+lay_body	标题 + 正文	Title + body
+text_box	插入文本框	Insert text box
+delete_slide	删除这一页	Delete this slide
+slide_up	上移一页	Move slide up
+slide_down	下移一页	Move slide down
+slide_n	第 %1$d 页	Slide %1$d
+slide_title_ph	点这里写标题	Click to add a title
+slide_body_ph	点这里写内容	Click to add text
+slide_other	这里还不能显示的对象（只读，文件里原样不动）	An object that cannot be shown here yet (read-only, untouched in the file)
+last_slide	至少留一页	Keep at least one slide
+arr_row	并排	Row
+arr_arc	环绕	Arc
+arr_layers	分层	Layers
+focus_prev	上一块转到面前 Ctrl+Alt+←	Previous piece to front Ctrl+Alt+←
+focus_next	下一块转到面前 Ctrl+Alt+→	Next piece to front Ctrl+Alt+→
+recenter	回到面前	Bring back to front
+collapse	收起	Collapse
+full_space	已进入全空间：别的应用的窗口暂时隐藏，点 [收起] 回来	Entered Full Space: other apps’ windows are hidden until you tap Collapse
+layout_saved	布局已记下（不改文件），下次打开原样还原	Layout recorded (file untouched); restored next time
+piece_n	%1$d / %2$d	%1$d / %2$d
+rh_prev	上一页 ←	Previous ←
+rh_next	下一页 →	Next →
+end_rehearsal	结束预演	End rehearsal
+rh_next_label	下一页	Next slide
+rh_last	最后一页	Last slide
+rh_notes_empty	这一页没有备注	No notes for this slide
+save_first_title	保存「%1$s」	Save “%1$s”
+save_first_lead	这是第一次保存这个文件，先把原件备份一份。保存只动你改过的地方。	This is the first save of this file, so the original is backed up first. Saving only touches what you changed.
+sf_changed	你改过的 %1$d 处	Your %1$d edit(s)
+sf_changed_sub	→ 写回文件里原来的位置，别的软件照常打开和编辑	→ written back in place in the file; other software opens and edits it as usual
+sf_rest	其余内容，包括这里只读或不显示的对象	Everything else, including objects that are read-only or not shown here
+sf_rest_sub	→ 文件里原样不动	→ left untouched in the file
+sf_layout	空间摆法、3D 图表的视角	Spatial layout, 3D chart view
+sf_layout_sub	→ 不写进文件。记在这台头显上，下次打开自动还原	→ not written into the file. Kept on this headset and restored next time
+tag_written	写回	Written
+tag_untouched	原样	Untouched
+tag_notinfile	不进文件	Not in file
+backup_to	原件备份到	Original backed up to
+backup_private	这个位置不能在旁边放备份，备份放在应用自己的文件夹：%1$s	A backup cannot be placed beside this file; it goes to the app's own folder: %1$s
+save_copy	另存为副本	Save as a copy
+backup_and_save	备份并保存	Back up and save
+saved_to	已保存到 %1$s	Saved to %1$s
+saved_first	已保存到 %1$s · 原件已备份	Saved to %1$s · original backed up
+save_failed	没能保存：%1$s	Could not save: %1$s
+open_failed	打不开 %1$s：%2$s	Could not open %1$s: %2$s
+open_unknown	这种文件这里打不开	This kind of file cannot be opened here
+opened	已打开 %1$s	Opened %1$s
+opened_sub	内容都在 · %1$d 处显示近似 · %2$d 处只读。打开不会改动文件	Everything is here · %1$d shown approximately · %2$d read-only. Opening never changes the file
+view	查看	View
+renamed	第一次保存：文件名用第一行，叫 %1$s	First save: the file is named after its first line, %1$s
+empty_removed	空的新文件没有留下	The empty new file was not kept
+saveas_title	另存「%1$s」	Save “%1$s” as
+saveas_label	另存为	Save as
+sa_copy	同格式副本 .%1$s	Copy in the same format .%1$s
+sa_copy_sub	内容和现在一样；别的软件直接能打开	Same content as now; other software opens it directly
+sa_pdf	PDF	PDF
+sa_pdf_sub	固定版面，适合发给别人看	Fixed layout, good for sending to others
+sa_csv	CSV（当前工作表）	CSV (current sheet)
+sa_csv_sub	只有数值和文字，公式存成结果	Values and text only; formulas become their results
+sa_txt	纯文本 .txt	Plain text .txt
+sa_txt_sub	只有文字，没有格式	Text only, no formatting
+sa_png	图片（每页一张 PNG）	Images (one PNG per slide)
+sa_png_sub	放进以文件名命名的文件夹	Placed in a folder named after the file
+sa_cloud	飞书 / 云盘	Feishu / cloud drive
+sa_cloud_sub	这一版还没有接入	Not available in this version
+save_to	保存到	Save to
+saveas_note	正在编辑的文件不受影响	The file you are editing is not affected
+saveas_go	另存	Save
+saved_as	已另存为 %1$s	Saved as %1$s
+unsaved_title	「%1$s」有没保存的改动	“%1$s” has unsaved changes
+unsaved_msg	不保存的话，这些改动会丢。	Without saving, these changes are lost.
+discard	不保存	Don't save
+grant_title	允许访问文件	Allow file access
+perm_denied	没有权限读写这个位置	No permission to read or write this location
+picker_none	这台设备上没有文件选择器。请在「浏览」里找文件。	No file picker on this device. Find the file under Browse.
+pdf_page	第 %1$d / %2$d 页	Page %1$d / %2$d
+readonly_note	这种文件只读：可以看、铺开、另存	This kind of file is read-only: view, spread out, save as

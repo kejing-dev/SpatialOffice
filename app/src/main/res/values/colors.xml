@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- launcher background: deep teal, the app's own colour -->
+    <color name="ic_launcher_bg">#FF0F6E78</color>
+</resources>
