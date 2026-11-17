@@ -36,7 +36,6 @@ import com.pico.spatial.ui.design.ListItem
 import com.pico.spatial.ui.design.PicoTheme
 import com.pico.spatial.ui.design.windows.AlertDialog
 import com.pico.spatial.ui.design.windows.Sheet
-import com.pico.spatial.ui.design.windows.Subwindow
 import io.embodit.spatialoffice.R
 import io.embodit.spatialoffice.core.docx.CompatKind
 import io.embodit.spatialoffice.core.docx.CompatNote
@@ -98,6 +97,7 @@ private fun SaveFirstSheet(graph: Graph, win: Win, s: Session) {
     Sheet(
         modifier = Modifier.width(680.dp),
         onDismissRequest = { graph.overlay = null },
+        leadingAction = { SheetClose { graph.overlay = null } },
         title = { Txt(tr(R.string.save_first_title, s.ref.name), "savefirst/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold, maxLines = 2) },
         bottom = {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End)) {
@@ -145,6 +145,7 @@ private fun SaveAsSheet(graph: Graph, win: Win, s: Session) {
     Sheet(
         modifier = Modifier.width(680.dp),
         onDismissRequest = { graph.overlay = null },
+        leadingAction = { SheetClose { graph.overlay = null } },
         title = { Txt(tr(R.string.saveas_title, s.ref.name), "saveas/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold, maxLines = 2) },
         bottom = {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -222,6 +223,7 @@ private fun ShortcutsSheet(graph: Graph) {
     Sheet(
         modifier = Modifier.width(560.dp),
         onDismissRequest = { graph.overlay = null },
+        leadingAction = { SheetClose { graph.overlay = null } },
         title = { Txt(tr(R.string.shortcuts), "keys/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold) },
     ) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -235,28 +237,43 @@ private fun ShortcutsSheet(graph: Graph) {
     }
 }
 
-/** "Compatibility": what is shown approximately or read-only here. Nothing in the file is ever dropped. */
+/**
+ * "Compatibility": what is shown approximately or read-only here. Nothing in the file is ever dropped.
+ * v0.2.2 (QA #2 q2-1): a Sheet over the editor window, like Save as. The Subwindow it used to be hung off the
+ * window's right edge, 36°–48° to the right of the gaze, mostly out of view (WindowFit.compatSheet / WindowFitTest).
+ */
 @Composable
 private fun CompatPanel(graph: Graph, s: Session) {
     val notes = remember(s.version) { s.compat() }
-    Subwindow {
-        Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 24.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { graph.overlay = null }, modifier = Modifier.size(48.dp)) {
-                    Icon(painter = painterResource(R.drawable.ic_cross), contentDescription = tr(R.string.close), modifier = Modifier.size(20.dp))
-                }
-                Txt(tr(R.string.compat_title), "compat/title", Modifier.padding(start = 8.dp), style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold)
+    Sheet(
+        modifier = Modifier.width(680.dp),
+        onDismissRequest = { graph.overlay = null },
+        leadingAction = { SheetClose { graph.overlay = null } },
+        title = { Txt(tr(R.string.compat_title), "compat/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold) },
+        bottom = {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                PrimaryButton(tr(R.string.done), "compat/done", onClick = { graph.overlay = null })
             }
-            Spacer(Modifier.height(8.dp))
+        },
+    ) {
+        Column(Modifier.fillMaxWidth()) {
             Txt(tr(R.string.compat_src, s.ref.name), "compat/src", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
             Txt(
                 if (notes.isEmpty()) tr(R.string.compat_none) else tr(R.string.compat_sum, notes.approx(), notes.held()),
                 "compat/sum", Modifier.padding(top = 4.dp, bottom = 12.dp), style = PicoTheme.typography.titleMedium, maxLines = 3,
             )
-            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 notes.forEach { n -> CompatRow(n, s.kind) }
             }
         }
+    }
+}
+
+/** The close button of every sheet, labelled in the app language (the built-in one reads the system language). */
+@Composable
+fun SheetClose(onClick: () -> Unit) {
+    IconButton(onClick = onClick, modifier = Modifier.size(48.dp)) {
+        Icon(painter = painterResource(R.drawable.ic_cross), contentDescription = tr(R.string.close), modifier = Modifier.size(20.dp))
     }
 }
 
@@ -288,6 +305,7 @@ private fun FindSheet(graph: Graph, s: DocSession) {
     Sheet(
         modifier = Modifier.width(680.dp),
         onDismissRequest = { graph.overlay = null },
+        leadingAction = { SheetClose { graph.overlay = null } },
         title = { Txt(tr(R.string.find_replace), "find/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold) },
         bottom = {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -381,6 +399,7 @@ private fun ImagePickSheet(graph: Graph, win: Win) {
     Sheet(
         modifier = Modifier.width(720.dp),
         onDismissRequest = { graph.overlay = null },
+        leadingAction = { SheetClose { graph.overlay = null } },
         title = { Txt(tr(R.string.pick_picture), "img/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold) },
         bottom = {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -438,6 +457,7 @@ private fun ChartSheet(graph: Graph, s: SheetSession, index: Int) {
     Sheet(
         modifier = Modifier.width(860.dp),
         onDismissRequest = { graph.overlay = null },
+        leadingAction = { SheetClose { graph.overlay = null } },
         title = { Txt(c.title.ifEmpty { tr(R.string.chart_untitled) } + " · " + tr(chartTypeName(c.type)), "chartview/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold, maxLines = 2) },
         bottom = {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {

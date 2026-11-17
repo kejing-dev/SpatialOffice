@@ -62,4 +62,73 @@ object WindowFit {
 
     /** The one placement rule for editor windows (opening, reopening, new file): in front of the user. */
     fun editorSpot(): Spot = Spot.FRONT
+
+    // ---- v0.2.2: the compatibility sheet (q2-1) and the 3D chart volume below the sheet window (q2-2) ----
+
+    /** Window centres sit this far below the eye (QA #2 screenshot 60: sheet centre 40 px of 2558 below the middle). */
+    const val EYE_DROP = 0.055
+    /** System controls under a Planar window: its Toolbar ornament and the window dot (QA #2 screenshot 60: 120 px ≈ 104 dp). */
+    const val CONTROLS_BELOW_DP = 104.0
+    /** The sheet window as declared in Main.kt. */
+    const val SHEET_W_DP = 1280.0
+    const val SHEET_H_DP = 800.0
+    /** The chart volume (Main.kt): metres. */
+    const val CHART_W = 0.90
+    const val CHART_H = 0.26
+    const val CHART_D = 0.32
+
+    /**
+     * Gap the system leaves between the sheet window's top edge and a volume placed `Placement.top(sheet, 0.dp)`.
+     * Measured on the emulator (v0.2.2, build/v0.2.2/placement-trials.md): sheet top edge at 18.3° up, volume
+     * bottom at 27.3° up, i.e. 0.33 m ≈ 206 dp at the window's distance. Placements tried and dropped there:
+     * bottom (the volume rests on the bed / floor, 34°+ down), negative offsets (volume not shown), right / left
+     * (volume about 4 m away, 55° to the side).
+     */
+    const val CHART_TOP_GAP_DP = 206.0
+
+    /** A [wDp] × [hDp] window in front, its centre [EYE_DROP] below the eye. */
+    fun frontWindow(wDp: Double, hDp: Double): Box = Box(0.0, -EYE_DROP, -DISTANCE, wDp * M_PER_DP, hDp * M_PER_DP)
+
+    /** The chart volume above the sheet (Placement.top(sheet, 0.dp)): bottom [gapDp] over the sheet's top edge, centred. */
+    fun chartAboveSheet(gapDp: Double = CHART_TOP_GAP_DP, w: Double = CHART_W, h: Double = CHART_H, d: Double = CHART_D): Box {
+        val sheet = frontWindow(SHEET_W_DP, SHEET_H_DP)
+        val bottom = sheet.cy + sheet.h / 2 + gapDp * M_PER_DP
+        return Box(0.0, bottom + h / 2, -DISTANCE, w, h, d)
+    }
+
+    /** v0.2.1's try: the 0.60 m volume under the sheet, 120 dp gap (it went to the floor). */
+    fun chartBelowSheet(gapDp: Double, w: Double, h: Double, d: Double): Box {
+        val sheet = frontWindow(SHEET_W_DP, SHEET_H_DP)
+        val top = sheet.cy - sheet.h / 2 - gapDp * M_PER_DP
+        return Box(0.0, top - h / 2, -DISTANCE, w, h, d)
+    }
+
+    /** What QA #2 saw: the volume Placement.none() in front, on top of the sheet. */
+    fun chartInFront(): Box = Box(0.0, -EYE_DROP, -DISTANCE, 0.76, 0.60, 0.48)
+
+    /** Screen rectangle (yaw / pitch degrees) of a box's 8 projected corners. */
+    data class Rect(val left: Double, val right: Double, val bottom: Double, val top: Double) {
+        fun overlaps(o: Rect): Boolean = left < o.right && o.left < right && bottom < o.top && o.bottom < top
+    }
+
+    fun rect(b: Box): Rect {
+        val a = b.corners().map { angles(it) }
+        return Rect(a.minOf { it.first }, a.maxOf { it.first }, a.minOf { it.second }, a.maxOf { it.second })
+    }
+
+    /** The sheet window with the system controls under it (what the chart must not cover). */
+    fun sheetWithControls(): Rect {
+        val s = frontWindow(SHEET_W_DP, SHEET_H_DP)
+        return rect(s.copy(cy = s.cy - CONTROLS_BELOW_DP * M_PER_DP / 2, h = s.h + CONTROLS_BELOW_DP * M_PER_DP))
+    }
+
+    /** The compatibility sheet: a [wDp] × [hDp] modal centred over the editor window, a little in front of it. */
+    fun compatSheet(wDp: Double = 680.0, hDp: Double = 760.0): Box = Box(0.0, -EYE_DROP, -DISTANCE + 0.05, wDp * M_PER_DP, hDp * M_PER_DP)
+
+    /** What QA #2 measured for the old Subwindow (hung off the editor's right edge): 36°–48° to the right. */
+    fun oldCompatSubwindow(): Box {
+        val l = Math.tan(Math.toRadians(36.0)) * DISTANCE; val r = Math.tan(Math.toRadians(48.0)) * DISTANCE
+        return Box((l + r) / 2, -EYE_DROP, -DISTANCE, r - l, 600 * M_PER_DP)
+    }
 }
+

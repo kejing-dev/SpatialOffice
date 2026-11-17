@@ -200,6 +200,7 @@ private fun HowToSheet(graph: Graph) {
     )
     Sheet(
         onDismissRequest = { graph.overlay = null },
+        leadingAction = { io.embodit.spatialoffice.ui.SheetClose { graph.overlay = null } },
         title = { Txt(tr(R.string.how_to_title), "howto/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold) },
     ) {
         // the sheet has a fixed width, so each action is a short block: its name, then one line per way of doing it

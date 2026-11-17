@@ -13,6 +13,7 @@ import com.pico.spatial.ui.foundation.dsl.WindowContainer
 import com.pico.spatial.ui.foundation.dsl.WindowContainerSize
 import com.pico.spatial.ui.platform.LengthUnit
 import io.embodit.spatialoffice.platform.Containers
+import io.embodit.spatialoffice.core.layout.WindowFit
 import io.embodit.spatialoffice.ui.chart.ChartVolume
 import io.embodit.spatialoffice.ui.doc.DocWindow
 import io.embodit.spatialoffice.ui.home.HomeWindow
@@ -35,6 +36,31 @@ internal fun editorPlacement(containers: List<ContainerProxy>, id: String): Plac
     android.util.Log.i("SpatialOffice", "PLACE $id ${io.embodit.spatialoffice.core.layout.WindowFit.editorSpot()} among " + containers.joinToString { "${it.id}/${it.state}" })
     return Placement.none()
 }
+
+/**
+ * The 3D chart volume (QA #2 q2-2): over the sheet window, so it never covers the grid (v0.2.1 opened it in front,
+ * on top of columns D–L, and the system faded the sheet). Beside the sheet is out of view (the sheet alone spans
+ * ±30°); below it the system sets the volume down on the bed / floor (34°+ down); a negative offset hides it;
+ * right / left put it about 4 m away at 55° (emulator trials, build/v0.2.2/placement-trials.md). Above, with the
+ * volume 0.24 m tall, all of it is 27°–35° up and clear of the sheet: WindowFitV022Test checks the 8 corners.
+ */
+internal fun chartPlacement(containers: List<ContainerProxy>): Placement {
+    val sheet = containers.firstOrNull { it.id == Containers.SHEET }
+    val mode = ChartPlace.mode
+    android.util.Log.i("SpatialOffice", "PLACE ${Containers.CHART} mode=$mode anchor=${sheet?.id} among " + containers.joinToString { "${it.id}/${it.state}" })
+    if (sheet == null) return Placement.none()
+    val (side, gap) = mode.split(':').let { it[0] to (it.getOrNull(1)?.toFloatOrNull() ?: 0f) }
+    return when (side) {
+        "top" -> Placement.top(sheet, gap.dp)
+        "left" -> Placement.left(sheet, gap.dp)
+        "right" -> Placement.right(sheet, gap.dp)
+        "none" -> Placement.none()
+        else -> Placement.bottom(sheet, gap.dp)
+    }
+}
+
+/** Where the chart volume goes (side:gapDp); the debug command `chart-place` can try others on the emulator. */
+object ChartPlace { @Volatile var mode: String = "top:0" }
 
 /**
  * Containers (design 2.1). Shared Space: the home window (default container, 1120 × 660 dp from the manifest), one
@@ -63,11 +89,9 @@ fun mainApp(scope: SpatialAppScope) =
         ) { Box(Modifier.windowConstraints(minWidth = 1300.dp, minHeight = 820.dp)) { SlidesWindow() } }
         WindowContainer(
             Containers.CHART, form = Form.Volumetric,
-            defaultSize = WindowContainerSize(0.76f, 0.60f, 0.48f, LengthUnit.Meters),
+            defaultSize = WindowContainerSize(WindowFit.CHART_W.toFloat(), WindowFit.CHART_H.toFloat(), WindowFit.CHART_D.toFloat(), LengthUnit.Meters),
             enableMaterialBackground = false,
-            // in front, like the editors: beside the sheet (now in front itself) would be out of view, and
-            // Placement.bottom(sheet) put it on the floor about 2 m away (emulator, v0.2.1)
-            placement = { editorPlacement(containers, Containers.CHART) },
+            placement = { chartPlacement(containers) },
         ) { ChartVolume() }
         Stage(Containers.STAGE) { StageScreen() }
     }

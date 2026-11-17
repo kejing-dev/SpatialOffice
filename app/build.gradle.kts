@@ -14,8 +14,8 @@ android {
         applicationId = "io.embodit.spatialoffice"
         minSdk = 35
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.2.1"
+        versionCode = 4
+        versionName = "0.2.2"
 
         // Cloud accounts (PRD §9): each service needs an app registration the user makes (README, "Connecting accounts").
         // Fill these in local.properties (never committed); left empty, the service says "register the app first".

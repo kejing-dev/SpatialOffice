@@ -27,7 +27,10 @@ tools/.venv/bin/python tools/verify/verify_xlsx.py        # same with openpyxl
 | `tools/` | `strings.tsv` + `gen_strings.py`, `svg2vd.py`, test-fixture generators and verifiers. |
 
 Containers (`Main.kt`): home window (default, 1120 × 660 dp), one Planar window per editor, a Volumetric window for the
-chart, one Mixed Stage. Since v0.2.1 every editor and the chart open with `editorPlacement()` = the system's spot in
+chart (0.90 × 0.26 × 0.32 m, `chartPlacement()` = `Placement.top(sheet)` since v0.2.2: in front it covered the grid,
+below / beside it left the view, `build/v0.2.2/placement-trials.md` in the factory), one Mixed Stage. The compatibility
+panel is a Sheet over its editor (v0.2.2; the Subwindow hung 36°–48° to the right). Every Sheet uses `SheetClose`
+(close button labelled in the app language). Since v0.2.1 every editor and the chart open with `editorPlacement()` = the system's spot in
 front of the user (`Placement.right(home)` put them 22°–60° to the right, QA #1 q1-1; `core/layout/WindowFit` +
 `WindowFitTest` check all 8 corners). Nothing is placed from the head pose.
 
@@ -57,6 +60,7 @@ Each command calls the same function as the control it stands for; the app logs 
 | `cell` | `B2=123` | set a cell; `select` `B2`; `sheet` index |
 | `slide` | index | current slide |
 | `chart`, `chart-type` (`columns` `scatter`), `chart-yaw` degrees | | 3D chart volume |
+| `chart-place` | `top:0` (default) `bottom:<dp>` `left:<dp>` `right:<dp>` `none` | placement the next chart opening uses (emulator trials only) |
 | `spread` | `doc` `sheet` `slides` | enter the spread layout; `arr` `row` `arc` `layers`; `focus` index; `recenter`; `collapse` |
 | `rehearse` | — | slide rehearsal (`collapse` ends it) |
 | `radius` `0..2`, `openmode` `window` `spread` | | settings |

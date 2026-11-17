@@ -130,9 +130,15 @@ class WindowCtl(private val graph: Graph) {
     /** Tag the system gave the default container (learned from the placement context; empty until then). */
     var homeTag: String = ""
 
-    /** Reopens what was closed for the Stage. Editors go through the level gate. */
+    /**
+     * Reopens what was closed for the Stage: [back] first (through the level gate), then every other editor window
+     * that was open before (v0.2.2; v0.2.1 brought back only [back], QA #2 known issue). The chart volume comes back
+     * after the sheet, so its placement below the sheet has a sheet to stand under.
+     */
     fun stageClosed(back: Win) {
-        Log.i(TAG, "STAGE closed, reopening windows closed=$closedForStage back=$back")
+        val others = closedForStage.filter { it != Win.HOME && it != back }
+            .sortedBy { if (it == Win.CHART) 1 else 0 }
+        Log.i(TAG, "STAGE closed, reopening windows closed=$closedForStage back=$back others=$others")
         nav()?.let { reopenHome(it) }
         closedForStage.clear()
         main.postDelayed({
@@ -141,9 +147,22 @@ class WindowCtl(private val graph: Graph) {
                 // at most 3 s, or 0.6 s when no head pose is available outside the Stage
                 gate.ask("reopen-${back.name}", SystemClock.elapsedRealtime())
                 gateWin = back
+                gateThen = others
                 main.post(gateTick)
-            }
+            } else reopenOthers(others)
         }, 600)
+    }
+
+    private var gateThen: List<Win> = emptyList()
+
+    /** The other windows, one after another (the system places each against those already open). */
+    private fun reopenOthers(list: List<Win>) {
+        list.forEachIndexed { i, w ->
+            main.postDelayed({
+                val wanted = w == Win.CHART && graph.sheet != null || w != Win.CHART && graph.session(w) != null
+                if (wanted && !isOpen(w)) { Log.i(TAG, "STAGE reopen ${w.name}"); open(w) }
+            }, 400L * (i + 1))
+        }
     }
 
     private val gate = LevelGate()
@@ -155,6 +174,8 @@ class WindowCtl(private val graph: Graph) {
             Log.i(TAG, "LEVEL gate open why=$why")
             gateWin?.let { open(it) }
             gateWin = null
+            val then = gateThen; gateThen = emptyList()
+            reopenOthers(then)
         }
     }
 

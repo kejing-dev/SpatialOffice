@@ -44,7 +44,6 @@ import com.pico.spatial.core.math.Color4
 import com.pico.spatial.core.math.Quat
 import com.pico.spatial.core.math.Vector3
 import com.pico.spatial.ui.design.PicoTheme
-import com.pico.spatial.ui.design.windows.Toolbar
 import com.pico.spatial.ui.foundation.content.SpatialView
 import com.pico.spatial.ui.foundation.gesture.TargetEntity
 import com.pico.spatial.ui.foundation.gesture.detectSpatialTapGesture
@@ -68,6 +67,8 @@ import kotlin.math.sin
 
 private const val LABEL = "chart-label"
 private const val TIP = "chart-tip"
+/** Tip of the chart towards the user (degrees about x): the volume is above the eye, 25°–35° up. */
+private const val TILT = 40f
 
 /** One mark of the chart and the cell it shows. */
 data class Mark(val series: Int, val index: Int, val value: Double, val row: Int, val col: Int)
@@ -105,12 +106,19 @@ internal class ChartScene {
     }
 
     fun setRegion(halfX: Float, halfY: Float) {
-        // the chart is modelled 0.60 m wide and 0.36 m high; leave room for the labels above
-        val s = minOf(halfX * 2f / 0.72f, halfY * 2f / 0.56f).coerceIn(0.2f, 3f)
+        // the chart is modelled 0.64 m wide (base plate), 0.30 m high and 0.36 m deep; it takes the middle half of
+        // the volume's width, the label panel stands on its left and the tip + controls on its right. v0.2.2: the
+        // volume sits over the sheet window, so the chart is tipped [TILT]° towards the user (its top faces the eye
+        // below it); tipped, it needs about 0.42 m of height per unit scale
+        val s = minOf(halfX * 2f * 0.5f / 0.64f, halfY * 2f / 0.42f).coerceIn(0.2f, 3f)
         if (abs(s - scale) < 1e-3f) return
         scale = s
-        fit.components[TransformComponent::class.java]?.setScaleVector(Vector3(s, s, s))
-        Log.i(TAG, "CHART region half=%.3fx%.3f scale=%.2f".format(halfX, halfY, s))
+        fit.components[TransformComponent::class.java]?.apply {
+            setScaleVector(Vector3(s, s, s))
+            val h = Math.toRadians(TILT.toDouble()).toFloat() / 2f
+            setQuaternion(Quat(sin(h), 0f, 0f, cos(h)))
+        }
+        Log.i(TAG, "CHART region half=%.3fx%.3f scale=%.2f tilt=%.0f".format(halfX, halfY, s, TILT))
     }
 
     fun setYaw(deg: Float) {
@@ -191,7 +199,8 @@ internal class ChartScene {
                     val selected = cell != null && cell.first == selRow
                     val x = (-w / 2 + (xv - x0) / (x1 - x0) * w).toFloat(); val z = -d / 2 + cellD * (si + 0.5f)
                     val y = floor + (value / max * hMax).toFloat()
-                    val size = if (selected) 0.026f else 0.018f
+                    // v0.2.2: bigger points (QA #2: hard to see with a small data set)
+                    val size = if (selected) 0.042f else 0.032f
                     box(size, size, size, x, y, z, mat(if (selected) white else color), Mark(si, ci, value, cell?.first ?: -1, cell?.second ?: -1))
                     box(0.002f, (y - floor).coerceAtLeast(0.001f), 0.002f, x, floor + (y - floor) / 2, z, mat(color, 0.5f)) // drop line to the base
                 }
@@ -201,7 +210,7 @@ internal class ChartScene {
     }
 }
 
-/** V1 spatial chart (Volume, 0.76 × 0.60 × 0.48 m): the sheet's standard chart shown in 3D, linked with the grid. */
+/** V1 spatial chart (Volume, 0.90 × 0.26 × 0.32 m, over the sheet window): the sheet's standard chart shown in 3D, linked with the grid. */
 @Composable
 fun ChartVolume() {
     WindowFrame(Win.CHART) { graph ->
@@ -227,12 +236,13 @@ fun ChartVolume() {
                 },
             attachments = {
                 AttachmentPanel(LABEL) { PanelTheme(graph) { ChartLabel(graph, s, chart) } }
-                AttachmentPanel(TIP) { PanelTheme(graph) { ChartTip(graph, s, chart) } }
+                AttachmentPanel(TIP) { PanelTheme(graph) { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { ChartTip(graph, s, chart); ChartControls(graph) } } }
             },
             initial = { content, attachments ->
                 content.addEntity(scene.root)
-                attachments.entity(LABEL)?.let { p -> p.components[TransformComponent::class.java]?.setPosition(Vector3(-0.17f, 0.21f, 0.05f)); scene.root.addChild(p) }
-                attachments.entity(TIP)?.let { p -> p.components[TransformComponent::class.java]?.setPosition(Vector3(0.19f, 0.21f, 0.05f)); scene.root.addChild(p) }
+                // the two panels stand left and right of the chart, inside the volume, a little towards the user
+                attachments.entity(LABEL)?.let { p -> p.components[TransformComponent::class.java]?.setPosition(Vector3(-0.335f, 0f, 0.06f)); scene.root.addChild(p) }
+                attachments.entity(TIP)?.let { p -> p.components[TransformComponent::class.java]?.setPosition(Vector3(0.335f, 0f, 0.06f)); scene.root.addChild(p) }
                 ready = true
                 Log.i(TAG, "CHART volume initial done")
             },
@@ -243,16 +253,26 @@ fun ChartVolume() {
                 }
             },
         )
-        Toolbar {
-            ToolRow {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Segments(listOf(false to tr(R.string.chart_columns), true to tr(R.string.chart_scatter)), graph.chartScatter, "chart/type", itemWidth = 96.dp) { graph.chartScatter = it }
-                }
-                ToolIcon(R.drawable.ic_arrow_left, tr(R.string.chart_turn_left), onClick = { graph.chartYaw -= 30f })
-                ToolIcon(R.drawable.ic_arrow_right, tr(R.string.chart_turn_right), onClick = { graph.chartYaw += 30f })
-                ToolIcon(R.drawable.ic_rotate, tr(R.string.chart_reset), onClick = { graph.chartYaw = 0f })
-                ToolIcon(R.drawable.ic_cross, tr(R.string.chart_close), onClick = { graph.windows.close(Win.CHART) })
-            }
+    }
+}
+
+/**
+ * Columns / points, turn, reset, close. They used to be a system Toolbar under the volume; with the volume under the
+ * sheet window that ornament would fall below the view (q2-2), so they live in the right-hand panel.
+ */
+@Composable
+private fun ChartControls(graph: Graph) {
+    Column(
+        Modifier.width(250.dp).clip(RoundedCornerShape(20.dp)).background(Color(0xF2F2F4F7)).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        // gate:allow tabs-segment chart type option (columns / points) of the same chart, not page switching
+        Segments(listOf(false to tr(R.string.chart_columns), true to tr(R.string.chart_scatter)), graph.chartScatter, "chart/type", itemWidth = 104.dp) { graph.chartScatter = it }
+        ToolRow {
+            ToolIcon(R.drawable.ic_arrow_left, tr(R.string.chart_turn_left), onClick = { graph.chartYaw -= 30f })
+            ToolIcon(R.drawable.ic_arrow_right, tr(R.string.chart_turn_right), onClick = { graph.chartYaw += 30f })
+            ToolIcon(R.drawable.ic_rotate, tr(R.string.chart_reset), onClick = { graph.chartYaw = 0f })
+            ToolIcon(R.drawable.ic_cross, tr(R.string.chart_close), onClick = { graph.windows.close(Win.CHART) })
         }
     }
 }
@@ -269,7 +289,7 @@ private fun PanelTheme(graph: Graph, content: @Composable () -> Unit) {
 @Composable
 private fun ChartLabel(graph: Graph, s: SheetSession?, chart: ChartInfo?) {
     s?.version
-    Column(Modifier.width(360.dp).clip(RoundedCornerShape(20.dp)).background(Color(0xE61B1D22)).padding(horizontal = 18.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(Modifier.width(250.dp).clip(RoundedCornerShape(20.dp)).background(Color(0xE61B1D22)).padding(horizontal = 18.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (s == null || chart == null) { Txt(tr(R.string.chart_closed_file), "chart/none", color = Color.White, maxLines = 2); return@Column }
         Txt(chart.title.ifEmpty { tr(R.string.chart_window) }, "chart/title", style = PicoTheme.typography.titleMedium, color = Color.White, weight = FontWeight.Bold, maxLines = 2)
         Txt(tr(R.string.chart_src, s.book.sheetNames.getOrElse(chart.sheet) { "" } + (chart.range?.let { "!$it" } ?: "")), "chart/src", style = PicoTheme.typography.bodySmall, color = Color(0xFFD5D9E0), maxLines = 2)
@@ -297,7 +317,7 @@ private fun ChartTip(graph: Graph, s: SheetSession?, chart: ChartInfo?) {
             }
         }
     }
-    Column(Modifier.width(300.dp).clip(RoundedCornerShape(20.dp)).background(Color(0xE61B1D22)).padding(horizontal = 18.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(Modifier.width(250.dp).clip(RoundedCornerShape(20.dp)).background(Color(0xE61B1D22)).padding(horizontal = 18.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (name.isNotEmpty()) {
             Txt(name, "chart/tip-name", style = PicoTheme.typography.bodyMedium, color = Color(0xFFD5D9E0), maxLines = 2)
             Txt(value, "chart/tip-value", style = PicoTheme.typography.headlineSmall, color = Color.White, weight = FontWeight.Bold)

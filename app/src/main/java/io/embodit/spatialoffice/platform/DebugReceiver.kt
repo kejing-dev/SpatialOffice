@@ -50,6 +50,7 @@ object DebugReceiver {
             "close" -> g.requestClose(win(arg))
             "unsaved" -> g.answerUnsaved(arg)
             "compat" -> g.overlay = Overlay.Compat(win(arg))
+            "chart-place" -> io.embodit.spatialoffice.ChartPlace.mode = arg
             "shortcuts" -> g.overlay = Overlay.Shortcuts(if (arg.isEmpty()) Win.HOME else win(arg))
             "howto" -> { g.homePage = HomePage.SETTINGS; g.overlay = Overlay.HowTo() }
             "exit-confirm" -> g.requestExit()
