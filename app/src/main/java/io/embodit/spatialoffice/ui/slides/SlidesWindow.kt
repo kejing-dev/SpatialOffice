@@ -252,7 +252,7 @@ private fun ShapeText(s: DeckSession, slide: Int, sh: Shape, box: Modifier, perP
     var focused by remember(slide, sh.id) { mutableStateOf(false) }
     if (!focused && text != model) text = model
     Box(box.border(1.dp, if (focused) Ink.Select else Color(0x22000000), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp), contentAlignment = align) {
-        if (text.isEmpty()) Text(
+        if (text.isEmpty() && sh.fillRgb == null) Text(
             tr(if (sh.kind == ShapeKind.TITLE) R.string.slide_title_ph else R.string.slide_body_ph),
             style = style.copy(color = Ink.Hint), modifier = Modifier.fillMaxWidth(),
         )
@@ -295,7 +295,7 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
                     if (s.current > 0) MenuEntry(tr(R.string.slide_up), "slides/up") { s.moveSlide(-1) } else null,
                     if (s.current < s.slideCount - 1) MenuEntry(tr(R.string.slide_down), "slides/down") { s.moveSlide(1) } else null,
                     MenuEntry(tr(R.string.delete_slide), "slides/delete") { if (!s.deleteSlide()) graph.say(Win.SLIDES, graph.str(R.string.last_slide)) },
-                ))
+                ) + THEMES.map { (name, colors) -> MenuEntry(tr(R.string.theme_item, tr(name)), "slides/theme-item") { s.setColors(colors) } })
                 ToolMenu(tr(R.string.menu_insert), "slides/insert", entries = listOf(
                     MenuEntry(tr(R.string.text_box), "slides/textbox") { s.addTextBox("") },
                     MenuEntry(tr(R.string.ins_picture), "slides/picture") { graph.pickImage(Win.SLIDES) { b, e, w, h -> s.addPicture(b, e, w, h) } },
@@ -314,9 +314,6 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
                     MenuEntry(tr(R.string.obj_smaller), "slides/obj-smaller") { s.nudge(0, 0, 1f / 1.2f) },
                     MenuEntry(tr(R.string.obj_delete), "slides/obj-delete") { s.deleteSelected() },
                 ))
-                ToolMenu(tr(R.string.menu_theme), "slides/theme", entries = THEMES.map { (name, colors) ->
-                    MenuEntry(tr(name), "slides/theme-item") { s.setColors(colors) }
-                })
                 ToolDivider()
                 UndoRedo(s)
             }

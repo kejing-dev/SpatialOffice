@@ -170,7 +170,7 @@ underline	下划线 Ctrl+U	Underline Ctrl+U
 bullets	项目符号	Bullets
 undo	撤销 Ctrl+Z	Undo Ctrl+Z
 redo	重做 Ctrl+Y	Redo Ctrl+Y
-spread	铺开	Spread out
+spread	铺开	Spread
 storyline	故事线	Storyline
 save_as	另存为	Save as
 save	保存	Save
@@ -316,7 +316,7 @@ br_reg_head	这个位置还不能用	This place is not available yet
 br_reg_sub	开发者要先到对方的开发者后台登记应用，把应用 ID 填进 local.properties 的 %1$s，再重新打包。README「连接账号」写了每家去哪登记、回调地址填什么。	The developer first registers the app in the provider’s developer console, puts the ID in %1$s in local.properties and rebuilds. README “Connecting accounts” lists where to register and which callback address to enter.
 chart_bar	柱状图	Column chart
 chart_line	折线图	Line chart
-chart_n_of	第 %1$d 个，共 %2$d 个	%1$d of %2$d
+chart_n_of	%1$d / %2$d	%1$d / %2$d
 chart_other	其他图表	Other chart
 chart_pie	饼图	Pie chart
 chart_untitled	图表	Chart
@@ -364,7 +364,7 @@ menu_chart	图表	Chart
 menu_data	数据	Data
 menu_fill	填充	Fill
 menu_insert	插入	Insert
-menu_object	所选对象	Selection
+menu_object	所选对象	Object
 menu_page	页面	Slide
 menu_paragraph	段落	Paragraph
 menu_rows	行列	Rows & columns
@@ -426,3 +426,4 @@ how_to_cloud	连接云盘	Connect a cloud drive
 how_to_cloud_keys	主页「账号与云盘」点 [连接]，在浏览器里登录同意；「浏览」上面切到那个云盘	Home › Accounts & drives › Connect, approve in the browser; then switch Browse to that drive
 how_to_cloud_hand	捏 [连接]，在浏览器页面里同意；回来在「浏览」里捏云盘里的文件	Pinch Connect and approve on the browser page; back here, pinch a file under Browse
 how_to_cloud_ctrl	扳机点 [连接]，在浏览器页面里同意；回来在「浏览」里点云盘里的文件	Trigger on Connect and approve on the browser page; back here, trigger on a file under Browse
+theme_item	主题：%1$s	Theme: %1$s

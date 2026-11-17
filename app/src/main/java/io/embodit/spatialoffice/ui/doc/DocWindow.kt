@@ -297,7 +297,8 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
                     }
                 },
             decorationBox = { inner ->
-                Box {
+                // full width, so centred / right / justified paragraphs line up with the page
+                Box(Modifier.fillMaxWidth(), propagateMinConstraints = true) {
                     if (value.text.isEmpty() && all.size == 1) Text(tr(R.string.doc_placeholder), style = paraStyle(b.style).copy(color = Ink.Hint))
                     inner()
                 }
@@ -382,7 +383,7 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                 ToolToggle(R.drawable.ic_text_bold, tr(R.string.bold), hasAttr(s, focus, Attr.BOLD), { toggle(s, focus, Attr.BOLD) }, enabled = canEdit && s.richText)
                 ToolToggle(R.drawable.ic_text_italic, tr(R.string.italic), hasAttr(s, focus, Attr.ITALIC), { toggle(s, focus, Attr.ITALIC) }, enabled = canEdit && s.richText)
                 ToolToggle(R.drawable.ic_text_underline, tr(R.string.underline), hasAttr(s, focus, Attr.UNDERLINE), { toggle(s, focus, Attr.UNDERLINE) }, enabled = canEdit && s.richText)
-                ToolMenu(tr(R.string.menu_paragraph), "doc/paragraph", icon = R.drawable.ic_list_bulleted, enabled = canEdit && s.styled, entries = listOfNotNull(
+                ToolMenu(tr(R.string.menu_paragraph), "doc/paragraph", enabled = canEdit && s.styled, entries = listOfNotNull(
                     MenuEntry(tr(R.string.bullets), "doc/bullets", checked = para?.style == ParaStyle.BULLET) { restyle(if (para?.style == ParaStyle.BULLET) ParaStyle.BODY else ParaStyle.BULLET) },
                     MenuEntry(tr(R.string.numbering), "doc/numbering", checked = para?.style == ParaStyle.NUMBERED) { restyle(if (para?.style == ParaStyle.NUMBERED) ParaStyle.BODY else ParaStyle.NUMBERED) },
                 ) + if (s.richText) listOf(
@@ -391,14 +392,14 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                     MenuEntry(tr(R.string.align_right), "doc/align-right", checked = para?.align == 2) { align(2) },
                     MenuEntry(tr(R.string.align_justify), "doc/align-justify", checked = para?.align == 3) { align(3) },
                 ) else emptyList())
-                ToolMenu(tr(R.string.menu_insert), "doc/insert", icon = R.drawable.ic_plus, enabled = s.richText, entries = listOf(
+                ToolMenu(tr(R.string.menu_insert), "doc/insert", enabled = s.richText, entries = listOf(
                     MenuEntry(tr(R.string.ins_picture), "doc/picture") {
                         val at = insertPoint(s, focus)
                         graph.pickImage(Win.DOC) { b, e, w, h -> s.insertImage(at, b, e, w, h) }
                     },
                     MenuEntry(tr(R.string.ins_table), "doc/table") { graph.overlay = Overlay.InsertTable(Win.DOC) },
                 ))
-                ToolMenu(tr(R.string.more), "doc/more", icon = R.drawable.ic_ellipsis, entries = listOfNotNull(
+                ToolMenu(tr(R.string.more), "doc/more", entries = listOfNotNull(
                     if (s.richText && canEdit) MenuEntry(tr(R.string.strike), "doc/strike", checked = hasAttr(s, focus, Attr.STRIKE)) { toggle(s, focus, Attr.STRIKE) } else null,
                     MenuEntry(tr(R.string.find_replace), "doc/find") { graph.overlay = Overlay.Find(Win.DOC) },
                     MenuEntry(tr(R.string.word_count), "doc/wordcount") { graph.overlay = Overlay.WordCount(Win.DOC) },

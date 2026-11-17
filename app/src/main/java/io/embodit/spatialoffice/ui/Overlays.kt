@@ -349,7 +349,7 @@ private fun InsertTableDialog(graph: Graph, s: DocSession) {
     var cols by remember { mutableStateOf(3) }
     AlertDialog(
         onDismissRequest = { graph.overlay = null },
-        title = { Txt(tr(R.string.ins_table), "table/title", style = PicoTheme.typography.headlineSmall, weight = FontWeight.Bold) },
+        title = { Txt(tr(R.string.ins_table).trimEnd('…', '.'), "table/title", style = PicoTheme.typography.headlineSmall, weight = FontWeight.Bold) },
         content = {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Stepper(tr(R.string.rows_n, rows), "table/rows", { rows = (rows - 1).coerceAtLeast(1) }, { rows = (rows + 1).coerceAtMost(30) })

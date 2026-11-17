@@ -319,7 +319,7 @@
     <string name="br_reg_sub">开发者要先到对方的开发者后台登记应用，把应用 ID 填进 local.properties 的 %1$s，再重新打包。README「连接账号」写了每家去哪登记、回调地址填什么。</string>
     <string name="chart_bar" formatted="false">柱状图</string>
     <string name="chart_line" formatted="false">折线图</string>
-    <string name="chart_n_of">第 %1$d 个，共 %2$d 个</string>
+    <string name="chart_n_of">%1$d / %2$d</string>
     <string name="chart_other" formatted="false">其他图表</string>
     <string name="chart_pie" formatted="false">饼图</string>
     <string name="chart_untitled" formatted="false">图表</string>
@@ -429,4 +429,5 @@
     <string name="how_to_cloud_keys" formatted="false">主页「账号与云盘」点 [连接]，在浏览器里登录同意；「浏览」上面切到那个云盘</string>
     <string name="how_to_cloud_hand" formatted="false">捏 [连接]，在浏览器页面里同意；回来在「浏览」里捏云盘里的文件</string>
     <string name="how_to_cloud_ctrl" formatted="false">扳机点 [连接]，在浏览器页面里同意；回来在「浏览」里点云盘里的文件</string>
+    <string name="theme_item">主题：%1$s</string>
 </resources>

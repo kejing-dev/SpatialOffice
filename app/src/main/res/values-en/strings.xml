@@ -173,7 +173,7 @@
     <string name="bullets" formatted="false">Bullets</string>
     <string name="undo" formatted="false">Undo Ctrl+Z</string>
     <string name="redo" formatted="false">Redo Ctrl+Y</string>
-    <string name="spread" formatted="false">Spread out</string>
+    <string name="spread" formatted="false">Spread</string>
     <string name="storyline" formatted="false">Storyline</string>
     <string name="save_as" formatted="false">Save as</string>
     <string name="save" formatted="false">Save</string>
@@ -319,7 +319,7 @@
     <string name="br_reg_sub">The developer first registers the app in the provider’s developer console, puts the ID in %1$s in local.properties and rebuilds. README “Connecting accounts” lists where to register and which callback address to enter.</string>
     <string name="chart_bar" formatted="false">Column chart</string>
     <string name="chart_line" formatted="false">Line chart</string>
-    <string name="chart_n_of">%1$d of %2$d</string>
+    <string name="chart_n_of">%1$d / %2$d</string>
     <string name="chart_other" formatted="false">Other chart</string>
     <string name="chart_pie" formatted="false">Pie chart</string>
     <string name="chart_untitled" formatted="false">Chart</string>
@@ -367,7 +367,7 @@
     <string name="menu_data" formatted="false">Data</string>
     <string name="menu_fill" formatted="false">Fill</string>
     <string name="menu_insert" formatted="false">Insert</string>
-    <string name="menu_object" formatted="false">Selection</string>
+    <string name="menu_object" formatted="false">Object</string>
     <string name="menu_page" formatted="false">Slide</string>
     <string name="menu_paragraph" formatted="false">Paragraph</string>
     <string name="menu_rows" formatted="false">Rows &amp; columns</string>
@@ -429,4 +429,5 @@
     <string name="how_to_cloud_keys" formatted="false">Home › Accounts &amp; drives › Connect, approve in the browser; then switch Browse to that drive</string>
     <string name="how_to_cloud_hand" formatted="false">Pinch Connect and approve on the browser page; back here, pinch a file under Browse</string>
     <string name="how_to_cloud_ctrl" formatted="false">Trigger on Connect and approve on the browser page; back here, trigger on a file under Browse</string>
+    <string name="theme_item">Theme: %1$s</string>
 </resources>
