@@ -430,4 +430,52 @@
     <string name="how_to_cloud_hand" formatted="false">Pinch Connect and approve on the browser page; back here, pinch a file under Browse</string>
     <string name="how_to_cloud_ctrl" formatted="false">Trigger on Connect and approve on the browser page; back here, trigger on a file under Browse</string>
     <string name="theme_item">Theme: %1$s</string>
+    <string name="style_h2_short" formatted="false">Heading 2</string>
+    <string name="style_bullet_short" formatted="false">Bullets</string>
+    <string name="style_numbered_short" formatted="false">Numbered</string>
+    <string name="group_quick_new" formatted="false">Start a new file</string>
+    <string name="new_open_head" formatted="false">Already have a file?</string>
+    <string name="new_open_sub" formatted="false">Open a .docx / .xlsx / .pptx and save back to the same file</string>
+    <string name="acct_need_reg_tapped">You pressed Connect: the developer has to register the app first (fill %1$s in local.properties). Until then it cannot connect</string>
+    <string name="scan_failed">Could not get a code: %1$s</string>
+    <string name="feishu_app_folder" formatted="false">Spatial Office</string>
+    <string name="feishu_inbox_folder" formatted="false">Inbox</string>
+    <string name="inbox_arrived">Sent from your computer: %1$s</string>
+    <string name="open" formatted="false">Open</string>
+    <string name="inbox_sub" formatted="false">Documents you put here from your computer</string>
+    <string name="connect_title">Connect %1$s</string>
+    <string name="connect_need_reg">The developer has to register the app first: fill %1$s in local.properties and rebuild. Until then neither way works</string>
+    <string name="way_scan" formatted="false">Scan with your phone or computer (recommended)</string>
+    <string name="way_scan_sub" formatted="false">The headset only shows a code; you agree on the other device</string>
+    <string name="way_scan_none">%1$s has no scan sign-in; use the browser</string>
+    <string name="way_browser" formatted="false">Sign in in the headset browser</string>
+    <string name="way_browser_sub" formatted="false">Opens the service’s own sign-in page, then comes back here</string>
+    <string name="connect_no_password" formatted="false">You never type a password here</string>
+    <string name="got_it" formatted="false">Got it</string>
+    <string name="scan_title">Scan to connect %1$s</string>
+    <string name="scan_qr_desc" formatted="false">Sign-in QR code</string>
+    <string name="scan_error_short" formatted="false">No code</string>
+    <string name="scan_step1">Scan this with %1$s or the camera on your phone, then tap Agree there</string>
+    <string name="scan_or_open">Or open %1$s on a computer and enter this code</string>
+    <string name="scan_waiting">Waiting for you to agree on the other device… (%1$d:%2$02d left)</string>
+    <string name="scan_other_way" formatted="false">Use another way</string>
+    <string name="connected_store" formatted="false">Your sign-in is kept encrypted on this headset and deleted when you sign out</string>
+    <string name="connected_folder">Save as to Feishu puts files in the %1$s folder</string>
+    <string name="connected_inbox">The inbox is %1$s / %2$s: documents you put there from your computer show at the top of Recent</string>
+    <string name="conflict_title">%1$s was changed in the cloud</string>
+    <string name="conflict_msg" formatted="false">Someone (or you on another device) saved this file after you opened it. Saving now would replace those changes</string>
+    <string name="conflict_overwrite" formatted="false">Overwrite</string>
+    <string name="conflict_copy" formatted="false">Save copy</string>
+    <string name="conflict_copied">Saved a copy: %1$s</string>
+    <string name="conflict_cancelled" formatted="false">Not saved; your changes are still here</string>
+    <string name="root_new_sub" formatted="false">New files and copies you save go here</string>
+    <string name="root_download_sub" formatted="false">Files your browser downloaded</string>
+    <string name="root_documents_sub" formatted="false">Documents other apps saved</string>
+    <string name="browse_more_head" formatted="false">File somewhere else?</string>
+    <string name="browse_more_sub" formatted="false">Pick it in the system file picker; it still saves back to where it was</string>
+    <string name="br_after_head" formatted="false">Once connected, this shows</string>
+    <string name="br_after_feishu" formatted="false">Your drive’s folders and files, with Spatial Office / Inbox at the top. Tap a file to open it; saving puts it back where it was</string>
+    <string name="br_after_other" formatted="false">Your drive’s folders and files. Tap a file to open it; saving puts it back in place and the drive keeps a version</string>
+    <string name="br_local_head" formatted="false">Local files work as usual</string>
+    <string name="br_local_sub" formatted="false">Without any account you can open, edit and save under Device</string>
 </resources>

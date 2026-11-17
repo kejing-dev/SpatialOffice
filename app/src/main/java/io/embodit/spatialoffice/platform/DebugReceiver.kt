@@ -4,6 +4,7 @@ import io.embodit.spatialoffice.core.pptx.SlideLayoutKind
 
 import android.content.BroadcastReceiver
 import android.content.Context
+import kotlinx.coroutines.launch
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
@@ -121,8 +122,17 @@ object DebugReceiver {
             "chart-add" -> g.sheet?.let { io.embodit.spatialoffice.ui.sheet.makeChart(g, it, arg.ifEmpty { "bar" }) }
             "chartview" -> g.overlay = Overlay.ChartView(Win.SHEET, arg.toIntOrNull() ?: -1)
             "browse" -> { g.overlay = null; g.homePage = HomePage.BROWSE; g.browseLoc = arg.toInt().coerceIn(0, 4) }
+            "browse-dir" -> { g.overlay = null; g.homePage = HomePage.BROWSE; g.browseLoc = 0; g.browseDir = File(arg) }
             "connect" -> io.embodit.spatialoffice.core.cloud.Provider.of(arg)?.let { g.accounts.connect(it) }
             "saveas-cloud" -> g.saveAs(win(arg), SaveAsTarget.CLOUD)
+            // ---- v0.2.1 cloud: the dialogs are the real ones; scan-preview / connected-preview fill them with a sample
+            // code (marked as such in AGENTS.md), because no service is registered on the test machines
+            "scan" -> io.embodit.spatialoffice.core.cloud.Provider.of(arg)?.let { g.accounts.connectByScan(it) }
+            "scan-preview" -> io.embodit.spatialoffice.core.cloud.Provider.of(arg)?.let { g.accounts.previewScan(it) }
+            "connected-preview" -> io.embodit.spatialoffice.core.cloud.Provider.of(arg)?.let { g.overlay = Overlay.Connected(it) }
+            "conflict" -> g.overlay = Overlay.Conflict(win(arg))
+            "conflict-answer" -> { val (w, c) = arg.split(" ", limit = 2); g.resolveConflict(win(w), c) }
+            "inbox" -> g.scope.launch { runCatching { g.accounts.checkInbox() } }
             "dump" -> {}
             else -> Log.w(TAG, "DEBUG unknown command $cmd")
         }

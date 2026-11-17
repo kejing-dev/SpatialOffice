@@ -68,9 +68,10 @@ internal fun BrowsePage(graph: Graph) {
             })
         }
         if (dir == null) {
-            listOf(graph.storage.newDir, graph.storage.downloadDir, graph.storage.documentsDir).forEach { d ->
-                FileRow(graph.storage.display(d), "", io.embodit.spatialoffice.core.files.FileKind.UNKNOWN, folder = true, tag = "browse/root") { graph.browseDir = d }
+            listOf(graph.storage.newDir to R.string.root_new_sub, graph.storage.downloadDir to R.string.root_download_sub, graph.storage.documentsDir to R.string.root_documents_sub).forEach { (d, sub) ->
+                FileRow(graph.storage.display(d), tr(sub), io.embodit.spatialoffice.core.files.FileKind.UNKNOWN, folder = true, tag = "browse/root") { graph.browseDir = d }
             }
+            BrowseMore(graph)
         } else {
             val entries = remember(dir, version) { graph.storage.list(dir) }
             if (entries.isEmpty()) InfoRow(R.drawable.ic_info_circle, tr(R.string.browse_empty), null, "browse/empty")
@@ -78,6 +79,8 @@ internal fun BrowsePage(graph: Graph) {
                 if (e.isDir) FileRow(e.file.name, "", e.kind, folder = true, tag = "browse/dir") { graph.browseDir = e.file }
                 else FileRow(e.file.name, kindLabel(e.kind) + " · " + sizeLabel(e.size) + " · " + timeLabel(e.modified), e.kind, tag = "browse/file") { graph.open(FileRef.Path(e.file)) }
             }
+            // a short folder is not a half-empty page: the way to everything else follows the list (q1-6)
+            if (entries.size <= 4) BrowseMore(graph)
         }
         if (!graph.storage.hasAllFiles) {
             Spacer(Modifier.height(4.dp))
@@ -87,6 +90,18 @@ internal fun BrowsePage(graph: Graph) {
                 })
             }
         }
+    }
+}
+
+/** The system picker reaches everything else (other apps' folders, USB); also keeps short Browse pages from being half empty. */
+@Composable
+private fun BrowseMore(graph: Graph) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    InfoRow(R.drawable.ic_search, tr(R.string.browse_more_head), tr(R.string.browse_more_sub), "browse/more") {
+        SecondaryButton(tr(R.string.open_file), "browse/open", icon = R.drawable.ic_folder, onClick = {
+            runCatching { context.startActivity(android.content.Intent(context, io.embodit.spatialoffice.platform.PickerActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                .onFailure { graph.say(Win.HOME, graph.str(R.string.picker_none)) }
+        })
     }
 }
 
@@ -223,6 +238,10 @@ private fun CloudBrowsePage(graph: Graph, p: io.embodit.spatialoffice.core.cloud
         io.embodit.spatialoffice.ui.home.AccountRow(graph, p)
         if (a.state(p) == io.embodit.spatialoffice.platform.AcctState.UNREGISTERED)
             InfoRow(R.drawable.ic_info_circle, tr(R.string.br_reg_head), tr(R.string.br_reg_sub, a.configKey(p)), "browse/reg")
+        // what this place will hold once connected, what the app may do there, and that local files do not wait (q1-6)
+        InfoRow(R.drawable.ic_folder, tr(R.string.br_after_head), tr(if (p == io.embodit.spatialoffice.core.cloud.Provider.FEISHU) R.string.br_after_feishu else R.string.br_after_other), "browse/after")
+        InfoRow(R.drawable.ic_lock, tr(R.string.scope_head), tr(R.string.scope_sub), "browse/scope")
+        InfoRow(R.drawable.ic_check_circle, tr(R.string.br_local_head), tr(R.string.br_local_sub), "browse/local")
         return
     }
     androidx.compose.runtime.LaunchedEffect(p, b.stack.size) { if (b.loadedFor != (b.stack.lastOrNull()?.id ?: "")) a.refresh(p) }
@@ -237,7 +256,16 @@ private fun CloudBrowsePage(graph: Graph, p: io.embodit.spatialoffice.core.cloud
         b.loading -> InfoRow(R.drawable.ic_history, tr(R.string.cloud_loading), null, "browse/cloud-loading")
         b.error != null -> InfoRow(R.drawable.ic_info_circle, b.error ?: "", null, "browse/cloud-error")
         b.items.isEmpty() -> InfoRow(R.drawable.ic_info_circle, tr(R.string.browse_empty), null, "browse/cloud-empty")
-        else -> b.items.take(60).forEach { f ->
+        else -> {
+            // Feishu: the inbox comes first at the top of the drive (PRD §9.5)
+            val inbox = a.feishuInbox
+            if (p == io.embodit.spatialoffice.core.cloud.Provider.FEISHU && b.stack.isEmpty() && inbox != null) {
+                val inboxName = tr(R.string.feishu_inbox_folder)
+                FileRow(tr(R.string.feishu_app_folder) + " / " + tr(R.string.feishu_inbox_folder), tr(R.string.inbox_sub), io.embodit.spatialoffice.core.files.FileKind.UNKNOWN, folder = true, tag = "browse/cloud-inbox") {
+                    a.enter(p, io.embodit.spatialoffice.core.cloud.CloudItem(inbox, inboxName, true, 0, ""))
+                }
+            }
+            b.items.take(60).forEach { f ->
             val kind = io.embodit.spatialoffice.core.files.FileKind.ofName(
                 when (f.kind) { "docx", "doc" -> "x.docx"; "sheet", "bitable" -> "x.xlsx"; "slides" -> "x.pptx"; else -> io.embodit.spatialoffice.core.cloud.CloudApi.exportName(f) },
             )
@@ -249,6 +277,7 @@ private fun CloudBrowsePage(graph: Graph, p: io.embodit.spatialoffice.core.cloud
             }
             if (f.folder) FileRow(f.name, "", kind, folder = true, tag = "browse/cloud-dir") { a.enter(p, f) }
             else FileRow(f.name, meta, kind, tag = "browse/cloud-file") { a.open(p, f) }
+        }
         }
     }
 }

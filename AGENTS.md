@@ -26,8 +26,10 @@ tools/.venv/bin/python tools/verify/verify_xlsx.py        # same with openpyxl
 | `app/…/ui/` | `home/` (recent, browse, new, accounts, settings), `doc/`, `sheet/`, `slides/` editors, `chart/` 3D chart volume, `space/` Stage (spread layout, rehearsal), `Overlays.kt` (save sheets, dialogs). |
 | `tools/` | `strings.tsv` + `gen_strings.py`, `svg2vd.py`, test-fixture generators and verifiers. |
 
-Containers (`Main.kt`): home window (default), one Planar window per editor, a Volumetric window for the chart, one
-Mixed Stage. Editors open to the right of an existing window; nothing is placed from the head pose.
+Containers (`Main.kt`): home window (default, 1120 × 660 dp), one Planar window per editor, a Volumetric window for the
+chart, one Mixed Stage. Since v0.2.1 every editor and the chart open with `editorPlacement()` = the system's spot in
+front of the user (`Placement.right(home)` put them 22°–60° to the right, QA #1 q1-1; `core/layout/WindowFit` +
+`WindowFitTest` check all 8 corners). Nothing is placed from the head pose.
 
 ## The save rule
 
@@ -76,7 +78,14 @@ Each command calls the same function as the control it stands for; the app logs 
 | `browse` | `0`–`4` | Browse page at Device / Feishu / Google Drive / OneDrive / Dropbox |
 | `connect` | `feishu` `gdrive` `onedrive` `dropbox` | same as [Connect] (opens the system browser when the app is registered) |
 | `saveas-cloud` | `doc` `sheet` `slides` | Save as ▸ a copy to the first connected drive |
-| `dump` | — | log state only |
+| `browse-dir` | absolute folder path | Browse page inside that folder |
+| `scan` | `feishu` `onedrive` | scan-to-sign-in for real (needs a registration) |
+| `scan-preview` | `feishu` `onedrive` | the scan dialog filled with a **sample** code `SAMP-LE42` (no request sent; for screenshots only) |
+| `connected-preview` | provider | the "connected" dialog (sample state) |
+| `conflict` | `doc` `sheet` `slides` | the "changed in the cloud" dialog of that window (what a cloud save shows on a version mismatch) |
+| `conflict-answer` | `<win> overwrite|copy|cancel` | answer it (same function as the buttons) |
+| `inbox` | — | check the Feishu inbox now |
+| `dump` | — | log state only (v0.2.1 adds `tableCaret`, `cols`) |
 
 v0.2.0 screenshot states (both languages): doc toolbar menus (Paragraph, Insert, More), find & replace, word count,
 insert table, picture picker, a doc with numbered list + centred heading + strikethrough + picture + table; slides with
@@ -97,5 +106,12 @@ registration in `local.properties`; see README "连接账号". Unregistered serv
 ## Not in this version
 
 Font / size / colour of text, comments and tracked changes (read-only), charts inside documents and slides,
-animations, merged cells / conditional formats (kept, not editable), QR-code sign-in, cloud version conflict
-check, Feishu inbox, web-page editing, pinned cards, named layouts, 3D objects on slides.
+animations, merged cells / conditional formats (kept, not editable), web-page editing, pinned cards, named layouts,
+3D objects on slides. (v0.2.1 added scan-to-sign-in, the cloud conflict check and the Feishu inbox; none of them has
+run against a real account yet.)
+
+## Toolbar keyboard focus (v0.2.1)
+
+The system Toolbar is a window of its own. After its menus the keyboard stays there and the app cannot take the window
+focus back (`restoreWindowContainer` returns false). So the doc and sheet toolbars take keys themselves: doc → the
+table cell with the caret (`DocSession.typeInCell` / `moveCell`), sheet → the selected cell (like typing on the grid).

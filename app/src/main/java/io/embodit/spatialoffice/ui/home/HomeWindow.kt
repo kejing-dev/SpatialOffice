@@ -206,6 +206,11 @@ private fun RecentPage(graph: Graph) {
                 FileRow(r.name, kindLabel(r.kind) + " · " + r.display.substringBeforeLast('/', "").ifEmpty { r.display } + " · " + timeLabel(r.time), r.kind, tag = "recent/row") { graph.open(r.ref()) }
             }
         }
+        // few files (or none): the three new-file cards right here, so the page is a start page and not a mostly empty one (q1-6)
+        if (items.size <= 3) {
+            GroupLabel(tr(R.string.group_quick_new), "recent")
+            QuickNewRow(graph, cover = 96.dp)
+        }
         if (!graph.settings.value.hintSeen && items.isNotEmpty()) LaunchedEffect(Unit) { graph.settings.update { it.copy(hintSeen = true) } }
         GroupLabel(tr(R.string.group_cloud), "recent")
         if (cloudItems.isNotEmpty()) cloudItems.take(4).forEach { r ->
@@ -232,23 +237,38 @@ internal fun InfoRow(icon: Int, head: String, sub: String?, tag: String, trailin
 @Composable
 private fun NewPage(graph: Graph) {
     PageHeader(tr(R.string.nav_new), tr(R.string.new_sub), "new")
+    val context = LocalContext.current
     PageBody {
-        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            NewCard(R.drawable.cover_doc, tr(R.string.new_doc), ".docx", "new/doc") { graph.newFile(FileKind.DOC) }
-            NewCard(R.drawable.cover_sheet, tr(R.string.new_sheet), ".xlsx", "new/sheet") { graph.newFile(FileKind.SHEET) }
-            NewCard(R.drawable.cover_slides, tr(R.string.new_slides), ".pptx", "new/slides") { graph.newFile(FileKind.SLIDES) }
-        }
+        QuickNewRow(graph, cover = 236.dp, top = 8.dp)
         Spacer(Modifier.height(12.dp))
         Txt(tr(R.string.new_note), "new/note", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
+        Spacer(Modifier.height(4.dp))
+        // the other way to start: a file that already exists
+        InfoRow(R.drawable.ic_folder, tr(R.string.new_open_head), tr(R.string.new_open_sub), "new/open") {
+            SecondaryButton(tr(R.string.open_file), "new/open", icon = R.drawable.ic_folder, onClick = {
+                runCatching { context.startActivity(Intent(context, PickerActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    .onFailure { graph.say(Win.HOME, graph.str(R.string.picker_none)) }
+            })
+        }
+    }
+}
+
+/** The three new-file cards (document, sheet, slides) side by side; [cover] is the preview height. */
+@Composable
+internal fun QuickNewRow(graph: Graph, cover: androidx.compose.ui.unit.Dp, top: androidx.compose.ui.unit.Dp = 0.dp) {
+    Row(Modifier.fillMaxWidth().padding(top = top), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        NewCard(R.drawable.cover_doc, tr(R.string.new_doc), ".docx", "new/doc", cover) { graph.newFile(FileKind.DOC) }
+        NewCard(R.drawable.cover_sheet, tr(R.string.new_sheet), ".xlsx", "new/sheet", cover) { graph.newFile(FileKind.SHEET) }
+        NewCard(R.drawable.cover_slides, tr(R.string.new_slides), ".pptx", "new/slides", cover) { graph.newFile(FileKind.SLIDES) }
     }
 }
 
 @Composable
-private fun NewCard(cover: Int, label: String, ext: String, tag: String, onClick: () -> Unit) {
+private fun NewCard(cover: Int, label: String, ext: String, tag: String, coverHeight: androidx.compose.ui.unit.Dp, onClick: () -> Unit) {
     Column(
         Modifier.width(224.dp).clip(RoundedCornerShape(20.dp)).background(PicoTheme.colorScheme.fillSecondary).clickable(onClick = onClick).padding(12.dp),
     ) {
-        Image(painter = painterResource(cover), contentDescription = null, modifier = Modifier.fillMaxWidth().height(125.dp).clip(RoundedCornerShape(12.dp)))
+        Image(painter = painterResource(cover), contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxWidth().height(coverHeight).clip(RoundedCornerShape(12.dp)))
         Spacer(Modifier.height(10.dp))
         Txt(label, "$tag/label", style = PicoTheme.typography.titleMedium, weight = FontWeight.Bold)
         Txt(ext, "$tag/ext", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary)
@@ -296,6 +316,18 @@ internal fun AccountRow(graph: Graph, p: io.embodit.spatialoffice.core.cloud.Pro
                 else -> io.embodit.spatialoffice.ui.PrimaryButton(tr(R.string.acct_relogin), "account/${p.id}/relogin", onClick = { a.connect(p) })
             }
         },
-        modifier = Modifier.fillMaxWidth().heightIn(min = 80.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 92.dp),
     )
+    // the last [Connect] tap, answered in place (a snackbar alone could be missed), q1 item 6
+    val tap = a.lastTap
+    if (tap == p) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 76.dp, end = 16.dp, bottom = 6.dp).clip(RoundedCornerShape(12.dp))
+                .background(PicoTheme.colorScheme.fillSecondary).padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(painter = painterResource(R.drawable.ic_info_circle), contentDescription = null, modifier = Modifier.size(20.dp))
+            Txt(tr(R.string.acct_need_reg_tapped, a.configKey(p)), "account/${p.id}/tapped", Modifier.weight(1f).padding(start = 10.dp), style = PicoTheme.typography.bodyMedium, maxLines = 3)
+        }
+    }
 }

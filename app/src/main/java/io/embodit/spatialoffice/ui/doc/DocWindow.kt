@@ -4,6 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -143,7 +144,7 @@ fun annotated(spans: List<Span>): AnnotatedString = buildAnnotatedString {
     ) { append(s.text) }
 }
 
-/** W1 document (Planar 1040 × 860 dp): title bar, white paper edited in place, toolbar. */
+/** W1 document (Planar 1160 × 860 dp; v0.2.1 wider so the English toolbar fits with its longest labels, q1-5): title bar, white paper edited in place, toolbar. */
 @Composable
 fun DocWindow() {
     WindowFrame(Win.DOC) { graph ->
@@ -153,7 +154,7 @@ fun DocWindow() {
         Column(Modifier.fillMaxSize().onPreviewKeyEvent { e -> docKeys(graph, s, focus, e) }) {
             EditorTitleBar(graph, Win.DOC, s)
             Box(Modifier.fillMaxWidth().weight(1f).padding(start = 32.dp, end = 32.dp, bottom = 56.dp), contentAlignment = Alignment.TopCenter) {
-                Paper(s, focus, Modifier.width(760.dp).fillMaxSize())
+                Paper(s, focus, Modifier.width(760.dp).fillMaxSize()) { graph.windows.focus(Win.DOC) }
             }
         }
         DocToolbar(graph, s, focus)
@@ -195,13 +196,22 @@ private fun hasAttr(s: DocSession, focus: DocFocus, attr: Attr): Boolean {
 }
 
 @Composable
-fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks: List<UiBlock>? = null) {
+fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks: List<UiBlock>? = null, onWindowFocus: () -> Unit = {}) {
     s.version
     s.blockCount
     val all = blocks ?: s.blocks()
     val numbers = listNumbers(all)
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    // a new table takes the caret in its first cell: bring it into view first, so the cell exists to take focus
+    val caret = s.tableCaret
+    LaunchedEffect(s.tableCaretTick) {
+        val id = caret?.first ?: return@LaunchedEffect
+        val i = all.indexOfFirst { it.id == id }
+        if (i >= 0 && list.layoutInfo.visibleItemsInfo.none { it.key == id }) runCatching { list.scrollToItem(i) }
+    }
     LazyColumn(
         modifier.clip(RoundedCornerShape(12.dp)).background(Ink.Paper).padding(horizontal = 44.dp),
+        state = list,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 36.dp),
     ) {
         if (all.isEmpty() && focus != null && !s.readOnly) item("empty") {
@@ -213,7 +223,7 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
         items(all, key = { it.id }) { b ->
             when (b) {
                 is UiBlock.Para -> if (focus != null && b.editable && !s.readOnly) ParaEditor(s, b, focus, all, numbers) else ParaView(b, numbers)
-                is UiBlock.Table -> TableView(b, if (focus != null && s.richText && !s.readOnly) s else null)
+                is UiBlock.Table -> TableView(b, if (focus != null && s.richText && !s.readOnly) s else null) { onWindowFocus() }
                 is UiBlock.Image -> b.bitmap?.let { Image(bitmap = it.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) }
                 is UiBlock.Page -> Image(bitmap = b.bitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.FillWidth, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).border(1.dp, Ink.Line))
                 is UiBlock.Opaque -> OpaqueView(b)
@@ -320,7 +330,7 @@ private fun cut(spans: List<Span>, from: Int, to: Int): List<Span> {
 }
 
 @Composable
-private fun TableView(b: UiBlock.Table, edit: DocSession?) {
+private fun TableView(b: UiBlock.Table, edit: DocSession?, windowFocus: () -> Unit = {}) {
     Column(Modifier.fillMaxWidth().padding(vertical = 8.dp).border(1.dp, Ink.Line).semantics { contentDescription = "table-${b.id}" }) {
         b.rows.forEachIndexed { r, row ->
             Row(Modifier.fillMaxWidth().background(if (r == 0) Ink.Header else Ink.Paper)) {
@@ -329,15 +339,42 @@ private fun TableView(b: UiBlock.Table, edit: DocSession?) {
                     val cellMod = Modifier.weight(1f).border(0.5.dp, Ink.Line).heightIn(min = 48.dp).padding(horizontal = 10.dp, vertical = 12.dp)
                     if (edit == null) Text(cell, style = style, modifier = cellMod)
                     else {
-                        var text by remember(b.id, r, c) { mutableStateOf(cell) }
+                        var text by remember(b.id, r, c) { mutableStateOf(TextFieldValue(cell)) }
                         var focused by remember(b.id, r, c) { mutableStateOf(false) }
-                        if (!focused && text != cell) text = cell
+                        // the model changed from outside this field (typing forwarded from the toolbar, undo): follow it
+                        if (text.text != cell) text = TextFieldValue(cell, TextRange(cell.length))
+                        val requester = remember(b.id, r, c) { FocusRequester() }
+                        val want = edit.tableCaret
+                        val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+                        val hostView = androidx.compose.ui.platform.LocalView.current
+                        LaunchedEffect(edit.tableCaretTick) {
+                            if (want != null && want.first == b.id && want.second == r && want.third == c) {
+                                // Insert ▸ Table comes from a dialog: wait until it has closed and the window has its
+                                // focus back, then take the caret, so the input session starts in this cell
+                                kotlinx.coroutines.delay(450)
+                                windowFocus()
+                                // the toolbar ornament is a view tree of its own and keeps the keyboard after its menu:
+                                // hand the view focus back to this window's content first
+                                val viewFocus = runCatching { hostView.requestFocus() }.getOrDefault(false)
+                                android.util.Log.i("SpatialOffice", "TABLE caret -> cell ${b.id},$r,$c hostFocus=$viewFocus hasWindowFocus=${hostView.hasWindowFocus()}")
+                                repeat(5) {
+                                    if (runCatching { requester.requestFocus() }.isSuccess) { keyboard?.show(); return@LaunchedEffect }
+                                    kotlinx.coroutines.delay(80)
+                                }
+                            }
+                        }
                         BasicTextField(
                             value = text,
-                            onValueChange = { text = it; edit.setTableCell(b.id, r, c, it) },
+                            onValueChange = { text = it; edit.setTableCell(b.id, r, c, it.text) },
                             textStyle = style,
                             cursorBrush = SolidColor(Ink.Select),
-                            modifier = cellMod.onFocusChanged { focused = it.isFocused }.semantics { contentDescription = "table-${b.id}-cell-$r-$c" },
+                            modifier = cellMod.focusRequester(requester)
+                                .onFocusChanged {
+                                    focused = it.isFocused
+                                    if (it.isFocused) { edit.tableCaret = Triple(b.id, r, c); text = text.copy(selection = TextRange(text.text.length)) }
+                                }
+                                .then(if (focused) Modifier.border(2.dp, Ink.Select, RoundedCornerShape(4.dp)) else Modifier)
+                                .semantics { contentDescription = "table-${b.id}-cell-$r-$c" },
                         )
                     }
                 }
@@ -373,11 +410,19 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
     val canEdit = !s.readOnly && para?.editable == true
     fun restyle(st: ParaStyle) { if (para != null) { s.setParagraph(para.id, para.spans, st); focus.want = para.id } }
     fun align(a: Int) { if (para != null) { s.setParagraph(para.id, para.spans, para.style, a); focus.want = para.id } }
+    // After a toolbar menu the system Toolbar window keeps the keyboard and the app cannot hand it back (restore
+    // returns false, the content view has no window focus). So the toolbar takes the keys itself and passes them to
+    // the cell with the caret: Insert ▸ Table, then typing, lands in the first cell (q1-3).
+    val keys = remember(s) { FocusRequester() }
+    LaunchedEffect(s.tableCaretTick) { if (s.tableCaret != null) { kotlinx.coroutines.delay(520); runCatching { keys.requestFocus() } } }
     Toolbar(
         supportingContent = { FileTools(graph, Win.DOC, s) },
         content = {
-            if (!s.readOnly) ToolRow {
-                ToolMenu(styleName(para?.style ?: ParaStyle.BODY), "doc/style", enabled = canEdit && s.styled, entries = listOf(ParaStyle.BODY, ParaStyle.H1, ParaStyle.H2, ParaStyle.H3, ParaStyle.TITLE).map { st ->
+            if (!s.readOnly) Box(
+                Modifier.focusRequester(keys).onPreviewKeyEvent { e -> toolbarKeys(graph, s, e) }.focusable(),
+            ) { ToolRow {
+                // q1-5: a short name on a fixed-width button (the menu keeps the long names), so [Save] never gets squeezed
+                ToolMenu(styleShort(para?.style ?: ParaStyle.BODY), "doc/style", enabled = canEdit && s.styled, width = STYLE_BUTTON_W, entries = listOf(ParaStyle.BODY, ParaStyle.H1, ParaStyle.H2, ParaStyle.H3, ParaStyle.TITLE).map { st ->
                     MenuEntry(styleName(st), "doc/style-item", checked = para?.style == st) { restyle(st) }
                 })
                 ToolToggle(R.drawable.ic_text_bold, tr(R.string.bold), hasAttr(s, focus, Attr.BOLD), { toggle(s, focus, Attr.BOLD) }, enabled = canEdit && s.richText)
@@ -406,12 +451,27 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                 ))
                 ToolDivider()
                 UndoRedo(s)
-            } else Row(verticalAlignment = Alignment.CenterVertically) {
+            } } else Row(verticalAlignment = Alignment.CenterVertically) {
                 Txt(tr(R.string.readonly_note), "doc/readonly-note", Modifier.padding(horizontal = 12.dp), style = PicoTheme.typography.bodyMedium)
                 ToolButton(tr(R.string.word_count), "doc/wordcount-ro", onClick = { graph.overlay = Overlay.WordCount(Win.DOC) })
             }
         },
     )
+}
+
+/** Keys that reach the toolbar window: shortcuts as everywhere, typing into the cell with the caret. */
+private fun toolbarKeys(graph: Graph, s: DocSession, e: androidx.compose.ui.input.key.KeyEvent): Boolean {
+    if (commonKeys(graph, Win.DOC, e)) return true
+    if (e.type != KeyEventType.KeyDown || e.isCtrlPressed || s.tableCaret == null) return false
+    return when (e.key) {
+        Key.Backspace -> s.backspaceInCell()
+        Key.Tab -> s.moveCell(down = false)
+        Key.Enter, Key.NumPadEnter -> s.moveCell(down = true)
+        else -> {
+            val cp = e.nativeKeyEvent.unicodeChar
+            if (cp >= 32) s.typeInCell(String(Character.toChars(cp))) else false
+        }
+    }
 }
 
 /** Paragraph id after which [DocWindow]'s Insert ▸ Table puts the table (debug and dialog share it). */
@@ -426,6 +486,23 @@ private fun styleName(st: ParaStyle): String = tr(
         ParaStyle.H2 -> R.string.style_h2
         ParaStyle.H3 -> R.string.style_h3
         ParaStyle.BULLET, ParaStyle.NUMBERED -> R.string.style_bullet
+        ParaStyle.BODY -> R.string.style_body
+    },
+)
+
+/** Width of the paragraph-style button: fits the longest short name in both languages ("Heading 3", "Numbered"). */
+val STYLE_BUTTON_W = 120.dp
+
+/** Short paragraph-style name for the toolbar button (one word or two; numbered lists are no longer called bullets). */
+@Composable
+private fun styleShort(st: ParaStyle): String = tr(
+    when (st) {
+        ParaStyle.TITLE -> R.string.style_title
+        ParaStyle.H1 -> R.string.style_h1
+        ParaStyle.H2 -> R.string.style_h2_short
+        ParaStyle.H3 -> R.string.style_h3
+        ParaStyle.BULLET -> R.string.style_bullet_short
+        ParaStyle.NUMBERED -> R.string.style_numbered_short
         ParaStyle.BODY -> R.string.style_body
     },
 )

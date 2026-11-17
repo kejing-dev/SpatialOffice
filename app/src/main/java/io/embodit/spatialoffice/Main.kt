@@ -27,35 +27,47 @@ private fun beside(containers: List<ContainerProxy>, vararg ids: String): Contai
 }
 
 /**
- * Containers (design 2.1). Shared Space: the home window (default container, 1120 × 800 dp from the manifest), one
- * window per editor, and the chart volume; each editor opens to the right of a window that is already there, so
- * no window is ever placed from the head pose. Full Space: one Mixed Stage for the spread layout and rehearsal.
+ * The one placement rule for every editor window, on every path that opens it (new file, open, reopen after the
+ * Stage): the system's own spot in front of the user. v0.2.0 used `Placement.right(home)`, which put a 1040–1360 dp
+ * editor 22°–60° to the right, mostly out of view (QA #1 q1-1; WindowFit / WindowFitTest check all 8 corners).
+ */
+internal fun editorPlacement(containers: List<ContainerProxy>, id: String): Placement {
+    android.util.Log.i("SpatialOffice", "PLACE $id ${io.embodit.spatialoffice.core.layout.WindowFit.editorSpot()} among " + containers.joinToString { "${it.id}/${it.state}" })
+    return Placement.none()
+}
+
+/**
+ * Containers (design 2.1). Shared Space: the home window (default container, 1120 × 660 dp from the manifest), one
+ * window per editor (in front, [editorPlacement]), and the chart volume beside the sheet; nothing is placed from
+ * the head pose. Full Space: one Mixed Stage for the spread layout and rehearsal.
  */
 fun mainApp(scope: SpatialAppScope) =
     with(scope) {
         DefaultWindowContainer {
-            Box(Modifier.windowConstraints(minWidth = 1040.dp, minHeight = 760.dp)) { HomeWindow() }
+            Box(Modifier.windowConstraints(minWidth = 1040.dp, minHeight = 620.dp)) { HomeWindow() }
         }
         WindowContainer(
             Containers.DOC, form = Form.Planar,
-            defaultSize = WindowContainerSize(width = 1040.dp, height = 860.dp),
-            placement = { beside(containers, Containers.HOME)?.let { Placement.right(it) } ?: Placement.none() },
+            defaultSize = WindowContainerSize(width = 1160.dp, height = 860.dp),
+            placement = { editorPlacement(containers, Containers.DOC) },
         ) { Box(Modifier.windowConstraints(minWidth = 960.dp, minHeight = 720.dp)) { DocWindow() } }
         WindowContainer(
             Containers.SHEET, form = Form.Planar,
             defaultSize = WindowContainerSize(width = 1280.dp, height = 800.dp),
-            placement = { beside(containers, Containers.DOC, Containers.HOME)?.let { Placement.right(it) } ?: Placement.none() },
+            placement = { editorPlacement(containers, Containers.SHEET) },
         ) { Box(Modifier.windowConstraints(minWidth = 1100.dp, minHeight = 700.dp)) { SheetWindow() } }
         WindowContainer(
             Containers.SLIDES, form = Form.Planar,
             defaultSize = WindowContainerSize(width = 1360.dp, height = 860.dp),
-            placement = { beside(containers, Containers.SHEET, Containers.DOC, Containers.HOME)?.let { Placement.right(it) } ?: Placement.none() },
+            placement = { editorPlacement(containers, Containers.SLIDES) },
         ) { Box(Modifier.windowConstraints(minWidth = 1300.dp, minHeight = 820.dp)) { SlidesWindow() } }
         WindowContainer(
             Containers.CHART, form = Form.Volumetric,
             defaultSize = WindowContainerSize(0.76f, 0.60f, 0.48f, LengthUnit.Meters),
             enableMaterialBackground = false,
-            placement = { beside(containers, Containers.SHEET, Containers.HOME)?.let { Placement.right(it) } ?: Placement.none() },
+            // in front, like the editors: beside the sheet (now in front itself) would be out of view, and
+            // Placement.bottom(sheet) put it on the floor about 2 m away (emulator, v0.2.1)
+            placement = { editorPlacement(containers, Containers.CHART) },
         ) { ChartVolume() }
         Stage(Containers.STAGE) { StageScreen() }
     }

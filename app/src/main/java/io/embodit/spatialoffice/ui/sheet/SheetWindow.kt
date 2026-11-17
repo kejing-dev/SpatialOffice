@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -344,10 +345,15 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
     s.version
     val cell = s.book.cell(s.sheet, s.row, s.col)
     val hasCharts = remember(s.version) { runCatching { s.book.charts().isNotEmpty() }.getOrDefault(false) }
-    fun run(f: () -> Unit) { edit.commit(s); f(); edit.load(s) }
+    // after a menu action the keyboard goes back to the selected cell (a new row / column is selected, D57)
+    // The system Toolbar window keeps the keyboard after its menus (the app cannot hand the window focus back), so
+    // the toolbar itself takes the keys and treats them as the grid would: typing goes into the selected cell.
+    val keys = remember(s) { FocusRequester() }
+    fun run(f: () -> Unit) { edit.commit(s); f(); edit.load(s); runCatching { edit.focus.requestFocus() }; runCatching { keys.requestFocus() } }
     Toolbar(
         supportingContent = { FileTools(graph, Win.SHEET, s) },
         content = {
+            Box(Modifier.focusRequester(keys).onPreviewKeyEvent { e -> commonKeys(graph, Win.SHEET, e) || sheetKeys(graph, s, edit, e) || typeIntoCell(s, edit, e) }.focusable()) {
             ToolRow {
                 ToolToggle(R.drawable.ic_text_bold, tr(R.string.bold), cell.bold, { on -> edit.commit(s); s.setBold(on) }, enabled = !s.isCsv)
                 ToolMenu(
@@ -386,6 +392,7 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
                 ToolDivider()
                 UndoRedo(s)
             }
+            }
         },
     )
 }
@@ -397,4 +404,21 @@ fun sheetFilter(graph: Graph, s: SheetSession) {
     s.filterValue = s.book.cell(s.sheet, s.row, s.col).display
     val n = s.visibleRows(s.rowCount).count { it in 1 until s.rowCount }
     graph.say(Win.SHEET, graph.str(R.string.filter_on, A1.colName(s.col), s.filterValue ?: "", n))
+}
+
+/** A printable key arriving at the toolbar: starts editing the selected cell with it, as typing on the grid does. */
+private fun typeIntoCell(s: SheetSession, edit: CellEdit, e: KeyEvent): Boolean {
+    if (e.type != KeyEventType.KeyDown || e.isCtrlPressed || e.isAltPressed) return false
+    if (e.key == Key.Backspace) {
+        if (!edit.editing) { edit.editing = true; edit.value = TextFieldValue("") }
+        else edit.value = TextFieldValue(edit.value.text.dropLast(1), TextRange(edit.value.text.length - 1))
+        return true
+    }
+    val cp = e.nativeKeyEvent.unicodeChar
+    if (cp < 32) return false
+    val ch = String(Character.toChars(cp))
+    val base = if (edit.editing) edit.value.text else ""
+    edit.editing = true
+    edit.value = TextFieldValue(base + ch, TextRange(base.length + ch.length))
+    return true
 }

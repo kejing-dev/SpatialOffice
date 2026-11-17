@@ -187,11 +187,56 @@ class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File)
         return id
     }
 
+    /**
+     * Table cell that has (or should take) the caret: table id, row, column. A new table puts it in its first cell
+     * (D57 "new things show at once and are selected"), so typing straight after Insert ▸ Table goes into the table.
+     */
+    var tableCaret by mutableStateOf<Triple<Int, Int, Int>?>(null)
+    /** Bumped each time [tableCaret] is asked for again, so the same cell can take the focus a second time. */
+    var tableCaretTick by mutableIntStateOf(0)
+        private set
+
+    fun focusCell(id: Int, row: Int, col: Int) { tableCaret = Triple(id, row, col); tableCaretTick++ }
+
+    private fun caretTable(): Pair<Triple<Int, Int, Int>, io.embodit.spatialoffice.core.docx.TableBlock>? {
+        val t = tableCaret ?: return null
+        val tb = docx?.blocks?.firstOrNull { it.id == t.first } as? io.embodit.spatialoffice.core.docx.TableBlock ?: return null
+        return t to tb
+    }
+
+    /**
+     * Keys typed while the keyboard still belongs to the system Toolbar (after Insert ▸ Table the toolbar window keeps
+     * the window focus and the app cannot take it back, see pico-cli-feedback): they go to the cell with the caret.
+     * Returns false when there is no such cell.
+     */
+    fun typeInCell(text: String): Boolean {
+        val (t, tb) = caretTable() ?: return false
+        val cur = tb.rows.getOrNull(t.second)?.getOrNull(t.third) ?: return false
+        setTableCell(t.first, t.second, t.third, cur + text); return true
+    }
+
+    fun backspaceInCell(): Boolean {
+        val (t, tb) = caretTable() ?: return false
+        val cur = tb.rows.getOrNull(t.second)?.getOrNull(t.third) ?: return false
+        if (cur.isNotEmpty()) setTableCell(t.first, t.second, t.third, cur.dropLast(1)); return true
+    }
+
+    /** Tab / Enter in a cell: next cell (wrapping to the next row) or the cell below. */
+    fun moveCell(down: Boolean): Boolean {
+        val (t, tb) = caretTable() ?: return false
+        val rows = tb.rows.size; val cols = tb.rows.firstOrNull()?.size ?: 0
+        var r = t.second; var c = t.third
+        if (down) r++ else { c++; if (c >= cols) { c = 0; r++ } }
+        if (r >= rows) return true
+        focusCell(t.first, r, c); return true
+    }
+
     fun insertTable(afterId: Int, rows: Int, cols: Int): Int {
         val d = docx ?: return -1
         mark("")
         val id = d.insertTableAfter(afterId, rows, cols)
         changed()
+        if (id >= 0) focusCell(id, 0, 0)
         return id
     }
 
@@ -338,7 +383,8 @@ class SheetSession(ref: FileRef, kind: FileKind, bytes: ByteArray) : Session(ref
     fun setBold(bold: Boolean) { mark(""); book.setBold(sheet, row, col, bold); changed() }
     fun setFill(rgb: Int?) { if (isCsv) return; mark(""); book.setFill(sheet, row, col, rgb); changed() }
     fun deleteRow() { mark(""); book.deleteRow(sheet, row); csvEdits++; changed() }
-    fun insertColumn() { mark(""); book.insertColumnRight(sheet, col); csvEdits++; changed() }
+    /** D57: the new column is picked at once (same row), so typing goes into it. */
+    fun insertColumn() { mark(""); book.insertColumnRight(sheet, col); col = (col + 1).coerceAtMost(701); csvEdits++; changed() }
     fun deleteColumn() { mark(""); book.deleteColumn(sheet, col); csvEdits++; changed() }
     fun toggleFreeze(): Boolean {
         if (isCsv) return false
@@ -346,7 +392,8 @@ class SheetSession(ref: FileRef, kind: FileKind, bytes: ByteArray) : Session(ref
     }
     val frozen: Int get() = if (isCsv) 0 else book.frozenRows(sheet)
     fun setFmt(fmt: NumFmt) { mark(""); book.setFmt(sheet, row, col, fmt); changed() }
-    fun insertRowBelow() { mark(""); book.insertRowBelow(sheet, row); csvEdits++; changed() }
+    /** D57: the new row is picked at once (same column), so typing goes into it. */
+    fun insertRowBelow() { mark(""); book.insertRowBelow(sheet, row); row = (row + 1).coerceAtMost(9999); csvEdits++; changed() }
     fun autoSum(): String? { mark(""); val f = book.autoSum(sheet, row, col); if (f != null) { csvEdits++; changed() }; return f }
 
     /** Sorts the data rows (everything below the first row down to the last row that has a value in this column). */
@@ -475,7 +522,8 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
     }
     fun addTextBox(text: String) {
         mark("")
-        deck.addTextBox(current, deck.widthEmu / 4, deck.heightEmu * 2 / 5, deck.widthEmu / 2, deck.heightEmu / 6, text); edits++; changed()
+        // D57: the new text box is picked at once, so the object tools act on it (as with shapes and pictures)
+        selected = deck.addTextBox(current, deck.widthEmu / 4, deck.heightEmu * 2 / 5, deck.widthEmu / 2, deck.heightEmu / 6, text); edits++; changed()
     }
 
     override fun serialize(): ByteArray = deck.save()

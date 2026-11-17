@@ -17,6 +17,10 @@ import io.embodit.spatialoffice.R
 import io.embodit.spatialoffice.core.cloud.AppRegistration
 import io.embodit.spatialoffice.core.cloud.AuthRequest
 import io.embodit.spatialoffice.core.cloud.CloudApi
+import io.embodit.spatialoffice.core.cloud.CloudConflictException
+import io.embodit.spatialoffice.core.cloud.CloudVersion
+import io.embodit.spatialoffice.core.cloud.DeviceAuth
+import io.embodit.spatialoffice.core.cloud.FeishuDrive
 import io.embodit.spatialoffice.core.cloud.CloudItem
 import io.embodit.spatialoffice.core.cloud.FeishuDoc
 import io.embodit.spatialoffice.core.cloud.FeishuSheet
@@ -51,6 +55,9 @@ class CloudBrowse {
 
 class CloudAuthException(msg: String) : IOException(msg)
 
+/** Scan-a-code sign-in in progress (PRD §9.2 ③a): what the dialog shows. */
+data class ScanState(val provider: Provider, val code: DeviceAuth.Code?, val error: String? = null)
+
 /**
  * Optional cloud accounts (PRD §9). Sign-in happens only on the service's own page in the system browser
  * (authorisation code + PKCE); the app never sees a password. Tokens are kept in EncryptedSharedPreferences and
@@ -61,6 +68,18 @@ class Accounts(private val app: Application, private val graph: Graph) {
     val browse = Provider.values().associateWith { CloudBrowse() }
 
     private val pending = ConcurrentHashMap<Provider, AuthRequest>()
+    /** Scan-a-code sign-in being shown (null = none). */
+    var scan by mutableStateOf<ScanState?>(null)
+        private set
+    private var scanJob: Job? = null
+    /** Service whose [Connect] was pressed last and what happened, shown in that row so the tap visibly did something. */
+    var lastTap by mutableStateOf<Provider?>(null)
+    /** Version stamp of each open cloud file when it was opened / last saved (for the §9.3 conflict check). */
+    private val versions = ConcurrentHashMap<String, String>()
+    /** Feishu "空间办公" folder and its inbox (PRD §9.4), once known. */
+    var feishuInbox by mutableStateOf<String?>(null)
+        private set
+    private var inboxJob: Job? = null
     private val waits = HashMap<Provider, Job>()
     private var server: ServerSocket? = null
 
@@ -75,7 +94,11 @@ class Accounts(private val app: Application, private val graph: Graph) {
         }.onFailure { Log.e(TAG, "CLOUD token store unavailable", it) }.getOrNull()
     }
 
-    init { Provider.values().forEach { info[it] = initial(it) } }
+    init {
+        Provider.values().forEach { info[it] = initial(it) }
+        feishuInbox = prefs?.getString("feishu.inbox", null)
+        if (connected(Provider.FEISHU)) watchInbox()
+    }
 
     fun registration(p: Provider): AppRegistration = when (p) {
         Provider.FEISHU -> AppRegistration(BuildConfig.FEISHU_APP_ID, BuildConfig.FEISHU_APP_SECRET, BuildConfig.FEISHU_REDIRECT)
@@ -112,14 +135,31 @@ class Accounts(private val app: Application, private val graph: Graph) {
 
     // ------------------------------------------------------------------ sign-in
 
-    /** [Connect]: opens the service's own sign-in page in the system browser and waits for the callback. */
+    /**
+     * [Connect] (PRD §9.2 ①–②): shows the choice of way — scan a code with a phone or computer (recommended, where
+     * the service has it) or sign in in the headset's browser. A service that is not registered yet shows the same
+     * dialog with both ways greyed out and what the developer has to register, so the tap always shows something.
+     */
     fun connect(p: Provider) {
         val reg = registration(p)
         if (!reg.registered) {
             Log.i(TAG, "CLOUD ${p.id} not registered (${configKey(p)} empty)")
+            lastTap = p
+            graph.overlay = Overlay.Connect(p)
             graph.say(Win.HOME, graph.str(R.string.acct_need_reg_toast, graph.str(nameRes(p)), configKey(p)))
             return
         }
+        lastTap = null
+        // only one way: skip the choice (PRD §9.2 ②)
+        if (!DeviceAuth.supported(p)) { connectInBrowser(p); return }
+        graph.overlay = Overlay.Connect(p)
+    }
+
+    /** ③b: the service's own sign-in page in the system browser, then back here through the registered callback. */
+    fun connectInBrowser(p: Provider) {
+        val reg = registration(p)
+        if (!reg.registered) return
+        if (graph.overlay is Overlay.Connect) graph.overlay = null
         cancel(p)
         val req = AuthRequest.create(p, reg)
         pending[p] = req
@@ -143,10 +183,107 @@ class Accounts(private val app: Application, private val graph: Graph) {
     }
 
     fun cancel(p: Provider) {
+        if (scan?.provider == p) cancelScan()
         waits.remove(p)?.cancel()
         if (pending.remove(p) != null) {
             info[p] = AcctInfo(AcctState.OFF, note = graph.str(R.string.acct_cancelled))
             if (pending.isEmpty()) stopLoopback()
+        }
+    }
+
+    /**
+     * ③a: asks the service for a device code, shows it as a QR code + short code, and polls until the user agrees on
+     * the other device, declines, or the code runs out (then back to the choice, PRD §9.2). No password is ever typed
+     * on the headset.
+     */
+    fun connectByScan(p: Provider) {
+        val reg = registration(p)
+        if (!reg.registered || !DeviceAuth.supported(p)) return
+        cancel(p)
+        scan = ScanState(p, null)
+        graph.overlay = Overlay.Scan(p)
+        info[p] = AcctInfo(AcctState.WAITING)
+        scanJob = graph.scope.launch {
+            val started = withContext(Dispatchers.IO) {
+                runCatching {
+                    DeviceAuth.parseStart(String(raw(CloudApi.Req("POST", DeviceAuth.startUrl(p), "application/x-www-form-urlencoded", DeviceAuth.startBody(p, reg)), null, null), Charsets.UTF_8), System.currentTimeMillis())
+                }
+            }
+            val code = started.getOrElse { e ->
+                Log.e(TAG, "CLOUD ${p.id} device code failed", e)
+                scan = ScanState(p, null, graph.str(R.string.scan_failed, e.message ?: ""))
+                info[p] = AcctInfo(AcctState.OFF, note = graph.str(R.string.acct_cancelled))
+                return@launch
+            }
+            scan = ScanState(p, code)
+            Log.i(TAG, "CLOUD ${p.id} device code shown, expires in ${(code.expiresAt - System.currentTimeMillis()) / 1000}s")
+            var interval = code.intervalMs
+            while (System.currentTimeMillis() < code.expiresAt) {
+                kotlinx.coroutines.delay(interval)
+                val (type, body) = DeviceAuth.pollBody(p, reg, code)
+                val ans = withContext(Dispatchers.IO) { runCatching { String(rawAny(CloudApi.Req("POST", p.tokenUrl, type, body)), Charsets.UTF_8) } }
+                val poll = ans.map { DeviceAuth.parsePoll(it, System.currentTimeMillis()) }.getOrElse { DeviceAuth.Poll.Pending }
+                when (poll) {
+                    DeviceAuth.Poll.Pending -> {}
+                    DeviceAuth.Poll.SlowDown -> interval += 5_000
+                    is DeviceAuth.Poll.Done -> { connected(p, poll.tokens); return@launch }
+                    is DeviceAuth.Poll.Ended -> {
+                        Log.i(TAG, "CLOUD ${p.id} scan ended: ${poll.why}")
+                        endScan(p); return@launch
+                    }
+                }
+            }
+            endScan(p)
+        }
+    }
+
+    /** Declined or timed out: back to the choice, nothing kept (PRD §9.2 "拒绝或超时"). */
+    private fun endScan(p: Provider) {
+        scan = null; scanJob = null
+        info[p] = AcctInfo(AcctState.OFF, note = graph.str(R.string.acct_cancelled))
+        graph.overlay = Overlay.Connect(p)
+        graph.say(Win.HOME, graph.str(R.string.acct_cancelled))
+    }
+
+    /** Debug only: the scan dialog with a sample code (no request is sent), for screenshots on machines without a registration. */
+    fun previewScan(p: Provider) {
+        cancelScan()
+        val url = if (p == Provider.ONEDRIVE) "https://microsoft.com/devicelogin" else "https://accounts.feishu.cn/oauth/v1/device/verify"
+        scan = ScanState(p, DeviceAuth.Code("sample", "SAMP-LE42", url, if (p == Provider.ONEDRIVE) null else "$url?user_code=SAMP-LE42", System.currentTimeMillis() + 600_000, 5_000))
+        graph.overlay = Overlay.Scan(p)
+    }
+
+    fun cancelScan() {
+        val p = scan?.provider
+        scanJob?.cancel(); scanJob = null; scan = null
+        if (p != null && info[p]?.state == AcctState.WAITING) info[p] = AcctInfo(AcctState.OFF, note = graph.str(R.string.acct_cancelled))
+        if (graph.overlay is Overlay.Scan) graph.overlay = null
+    }
+
+    /** Tokens arrived (browser or scan): store, read the name, set up the Feishu folders, say so. */
+    private suspend fun connected(p: Provider, t: Tokens) {
+        val r = withContext(Dispatchers.IO) {
+            runCatching {
+                saveTokens(p, t)
+                val name = runCatching { CloudApi.parseMe(p, String(call(p, CloudApi.me(p)), Charsets.UTF_8)) }.getOrDefault("")
+                prefs?.edit()?.putString("${p.id}.name", name)?.apply()
+                if (p == Provider.FEISHU) runCatching { ensureFeishuFolders() }.onFailure { Log.w(TAG, "CLOUD feishu folders: $it") }
+                name
+            }
+        }
+        scan = null; scanJob = null
+        r.onSuccess { name ->
+            info[p] = AcctInfo(AcctState.ON, name)
+            Log.i(TAG, "CLOUD ${p.id} connected")
+            graph.overlay = Overlay.Connected(p)
+            graph.say(Win.HOME, graph.str(R.string.acct_connected_toast, graph.str(nameRes(p)), name))
+            if (p == Provider.FEISHU) watchInbox()
+            if (graph.homePage == HomePage.BROWSE) refresh(p)
+        }.onFailure { e ->
+            Log.e(TAG, "CLOUD ${p.id} sign-in failed", e)
+            info[p] = AcctInfo(AcctState.OFF, note = e.message)
+            if (graph.overlay is Overlay.Scan) graph.overlay = null
+            graph.say(Win.HOME, graph.str(R.string.acct_failed, e.message ?: ""))
         }
     }
 
@@ -183,23 +320,13 @@ class Accounts(private val app: Application, private val graph: Graph) {
 
     private fun finish(p: Provider, req: AuthRequest, code: String) {
         graph.scope.launch {
-            val r = withContext(Dispatchers.IO) {
+            val t = withContext(Dispatchers.IO) {
                 runCatching {
                     val (type, body) = req.tokenBody(code)
-                    val ans = String(raw(CloudApi.Req("POST", p.tokenUrl, type, body), null, null), Charsets.UTF_8)
-                    val t = Tokens.parse(ans, System.currentTimeMillis())
-                    saveTokens(p, t)
-                    val name = runCatching { CloudApi.parseMe(p, String(call(p, CloudApi.me(p)), Charsets.UTF_8)) }.getOrDefault("")
-                    prefs?.edit()?.putString("${p.id}.name", name)?.apply()
-                    name
+                    Tokens.parse(String(raw(CloudApi.Req("POST", p.tokenUrl, type, body), null, null), Charsets.UTF_8), System.currentTimeMillis())
                 }
             }
-            r.onSuccess { name ->
-                info[p] = AcctInfo(AcctState.ON, name)
-                Log.i(TAG, "CLOUD ${p.id} connected")
-                graph.say(Win.HOME, graph.str(R.string.acct_connected_toast, graph.str(nameRes(p)), name))
-                if (graph.homePage == HomePage.BROWSE) refresh(p)
-            }.onFailure { e ->
+            t.onSuccess { connected(p, it) }.onFailure { e ->
                 Log.e(TAG, "CLOUD ${p.id} token exchange failed", e)
                 info[p] = AcctInfo(AcctState.OFF, note = e.message)
                 graph.say(Win.HOME, graph.str(R.string.acct_failed, e.message ?: ""))
@@ -262,6 +389,22 @@ class Accounts(private val app: Application, private val graph: Graph) {
             }
         }
         return bytes
+    }
+
+    /** POST without a token that returns the body even for HTTP 4xx (device-flow polls answer "pending" as 400). */
+    private fun rawAny(req: CloudApi.Req): ByteArray {
+        val c = URL(req.url).openConnection() as HttpURLConnection
+        c.connectTimeout = 15_000; c.readTimeout = 30_000
+        c.requestMethod = req.method
+        val out = req.body?.toByteArray(Charsets.UTF_8)
+        if (out != null) {
+            c.doOutput = true
+            c.setRequestProperty("Content-Type", req.contentType ?: "application/x-www-form-urlencoded")
+            c.setFixedLengthStreamingMode(out.size)
+            c.outputStream.use { it.write(out) }
+        }
+        val code = c.responseCode
+        return (if (code >= 400) c.errorStream else c.inputStream)?.use { it.readBytes() } ?: ByteArray(0)
     }
 
     /** A call with the service's access token; refreshes it once when it expired. Blocking: call on IO. */
@@ -328,12 +471,71 @@ class Accounts(private val app: Application, private val graph: Graph) {
             graph.say(Win.HOME, graph.str(R.string.cloud_slides_ro))
             return
         }
+        graph.open(refFor(p, f, browse.getValue(p).stack.lastOrNull()?.id ?: ""))
+    }
+
+    fun refFor(p: Provider, f: CloudItem, folder: String): FileRef.Cloud {
         val name = when {
             f.kind == "docx" -> f.name + ".docx"
             f.kind == "sheet" -> f.name + ".xlsx"
             else -> CloudApi.exportName(f)
         }
-        graph.open(FileRef.Cloud(p.id, f.id, name, f.kind, f.mime, f.path, f.url, folder = browse.getValue(p).stack.lastOrNull()?.id ?: ""))
+        return FileRef.Cloud(p.id, f.id, name, f.kind, f.mime, f.path, f.url, folder = folder)
+    }
+
+    // ------------------------------------------------------------------ Feishu folders and inbox (PRD §9.4)
+
+    /** First connection: 「空间办公」 and 「空间办公 / 收件夹」 under My Space (reused when they already exist). Blocking. */
+    private fun ensureFeishuFolders() {
+        val p = Provider.FEISHU
+        if (!prefs?.getString("feishu.inbox", null).isNullOrEmpty()) return
+        val root = prefs?.getString("feishu.root", null) ?: CloudApi.parseFeishuRoot(String(call(p, CloudApi.feishuRoot()), Charsets.UTF_8)).also { prefs?.edit()?.putString("feishu.root", it)?.apply() }
+        fun folderIn(parent: String, name: String): String {
+            val items = CloudApi.parseList(p, String(call(p, CloudApi.list(p, CloudItem(parent, "", true, 0, ""))), Charsets.UTF_8))
+            FeishuDrive.find(items, name)?.let { return it.id }
+            return FeishuDrive.parseCreated(String(call(p, FeishuDrive.createFolder(name, parent)), Charsets.UTF_8))
+        }
+        val app = folderIn(root, graph.str(R.string.feishu_app_folder))
+        val inbox = folderIn(app, graph.str(R.string.feishu_inbox_folder))
+        prefs?.edit()?.putString("feishu.app", app)?.putString("feishu.inbox", inbox)?.apply()
+        graph.scope.launch { feishuInbox = inbox }
+        Log.i(TAG, "CLOUD feishu folders app=$app inbox=$inbox")
+    }
+
+    /**
+     * While the app is in front, looks at the inbox every 10 s (PRD §9.4 / §14: no background sync). Something new:
+     * it goes to the top of Recent and a note says 「电脑发来…」 with [Open].
+     */
+    private fun watchInbox() {
+        if (inboxJob?.isActive == true) return
+        inboxJob = graph.scope.launch {
+            while (connected(Provider.FEISHU)) {
+                if (graph.windows.state.values.any { it == "ON_RESUME" }) runCatching { checkInbox() }.onFailure { Log.w(TAG, "CLOUD inbox: $it") }
+                kotlinx.coroutines.delay(10_000)
+            }
+        }
+    }
+
+    suspend fun checkInbox() {
+        val p = Provider.FEISHU
+        if (!connected(p)) return
+        val items = withContext(Dispatchers.IO) {
+            if (feishuInbox.isNullOrEmpty()) ensureFeishuFolders()
+            val inbox = prefs?.getString("feishu.inbox", null) ?: return@withContext emptyList()
+            CloudApi.parseList(p, String(call(p, CloudApi.list(p, CloudItem(inbox, "", true, 0, ""))), Charsets.UTF_8))
+        }
+        val seenRaw = prefs?.getStringSet("feishu.inboxSeen", emptySet()) ?: emptySet()
+        val fresh = FeishuDrive.newArrivals(items, seenRaw)
+        if (fresh.isEmpty()) return
+        prefs?.edit()?.putStringSet("feishu.inboxSeen", seenRaw + fresh.map { it.id })?.apply()
+        val inbox = feishuInbox ?: ""
+        for (f in fresh.reversed()) {
+            val ref = refFor(p, f, inbox)
+            graph.recents.touch(ref, graph.str(R.string.loc_feishu) + " › " + graph.str(R.string.feishu_inbox_folder))
+        }
+        val first = fresh.first()
+        Log.i(TAG, "CLOUD feishu inbox new=${fresh.size} first=${first.name}")
+        graph.say(Win.HOME, graph.str(R.string.inbox_arrived, first.name), graph.str(R.string.open)) { open(p, first) }
     }
 
     // ------------------------------------------------------------------ files (blocking, on IO)
@@ -364,7 +566,8 @@ class Accounts(private val app: Application, private val graph: Graph) {
                 else -> call(p, CloudApi.download(p, ref.item()))
             }
             cacheFile(ref).writeBytes(bytes)
-            Log.i(TAG, "CLOUD ${p.id} read ${ref.name} ${bytes.size} B")
+            versions[ref.key] = version(p, ref)
+            Log.i(TAG, "CLOUD ${p.id} read ${ref.name} ${bytes.size} B version=${versions[ref.key]}")
             bytes
         } catch (e: IOException) {
             val c = cacheFile(ref)
@@ -372,11 +575,25 @@ class Accounts(private val app: Application, private val graph: Graph) {
         }
     }
 
-    /** Writes back to the same file (Feishu online documents: only the changed blocks / cells). */
-    fun write(ref: FileRef.Cloud, bytes: ByteArray): FileRef.Cloud {
+    /** Current version stamp of a cloud file ("" when the service gave none). Blocking. */
+    private fun version(p: Provider, ref: FileRef.Cloud): String =
+        runCatching { CloudVersion.parse(p, ref.kind, String(call(p, CloudVersion.request(p, ref.id, ref.kind)), Charsets.UTF_8)) }
+            .onFailure { Log.w(TAG, "CLOUD version of ${ref.name}: $it") }.getOrDefault("")
+
+    /**
+     * Writes back to the same file (Feishu online documents: only the changed blocks / cells). Unless [force], first
+     * checks that nobody changed the cloud copy since it was opened (PRD §9.3); if someone did, throws
+     * [CloudConflictException] and writes nothing, and the app asks: overwrite / save a copy / cancel.
+     */
+    fun write(ref: FileRef.Cloud, bytes: ByteArray, force: Boolean = false): FileRef.Cloud {
         val p = Provider.of(ref.provider) ?: error("unknown service")
         if (ref.readOnlyCloud) throw IOException(graph.str(R.string.cloud_readonly_save))
         cacheFile(ref).writeBytes(bytes)
+        if (!force) {
+            val opened = versions[ref.key]
+            val now = version(p, ref)
+            if (CloudVersion.changed(opened, now)) { Log.i(TAG, "CLOUD ${p.id} conflict ${ref.name} $opened -> $now"); throw CloudConflictException(opened ?: "", now) }
+        }
         var out = ref
         when {
             p == Provider.FEISHU && ref.kind == "docx" -> {
@@ -390,15 +607,41 @@ class Accounts(private val app: Application, private val graph: Graph) {
                 read(ref)
             }
             p == Provider.FEISHU -> {
-                // Drive files have no "new version" call: upload beside, then remove the old one (same folder, same name)
-                val token = CloudApi.parseFeishuUpload(String(call(p, CloudApi.create(p, ref.name, ref.folder, bytes.size), CloudApi.feishuMultipart(ref.name, ref.folder, bytes)), Charsets.UTF_8))
-                runCatching { call(p, CloudApi.feishuDelete(ref.item())) }
-                if (token.isNotEmpty()) out = ref.copy(id = token)
+                // upload_all with the file's own token: a new version of the same file, history kept (same as the
+                // Feishu CLI's `drive +upload --file-token`). Tenants that do not take the field yet answer with an
+                // error: only then fall back to the v0.2.0 way (upload beside, remove the old one; history breaks).
+                val inPlace = runCatching {
+                    call(p, CloudApi.upload(p, ref.item()), FeishuDrive.inPlaceMultipart(ref.name, ref.folder, ref.id, bytes))
+                }
+                inPlace.exceptionOrNull()?.let { e ->
+                    if (e is CloudAuthException || e !is IOException || !FeishuDrive.inPlaceUnsupported(e.message ?: "")) throw e
+                    Log.w(TAG, "CLOUD feishu in-place upload not available on this tenant (${e.message}); new file + delete old")
+                    val token = CloudApi.parseFeishuUpload(String(call(p, CloudApi.create(p, ref.name, ref.folder, bytes.size), CloudApi.feishuMultipart(ref.name, ref.folder, bytes)), Charsets.UTF_8))
+                    runCatching { call(p, CloudApi.feishuDelete(ref.item())) }
+                    if (token.isNotEmpty()) out = ref.copy(id = token)
+                }
             }
             else -> call(p, CloudApi.upload(p, ref.item()), bytes)
         }
-        Log.i(TAG, "CLOUD ${p.id} wrote ${ref.name} ${bytes.size} B")
+        versions[out.key] = version(p, out)
+        Log.i(TAG, "CLOUD ${p.id} wrote ${ref.name} ${bytes.size} B version=${versions[out.key]}")
         return out
+    }
+
+    /** Conflict → [Save a copy]: a new file beside the original, in the same folder (PRD §9.3). Returns where it went. */
+    fun saveCopyBeside(ref: FileRef.Cloud, copyName: String, bytes: ByteArray): String {
+        val p = Provider.of(ref.provider) ?: error("unknown service")
+        when (p) {
+            Provider.FEISHU -> {
+                val folder = ref.folder.ifEmpty { prefs?.getString("feishu.root", null) ?: CloudApi.parseFeishuRoot(String(call(p, CloudApi.feishuRoot()), Charsets.UTF_8)) }
+                call(p, CloudApi.create(p, copyName, folder, bytes.size), CloudApi.feishuMultipart(copyName, folder, bytes))
+            }
+            Provider.GDRIVE -> call(p, CloudApi.create(p, copyName, "", bytes.size), CloudApi.googleMultipart(copyName, bytes, ref.folder.ifEmpty { null }))
+            Provider.ONEDRIVE -> call(p, CloudApi.createIn(p, copyName, ref.folder), bytes)
+            Provider.DROPBOX -> call(p, CloudApi.createIn(p, copyName, ref.path.substringBeforeLast('/', "")), bytes)
+        }
+        Log.i(TAG, "CLOUD ${p.id} conflict copy -> $copyName")
+        return graph.str(nameRes(p)) + " › " + copyName
     }
 
     /** Save as → a new file at the top of the first connected drive. Returns where it went. */
@@ -406,7 +649,8 @@ class Accounts(private val app: Application, private val graph: Graph) {
         val p = Provider.values().firstOrNull { connected(it) } ?: throw IOException(graph.str(R.string.cloud_none_connected))
         when (p) {
             Provider.FEISHU -> {
-                val root = prefs?.getString("feishu.root", null) ?: CloudApi.parseFeishuRoot(String(call(p, CloudApi.feishuRoot()), Charsets.UTF_8))
+                // the app's own folder made on first connection (PRD §9.2 ⑤), else the top of My Space
+                val root = prefs?.getString("feishu.app", null) ?: prefs?.getString("feishu.root", null) ?: CloudApi.parseFeishuRoot(String(call(p, CloudApi.feishuRoot()), Charsets.UTF_8))
                 call(p, CloudApi.create(p, name, root, bytes.size), CloudApi.feishuMultipart(name, root, bytes))
             }
             Provider.GDRIVE -> call(p, CloudApi.create(p, name, "", bytes.size), CloudApi.googleMultipart(name, bytes))

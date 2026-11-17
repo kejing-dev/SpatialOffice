@@ -66,6 +66,17 @@ class WindowCtl(private val graph: Graph) {
         runCatching { n.openWindowContainer(Containers.id(win), Containers.TAG_MAIN, null) }.onFailure { Log.e(TAG, "WINDOW open failed", it) }
     }
 
+    /**
+     * Gives [win] the window focus back (the system Toolbar and dialogs are windows of their own: after a toolbar
+     * menu the keyboard goes to the toolbar, not to the cell that just took the caret). Uses the system's restore.
+     */
+    fun focus(win: Win) {
+        if (!isOpen(win)) return
+        val n = navigators[win] ?: nav() ?: return
+        val r = runCatching { n.restoreWindowContainer(Containers.id(win), Containers.TAG_MAIN) }
+        Log.i(TAG, "WINDOW focus ${win.name} restore=${r.getOrNull() ?: r.exceptionOrNull()}")
+    }
+
     fun close(win: Win) {
         if (win == Win.HOME || win == Win.STAGE || !isOpen(win)) return
         Log.i(TAG, "WINDOW close ${win.name}")

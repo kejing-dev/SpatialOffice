@@ -54,6 +54,51 @@ class NewItemsShowAtOnceTest {
         assertTrue(invalidates({ s.selected; s.version }) { s.addShape("ellipse", 0x2563EB) })
         assertTrue(s.selected > 0)
         assertTrue(s.deck.slides[s.current].shapes.any { it.id == s.selected })
+        // q1-2: a text box too (it was left unpicked, the picked frame stayed on the ellipse)
+        val ellipse = s.selected
+        assertTrue(invalidates({ s.selected; s.version }) { s.addTextBox("new box") })
+        assertTrue(s.selected > 0 && s.selected != ellipse)
+        assertTrue(s.deck.slides[s.current].shapes.any { it.id == s.selected && it.paras.any { p -> p.text == "new box" } })
+        // a picture as well
+        val png = java.util.Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+        val box = s.selected
+        assertTrue(invalidates({ s.selected }) { s.addPicture(png, "png", 1, 1) })
+        assertTrue(s.selected > 0 && s.selected != box)
+        // a new slide starts with nothing picked
+        s.addSlide(SlideLayoutKind.BLANK)
+        assertEquals(-1, s.selected)
+    }
+
+    @Test fun newTableTakesTheCaretInItsFirstCell() {
+        // q1-3: Insert ▸ Table, then typing went nowhere; the first cell of the new table now has the caret
+        val s = DocSession(FileRef.Path(File("t.docx")), FileKind.DOC, DocxDocument.blank().save(), File("build/tmp"))
+        val id = s.insertTable(s.blocks().last().id, 3, 3)
+        assertTrue(id >= 0)
+        assertEquals(Triple(id, 0, 0), s.tableCaret)
+        val tick = s.tableCaretTick
+        val id2 = s.insertTable(id, 2, 2)
+        assertEquals(Triple(id2, 0, 0), s.tableCaret)
+        assertTrue(s.tableCaretTick > tick)
+        // what is typed there lands in the table, also when the keys arrive at the toolbar window (forwarded)
+        assertTrue(s.typeInCell("C0")); assertTrue(s.typeInCell("0"))
+        assertEquals("C00", (s.blocks().first { it.id == id2 } as UiBlock.Table).rows[0][0])
+        assertTrue(s.moveCell(down = false)); assertEquals(Triple(id2, 0, 1), s.tableCaret)
+        assertTrue(s.typeInCell("C01")); assertTrue(s.backspaceInCell())
+        assertEquals("C0", (s.blocks().first { it.id == id2 } as UiBlock.Table).rows[0][1])
+        assertTrue(s.moveCell(down = false)); assertEquals(Triple(id2, 1, 0), s.tableCaret)   // wraps to the next row
+    }
+
+    @Test fun newRowAndColumnArePickedAtOnce() {
+        // q1-4: the selection stayed in B2 after Insert row / Insert column right
+        val b = XlsxWorkbook.blank()
+        b.setCell(0, 0, 0, "a"); b.setCell(0, 1, 1, "1")
+        val s = SheetSession(FileRef.Path(File("t.xlsx")), FileKind.SHEET, b.save())
+        s.select(1, 1)
+        assertTrue(invalidates({ s.row; s.col }) { s.insertRowBelow() })
+        assertEquals(2, s.row); assertEquals(1, s.col)
+        assertTrue(invalidates({ s.row; s.col }) { s.insertColumn() })
+        assertEquals(2, s.row); assertEquals(2, s.col)
+        assertEquals("", s.book.cell(s.sheet, s.row, s.col).input)   // the picked cell is the new, empty one
     }
 
     @Test fun newParagraphAndTableShowWithoutReopening() {

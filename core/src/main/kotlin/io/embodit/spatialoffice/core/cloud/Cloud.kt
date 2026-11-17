@@ -220,7 +220,8 @@ object CloudApi {
 
     /** Writes new bytes into the same file (same id, a new version in the service's history). Body is the raw file. */
     fun upload(p: Provider, f: CloudItem): Req = when (p) {
-        Provider.FEISHU -> error("Feishu files are re-uploaded with uploadNew + delete")
+        // upload_all + file_token (body: FeishuDrive.inPlaceMultipart); same file, a new version in its history
+        Provider.FEISHU -> Req("POST", "https://open.feishu.cn/open-apis/drive/v1/files/upload_all", "multipart/form-data; boundary=$BOUNDARY")
         Provider.GDRIVE -> Req("PATCH", "https://www.googleapis.com/upload/drive/v3/files/${enc(f.id)}?uploadType=media", "application/octet-stream")
         Provider.ONEDRIVE -> Req("PUT", "https://graph.microsoft.com/v1.0/me/drive/items/${enc(f.id)}/content", "application/octet-stream")
         Provider.DROPBOX -> Req(
@@ -239,20 +240,34 @@ object CloudApi {
             headers = mapOf("Dropbox-API-Arg" to Json.write(mapOf("path" to "/$name", "mode" to "add", "autorename" to true))))
     }
 
+    /** A new file [name] inside [folder] (OneDrive: parent item id, "" = top; Dropbox: parent path). Body is the raw file; never replaces. */
+    fun createIn(p: Provider, name: String, folder: String): Req = when (p) {
+        Provider.ONEDRIVE -> Req(
+            "PUT", "https://graph.microsoft.com/v1.0/me/drive/" + (if (folder.isEmpty()) "root" else "items/" + enc(folder)) + ":/" +
+                enc(name).replace("+", "%20") + ":/content?@microsoft.graph.conflictBehavior=rename", "application/octet-stream",
+        )
+        Provider.DROPBOX -> Req("POST", "https://content.dropboxapi.com/2/files/upload", "application/octet-stream",
+            headers = mapOf("Dropbox-API-Arg" to Json.write(mapOf("path" to "$folder/$name", "mode" to "add", "autorename" to true))))
+        else -> create(p, name, folder, 0)
+    }
+
     const val BOUNDARY = "spatialofficeBoundary7c1"
 
     /** Google multipart/related body: metadata part + file part. */
-    fun googleMultipart(name: String, bytes: ByteArray): ByteArray {
-        val head = "--$BOUNDARY\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" + Json.write(mapOf("name" to name)) +
+    fun googleMultipart(name: String, bytes: ByteArray, parent: String? = null): ByteArray {
+        val meta: Map<String, Any> = if (parent == null) mapOf("name" to name) else mapOf("name" to name, "parents" to listOf(parent))
+        val head = "--$BOUNDARY\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" + Json.write(meta) +
             "\r\n--$BOUNDARY\r\nContent-Type: application/octet-stream\r\n\r\n"
         return head.toByteArray() + bytes + "\r\n--$BOUNDARY--\r\n".toByteArray()
     }
 
     /** Feishu upload_all multipart/form-data body (the fields go in the form, not a header). */
-    fun feishuMultipart(name: String, folder: String, bytes: ByteArray): ByteArray {
+    fun feishuMultipart(name: String, folder: String, bytes: ByteArray, fileToken: String? = null): ByteArray {
         val sb = StringBuilder()
         fun field(k: String, v: String) { sb.append("--$BOUNDARY\r\nContent-Disposition: form-data; name=\"$k\"\r\n\r\n$v\r\n") }
         field("file_name", name); field("parent_type", "explorer"); field("parent_node", folder); field("size", bytes.size.toString())
+        // an existing file's token: the bytes become a new version of that file (in place) instead of a new file
+        if (!fileToken.isNullOrEmpty()) field("file_token", fileToken)
         sb.append("--$BOUNDARY\r\nContent-Disposition: form-data; name=\"file\"; filename=\"file\"\r\nContent-Type: application/octet-stream\r\n\r\n")
         return sb.toString().toByteArray() + bytes + "\r\n--$BOUNDARY--\r\n".toByteArray()
     }

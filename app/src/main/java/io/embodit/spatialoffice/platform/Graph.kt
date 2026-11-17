@@ -56,6 +56,14 @@ sealed class Overlay {
     data class ImagePick(override val win: Win) : Overlay()
     /** Confirm signing out of a cloud account. */
     data class SignOut(val provider: io.embodit.spatialoffice.core.cloud.Provider, override val win: Win = Win.HOME) : Overlay()
+    /** [Connect] → choose a way: scan a code (recommended) or sign in in the headset browser (PRD §9.2 ②). */
+    data class Connect(val provider: io.embodit.spatialoffice.core.cloud.Provider, override val win: Win = Win.HOME) : Overlay()
+    /** QR code + short code, waiting for the other device (PRD §9.2 ③a). */
+    data class Scan(val provider: io.embodit.spatialoffice.core.cloud.Provider, override val win: Win = Win.HOME) : Overlay()
+    /** Connected: who, where the sign-in is kept, default folder and inbox (PRD §9.2 ⑤). */
+    data class Connected(val provider: io.embodit.spatialoffice.core.cloud.Provider, override val win: Win = Win.HOME) : Overlay()
+    /** The cloud copy changed since it was opened: overwrite / save a copy / cancel (PRD §9.3). */
+    data class Conflict(override val win: Win) : Overlay()
 }
 
 data class Toast(val id: Long, val win: Win, val text: String, val action: String? = null, val onAction: (() -> Unit)? = null)
@@ -261,7 +269,27 @@ class Graph(val app: Application) {
         session(win)?.let { write(it, win, backup = true) }
     }
 
-    private fun write(s: Session, win: Win, backup: Boolean, after: (() -> Unit)? = null) {
+    /** Answer to the cloud-conflict dialog: "overwrite" | "copy" | "cancel". The debug command calls this too. */
+    fun resolveConflict(win: Win, choice: String) {
+        val s = session(win) ?: return
+        overlay = null
+        Log.i(TAG, "CONFLICT $win $choice")
+        when (choice) {
+            "overwrite" -> write(s, win, backup = false, force = true)
+            "copy" -> {
+                val ref = s.ref as? FileRef.Cloud ?: return
+                val copy = io.embodit.spatialoffice.core.files.Naming.copyName(ref.name, settings.value.zh)
+                scope.launch {
+                    val r = withContext(Dispatchers.IO) { runCatching { accounts.saveCopyBeside(ref, copy, s.serialize()) } }
+                    r.onFailure { e -> Log.e(TAG, "CONFLICT copy failed", e); say(win, str(R.string.cloud_save_failed, e.message ?: "")) }
+                        .onSuccess { where -> say(win, str(R.string.conflict_copied, where)) }
+                }
+            }
+            else -> say(win, str(R.string.conflict_cancelled))
+        }
+    }
+
+    private fun write(s: Session, win: Win, backup: Boolean, after: (() -> Unit)? = null, force: Boolean = false) {
         val zh = settings.value.zh
         scope.launch {
             val r = withContext(Dispatchers.IO) {
@@ -273,7 +301,7 @@ class Graph(val app: Application) {
                     }
                     val ref = s.ref
                     if (ref is FileRef.Cloud) {
-                        val now = accounts.write(ref, s.serialize())
+                        val now = accounts.write(ref, s.serialize(), force)
                         if (now != ref) withContext(Dispatchers.Main) { s.ref = now }
                     } else storage.write(ref, s.serialize())
                     backupFile
@@ -281,6 +309,7 @@ class Graph(val app: Application) {
             }
             r.onFailure { e ->
                 Log.e(TAG, "SAVE failed", e)
+                if (e is io.embodit.spatialoffice.core.cloud.CloudConflictException) { overlay = Overlay.Conflict(win); return@onFailure }
                 if (s.ref is FileRef.Cloud) say(win, str(if (e is CloudAuthException) R.string.cloud_kept_local else R.string.cloud_save_failed, e.message ?: ""))
                 else say(win, str(R.string.save_failed, e.message ?: str(R.string.perm_denied)))
             }
@@ -501,7 +530,7 @@ class Graph(val app: Application) {
         "DUMP page=$homePage lang=${settings.value.lang} doc=${doc?.ref?.name}:${doc?.dirty} sheet=${sheet?.ref?.name}:${sheet?.dirty}@${sheet?.row},${sheet?.col} " +
             "deck=${deck?.ref?.name}:${deck?.dirty}#${deck?.current} overlay=${overlay?.javaClass?.simpleName} stage=$stageMode/$stageKind/$arrangement/$focus " +
             "windows=${windows.dump()} allFiles=${storage.hasAllFiles} blocks=${doc?.blockCount} slides=${deck?.slideCount} sel=${deck?.selected} " +
-            "rows=${sheet?.rowCount} frozen=${sheet?.frozen} filter=${sheet?.filterCol}:${sheet?.filterValue} accounts=" +
+            "tableCaret=${doc?.tableCaret} cols=${sheet?.colCount} rows=${sheet?.rowCount} frozen=${sheet?.frozen} filter=${sheet?.filterCol}:${sheet?.filterValue} accounts=" +
             io.embodit.spatialoffice.core.cloud.Provider.values().joinToString(",") { it.id + ":" + accounts.state(it) }
 
     companion object {

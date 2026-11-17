@@ -127,6 +127,7 @@ fun WindowFrame(win: Win, content: @Composable (Graph) -> Unit) {
                 ToastPump(graph, win)
                 content(graph)
                 SharedOverlays(graph, win)
+                CloudOverlays(graph, win)
             }
         }
     }
@@ -203,10 +204,12 @@ fun SecondaryButton(text: String, tag: String, onClick: () -> Unit, modifier: Mo
  * apart inside the system Toolbar ornament.
  */
 @Composable
-fun ToolButton(text: String, tag: String, onClick: () -> Unit, enabled: Boolean = true, icon: Int? = null, primary: Boolean = false) {
+fun ToolButton(text: String, tag: String, onClick: () -> Unit, enabled: Boolean = true, icon: Int? = null, primary: Boolean = false, width: Dp? = null) {
     val fg = if (primary) PicoTheme.colorScheme.labelPrimaryLight else PicoTheme.colorScheme.labelPrimary
     Button(
         onClick = onClick, enabled = enabled,
+        // a fixed width for buttons whose label follows the state (paragraph style), so the row never reflows
+        modifier = if (width != null) Modifier.width(width) else Modifier,
         // gate:allow button-height editor toolbar: 14–16 tools in one system Toolbar (PRD §11), 48 dp targets
         size = ButtonDefaults.Small.copy(height = 48.dp, minWidth = 64.dp),
         shape = RoundedCornerShape(24.dp),
@@ -285,10 +288,10 @@ data class MenuEntry(val label: String, val tag: String, val checked: Boolean = 
  * "More"). The menu opens above the bottom toolbar.
  */
 @Composable
-fun ToolMenu(label: String, tag: String, entries: List<MenuEntry>, enabled: Boolean = true, icon: Int? = null, above: Boolean = true) {
+fun ToolMenu(label: String, tag: String, entries: List<MenuEntry>, enabled: Boolean = true, icon: Int? = null, above: Boolean = true, width: Dp? = null) {
     var open by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     Box {
-        ToolButton(label, tag, onClick = { open = !open }, enabled = enabled && entries.isNotEmpty(), icon = icon)
+        ToolButton(label, tag, onClick = { open = !open }, enabled = enabled && entries.isNotEmpty(), icon = icon, width = width)
         if (open) {
             com.pico.spatial.ui.design.menu.Menu(
                 onDismissRequest = { open = false },
