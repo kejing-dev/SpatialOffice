@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -12,8 +14,23 @@ android {
         applicationId = "io.embodit.spatialoffice"
         minSdk = 35
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
+
+        // Cloud accounts (PRD §9): each service needs an app registration the user makes (README, "Connecting accounts").
+        // Fill these in local.properties (never committed); left empty, the service says "register the app first".
+        val local = Properties().also { p -> rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { p.load(it) } }
+        fun cfg(key: String, default: String = "") = "\"" + (local.getProperty(key) ?: default).replace("\"", "") + "\""
+        buildConfigField("String", "FEISHU_APP_ID", cfg("cloud.feishu.appId"))
+        buildConfigField("String", "FEISHU_APP_SECRET", cfg("cloud.feishu.appSecret"))
+        buildConfigField("String", "FEISHU_REDIRECT", cfg("cloud.feishu.redirect", "http://127.0.0.1:53682/callback"))
+        buildConfigField("String", "GOOGLE_CLIENT_ID", cfg("cloud.google.clientId"))
+        buildConfigField("String", "GOOGLE_CLIENT_SECRET", cfg("cloud.google.clientSecret"))
+        buildConfigField("String", "GOOGLE_REDIRECT", cfg("cloud.google.redirect", "http://127.0.0.1:53682/callback"))
+        buildConfigField("String", "ONEDRIVE_CLIENT_ID", cfg("cloud.onedrive.clientId"))
+        buildConfigField("String", "ONEDRIVE_REDIRECT", cfg("cloud.onedrive.redirect", "spatialoffice://oauth/onedrive"))
+        buildConfigField("String", "DROPBOX_APP_KEY", cfg("cloud.dropbox.appKey"))
+        buildConfigField("String", "DROPBOX_REDIRECT", cfg("cloud.dropbox.redirect", "http://localhost:53682/callback"))
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters.add("arm64-v8a") }
@@ -58,6 +75,7 @@ dependencies {
     implementation(libs.androidx.annotation)
     implementation(libs.androidx.appcompat)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation("androidx.security:security-crypto:1.1.0")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

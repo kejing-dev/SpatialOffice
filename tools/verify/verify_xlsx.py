@@ -259,7 +259,7 @@ def verify_cached():
     name = "xlsx-cached-unknown-fn.xlsx"
     wb, vals = books(name)
     if wb:
-        eq(wb["Data"]["A9"].value, "=VLOOKUP(A1,A1:B4,2,0)", f"{name}: typed unknown function is a formula")
+        eq(wb["Data"]["A9"].value, "=INDEX(A1:B4,2,1)", f"{name}: typed unknown function is a formula")
         eq(wb["Data"]["B2"].value, 11, f"{name}: edited input")
         eq(vals["Data"]["B5"].value, 61, f"{name}: SUM cached")
         eq(vals["Data"]["C5"].value, 10, f"{name}: STDEV cached value kept")

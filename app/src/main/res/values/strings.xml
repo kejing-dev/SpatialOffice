@@ -13,7 +13,7 @@
     <string name="group_cloud" formatted="false">云端（需要登录）</string>
     <string name="recent_empty" formatted="false">还没有打开过文件。点「新建」开一个，或点「浏览」找这台设备上的文件。</string>
     <string name="first_hint" formatted="false">接下来：点左边「新建」开一个文档，或点一个文件打开它。</string>
-    <string name="cloud_none" formatted="false">这一版还没有接入云盘。本机文件全部可用。</string>
+    <string name="cloud_none" formatted="false">还没有连接云盘。到「账号与云盘」连接；本机文件不受影响。</string>
     <string name="entry_head" formatted="false">别的地方也能直接打开到这里</string>
     <string name="entry_sub" formatted="false">浏览器下载的文件 · 系统「分享」和「打开方式」。都是点一下直接打开，不用先转换。</string>
     <string name="meta_doc" formatted="false">文档</string>
@@ -104,10 +104,10 @@
     <string name="how_to_move_keys" formatted="false">拖窗口下面的小圆点</string>
     <string name="how_to_move_hand" formatted="false">捏住窗口下面的小圆点拖</string>
     <string name="how_to_move_ctrl" formatted="false">扳机按住窗口下面的小圆点拖</string>
-    <string name="how_to_chart" formatted="false">3D 图表</string>
-    <string name="how_to_chart_keys" formatted="false">表格里点 [3D 图表]；点柱子选中对应单元格</string>
-    <string name="how_to_chart_hand" formatted="false">捏 [3D 图表]；捏柱子选中对应单元格</string>
-    <string name="how_to_chart_ctrl" formatted="false">扳机点 [3D 图表]；点柱子选中对应单元格</string>
+    <string name="how_to_chart" formatted="false">图表</string>
+    <string name="how_to_chart_keys" formatted="false">表格里点 [图表]，选柱状 / 折线 / 饼图或 3D 图表；3D 里点柱子选中对应单元格</string>
+    <string name="how_to_chart_hand" formatted="false">捏 [图表] 选一种；3D 里捏柱子选中对应单元格</string>
+    <string name="how_to_chart_ctrl" formatted="false">扳机点 [图表] 选一种；3D 里点柱子选中对应单元格</string>
     <string name="key_save" formatted="false">保存</string>
     <string name="key_undo" formatted="false">撤销 / 重做</string>
     <string name="key_bold" formatted="false">粗体 / 斜体 / 下划线</string>
@@ -217,7 +217,7 @@
     <string name="layout_btn" formatted="false">版式</string>
     <string name="lay_title" formatted="false">标题页</string>
     <string name="lay_body" formatted="false">标题 + 正文</string>
-    <string name="text_box" formatted="false">插入文本框</string>
+    <string name="text_box" formatted="false">文本框</string>
     <string name="delete_slide" formatted="false">删除这一页</string>
     <string name="slide_up" formatted="false">上移一页</string>
     <string name="slide_down" formatted="false">下移一页</string>
@@ -279,8 +279,8 @@
     <string name="sa_txt_sub" formatted="false">只有文字，没有格式</string>
     <string name="sa_png" formatted="false">图片（每页一张 PNG）</string>
     <string name="sa_png_sub" formatted="false">放进以文件名命名的文件夹</string>
-    <string name="sa_cloud" formatted="false">飞书 / 云盘</string>
-    <string name="sa_cloud_sub" formatted="false">这一版还没有接入</string>
+    <string name="sa_cloud" formatted="false">存到云盘</string>
+    <string name="sa_cloud_sub" formatted="false">先在「账号与云盘」连接一个云盘</string>
     <string name="save_to" formatted="false">保存到</string>
     <string name="saveas_note" formatted="false">正在编辑的文件不受影响</string>
     <string name="saveas_go" formatted="false">另存</string>
@@ -293,4 +293,140 @@
     <string name="picker_none" formatted="false">这台设备上没有文件选择器。请在「浏览」里找文件。</string>
     <string name="pdf_page">第 %1$d / %2$d 页</string>
     <string name="readonly_note" formatted="false">这种文件只读：可以看、铺开、另存</string>
+    <string name="acct_browser_done" formatted="false">已连接。回到空间办公就能用了，这一页可以关掉。</string>
+    <string name="acct_cancelled" formatted="false">已取消，没有连接</string>
+    <string name="acct_connect" formatted="false">连接</string>
+    <string name="acct_connected_toast">已连接%1$s：%2$s</string>
+    <string name="acct_expired" formatted="false">登录已过期。改动留在这台设备上，重新登录后保存上去</string>
+    <string name="acct_expired_note" formatted="false">登录已过期，改动没有丢，重新登录后再保存</string>
+    <string name="acct_failed">没连上：%1$s</string>
+    <string name="acct_need_reg">需要开发者先登记应用（在 local.properties 填 %1$s，见 README）</string>
+    <string name="acct_need_reg_toast">%1$s：需要开发者先登记应用，在 local.properties 填 %2$s 后重新打包</string>
+    <string name="acct_no_browser" formatted="false">这台设备上没有能打开登录页的浏览器</string>
+    <string name="acct_off_now" formatted="false">没有连接。点 [连接] 在浏览器里登录，密码不经过这个应用</string>
+    <string name="acct_on">已连接：%1$s</string>
+    <string name="acct_relogin" formatted="false">重新登录</string>
+    <string name="acct_revoked" formatted="false">授权被取消了，凭证已删除。改动留在这台设备上</string>
+    <string name="acct_signed_out">已退出%1$s，凭证已删除</string>
+    <string name="acct_signout" formatted="false">退出登录</string>
+    <string name="acct_store_fail" formatted="false">这台设备上存不了登录凭证</string>
+    <string name="acct_waiting" formatted="false">等你在浏览器里同意…（10 分钟内有效）</string>
+    <string name="align_center" formatted="false">居中</string>
+    <string name="align_justify" formatted="false">两端对齐</string>
+    <string name="align_left" formatted="false">左对齐</string>
+    <string name="align_right" formatted="false">右对齐</string>
+    <string name="br_reg_head" formatted="false">这个位置还不能用</string>
+    <string name="br_reg_sub">开发者要先到对方的开发者后台登记应用，把应用 ID 填进 local.properties 的 %1$s，再重新打包。README「连接账号」写了每家去哪登记、回调地址填什么。</string>
+    <string name="chart_bar" formatted="false">柱状图</string>
+    <string name="chart_line" formatted="false">折线图</string>
+    <string name="chart_n_of">第 %1$d 个，共 %2$d 个</string>
+    <string name="chart_other" formatted="false">其他图表</string>
+    <string name="chart_pie" formatted="false">饼图</string>
+    <string name="chart_untitled" formatted="false">图表</string>
+    <string name="chart_view" formatted="false">查看图表</string>
+    <string name="cloud_kept_local" formatted="false">登录过期了，改动留在这台设备上没有丢。重新登录后再保存</string>
+    <string name="cloud_kind_fdoc" formatted="false">飞书云文档</string>
+    <string name="cloud_kind_fsheet" formatted="false">飞书电子表格</string>
+    <string name="cloud_loading" formatted="false">正在读取…</string>
+    <string name="cloud_none_connected" formatted="false">还没有连接任何云盘</string>
+    <string name="cloud_offline" formatted="false">连不上。已经打开的文件可以接着改，联网后再保存</string>
+    <string name="cloud_readonly_save" formatted="false">这个文件在云端是只读的（Google 自己格式的文档、飞书幻灯片）。用 [另存为] 存一份副本</string>
+    <string name="cloud_readonly_tag" formatted="false">只读</string>
+    <string name="cloud_recent_none" formatted="false">还没有打开过云端文件</string>
+    <string name="cloud_save_failed">没保存上去：%1$s。改动还在，可以再试</string>
+    <string name="cloud_slides_ro" formatted="false">飞书幻灯片这一版只读，已在浏览器里打开</string>
+    <string name="cols_n">%1$d 列</string>
+    <string name="delete_col" formatted="false">删除这一列</string>
+    <string name="delete_row" formatted="false">删除这一行</string>
+    <string name="dup_slide" formatted="false">复制这一页</string>
+    <string name="fill_blue" formatted="false">浅蓝</string>
+    <string name="fill_gray" formatted="false">浅灰</string>
+    <string name="fill_green" formatted="false">浅绿</string>
+    <string name="fill_none" formatted="false">无填充</string>
+    <string name="fill_red" formatted="false">浅红</string>
+    <string name="fill_yellow" formatted="false">浅黄</string>
+    <string name="filter_blank" formatted="false">空白</string>
+    <string name="filter_by">只看「%1$s」</string>
+    <string name="filter_clear" formatted="false">清除筛选</string>
+    <string name="filter_header" formatted="false">先选数据行里的一个值，再按它筛选</string>
+    <string name="filter_on">%1$s 列只看「%2$s」：%3$d 行</string>
+    <string name="find_hits">找到 %1$d 处</string>
+    <string name="find_label" formatted="false">查找</string>
+    <string name="find_replace" formatted="false">查找和替换</string>
+    <string name="fmt_date" formatted="false">日期</string>
+    <string name="fmt_number" formatted="false">数字 0.00</string>
+    <string name="freeze_top" formatted="false">冻结首行</string>
+    <string name="image_failed">「%1$s」不是能插入的图片</string>
+    <string name="ins_picture" formatted="false">图片…</string>
+    <string name="ins_table" formatted="false">表格…</string>
+    <string name="insert" formatted="false">插入</string>
+    <string name="insert_col" formatted="false">右边插入一列</string>
+    <string name="lay_blank" formatted="false">空白</string>
+    <string name="lay_two" formatted="false">两栏</string>
+    <string name="menu_chart" formatted="false">图表</string>
+    <string name="menu_data" formatted="false">数据</string>
+    <string name="menu_fill" formatted="false">填充</string>
+    <string name="menu_insert" formatted="false">插入</string>
+    <string name="menu_object" formatted="false">所选对象</string>
+    <string name="menu_page" formatted="false">页面</string>
+    <string name="menu_paragraph" formatted="false">段落</string>
+    <string name="menu_rows" formatted="false">行列</string>
+    <string name="menu_theme" formatted="false">主题</string>
+    <string name="next" formatted="false">下一个</string>
+    <string name="numbering" formatted="false">编号</string>
+    <string name="obj_bigger" formatted="false">放大</string>
+    <string name="obj_delete" formatted="false">删除</string>
+    <string name="obj_down" formatted="false">下移</string>
+    <string name="obj_left" formatted="false">左移</string>
+    <string name="obj_right" formatted="false">右移</string>
+    <string name="obj_smaller" formatted="false">缩小</string>
+    <string name="obj_up" formatted="false">上移</string>
+    <string name="pick_picture" formatted="false">插入图片</string>
+    <string name="pick_picture_none" formatted="false">图片、下载、相机和文档文件夹里没有找到图片。可以用 [系统选择…]</string>
+    <string name="pick_picture_note" formatted="false">列的是图片、下载、相机和文档文件夹里最新的图片</string>
+    <string name="pick_system" formatted="false">系统选择…</string>
+    <string name="prev" formatted="false">上一个</string>
+    <string name="reload" formatted="false">刷新</string>
+    <string name="replace_all" formatted="false">全部替换</string>
+    <string name="replace_label" formatted="false">替换为</string>
+    <string name="replaced_n">替换了 %1$d 处，可以撤销</string>
+    <string name="rows_n">%1$d 行</string>
+    <string name="sa_cloud_dest">云盘顶层 › %1$s</string>
+    <string name="sa_cloud_to">存一份到%1$s</string>
+    <string name="sa_cloud_to_sub" formatted="false">放在云盘最上一层，原文件不动</string>
+    <string name="shape_arrow" formatted="false">箭头</string>
+    <string name="shape_ellipse" formatted="false">椭圆</string>
+    <string name="shape_rect" formatted="false">矩形</string>
+    <string name="shape_round" formatted="false">圆角矩形</string>
+    <string name="shape_triangle" formatted="false">三角形</string>
+    <string name="signout_title">退出%1$s？</string>
+    <string name="signout_msg" formatted="false">这台设备上的登录凭证会删除。还没保存上去的改动留在本机，再连接同一个账号后可以继续保存。</string>
+    <string name="sort_desc" formatted="false">按当前列降序排序</string>
+    <string name="sorted_desc">已按 %1$s 列降序排列数据行</string>
+    <string name="strike" formatted="false">删除线</string>
+    <string name="theme_dark" formatted="false">深色</string>
+    <string name="theme_forest" formatted="false">森林</string>
+    <string name="theme_light" formatted="false">浅色</string>
+    <string name="theme_warm" formatted="false">暖色</string>
+    <string name="wc_chars">字符（不含空格）：%1$d</string>
+    <string name="wc_chars_sp">字符（含空格）：%1$d</string>
+    <string name="wc_paras">段落：%1$d</string>
+    <string name="wc_words">字数：%1$d</string>
+    <string name="word_count" formatted="false">字数统计</string>
+    <string name="how_to_format" formatted="false">排版和插入</string>
+    <string name="how_to_format_keys" formatted="false">Ctrl+B / I / U；底部工具条 [段落] [插入] [更多] 里有列表、对齐、图片、表格、删除线</string>
+    <string name="how_to_format_hand" formatted="false">捏住选中文字，再捏工具条上的按钮或菜单项</string>
+    <string name="how_to_format_ctrl" formatted="false">扳机拖选文字，再扳机点工具条上的按钮或菜单项</string>
+    <string name="how_to_find" formatted="false">查找替换、字数</string>
+    <string name="how_to_find_keys" formatted="false">Ctrl+F；或 [更多] › [查找和替换] / [字数统计]</string>
+    <string name="how_to_find_hand" formatted="false">捏 [更多]，再捏 [查找和替换] 或 [字数统计]</string>
+    <string name="how_to_find_ctrl" formatted="false">扳机点 [更多]，再点 [查找和替换] 或 [字数统计]</string>
+    <string name="how_to_slides" formatted="false">幻灯片排序</string>
+    <string name="how_to_slides_keys" formatted="false">按住左边缩略图拖到新位置；或 [页面] › [上移] [下移]</string>
+    <string name="how_to_slides_hand" formatted="false">捏住缩略图停一下再拖，松手就放下</string>
+    <string name="how_to_slides_ctrl" formatted="false">扳机按住缩略图停一下再拖，松开就放下</string>
+    <string name="how_to_cloud" formatted="false">连接云盘</string>
+    <string name="how_to_cloud_keys" formatted="false">主页「账号与云盘」点 [连接]，在浏览器里登录同意；「浏览」上面切到那个云盘</string>
+    <string name="how_to_cloud_hand" formatted="false">捏 [连接]，在浏览器页面里同意；回来在「浏览」里捏云盘里的文件</string>
+    <string name="how_to_cloud_ctrl" formatted="false">扳机点 [连接]，在浏览器页面里同意；回来在「浏览」里点云盘里的文件</string>
 </resources>

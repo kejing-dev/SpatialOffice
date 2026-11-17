@@ -39,6 +39,7 @@ object Exporter {
             SaveAsTarget.CSV -> File(dir, Naming.unique(taken, base, "csv"))
             SaveAsTarget.TXT -> File(dir, Naming.unique(taken, base, "txt"))
             SaveAsTarget.PNG -> { var n = base; var i = 2; while (n in taken) n = "$base ${i++}"; File(dir, n) }
+            SaveAsTarget.CLOUD -> File(dir, s.ref.name)
         }
     }
 
@@ -49,6 +50,7 @@ object Exporter {
             SaveAsTarget.COPY -> out.writeBytes(if (s.readOnly) graph.storage.read(s.ref) else s.serialize())
             SaveAsTarget.CSV -> out.writeText((s as SheetSession).book.toCsv(s.sheet))
             SaveAsTarget.TXT -> out.writeText((s as DocSession).plainText())
+            SaveAsTarget.CLOUD -> error("cloud copies go through Accounts.saveCopy")
             SaveAsTarget.PDF -> when (s) {
                 is DeckSession -> deckPdf(s, out)
                 is SheetSession -> sheetPdf(s, out)

@@ -10,7 +10,7 @@ group_device	这台设备	On this device
 group_cloud	云端（需要登录）	Cloud (sign-in required)
 recent_empty	还没有打开过文件。点「新建」开一个，或点「浏览」找这台设备上的文件。	Nothing opened yet. Use New to start a file, or Browse to find files on this device.
 first_hint	接下来：点左边「新建」开一个文档，或点一个文件打开它。	Next: choose New on the left to start a document, or click a file to open it.
-cloud_none	这一版还没有接入云盘。本机文件全部可用。	Cloud drives are not available in this version. Local files all work.
+cloud_none	还没有连接云盘。到「账号与云盘」连接；本机文件不受影响。	No cloud drive connected. Connect one under Accounts & drives; local files are not affected.
 entry_head	别的地方也能直接打开到这里	Files open here from other places too
 entry_sub	浏览器下载的文件 · 系统「分享」和「打开方式」。都是点一下直接打开，不用先转换。	Browser downloads · system Share and Open with. One click opens them; nothing is converted first.
 meta_doc	文档	Document
@@ -101,10 +101,10 @@ how_to_move	挪窗口	Move a window
 how_to_move_keys	拖窗口下面的小圆点	Drag the small dot under the window
 how_to_move_hand	捏住窗口下面的小圆点拖	Pinch and drag the small dot under the window
 how_to_move_ctrl	扳机按住窗口下面的小圆点拖	Hold the trigger on the small dot under the window and drag
-how_to_chart	3D 图表	3D chart
-how_to_chart_keys	表格里点 [3D 图表]；点柱子选中对应单元格	Click [3D chart] in a sheet; click a bar to select its cell
-how_to_chart_hand	捏 [3D 图表]；捏柱子选中对应单元格	Pinch [3D chart]; pinch a bar to select its cell
-how_to_chart_ctrl	扳机点 [3D 图表]；点柱子选中对应单元格	Trigger on [3D chart]; trigger on a bar to select its cell
+how_to_chart	图表	Charts
+how_to_chart_keys	表格里点 [图表]，选柱状 / 折线 / 饼图或 3D 图表；3D 里点柱子选中对应单元格	In a sheet click Chart and pick column, line, pie or 3D; in 3D click a bar to select its cell
+how_to_chart_hand	捏 [图表] 选一种；3D 里捏柱子选中对应单元格	Pinch Chart and pick one; in 3D pinch a bar to select its cell
+how_to_chart_ctrl	扳机点 [图表] 选一种；3D 里点柱子选中对应单元格	Trigger on Chart and pick one; in 3D trigger on a bar to select its cell
 key_save	保存	Save
 key_undo	撤销 / 重做	Undo / redo
 key_bold	粗体 / 斜体 / 下划线	Bold / italic / underline
@@ -214,7 +214,7 @@ add_slide	新建页	New slide
 layout_btn	版式	Layout
 lay_title	标题页	Title
 lay_body	标题 + 正文	Title + body
-text_box	插入文本框	Insert text box
+text_box	文本框	Text box
 delete_slide	删除这一页	Delete this slide
 slide_up	上移一页	Move slide up
 slide_down	下移一页	Move slide down
@@ -276,8 +276,8 @@ sa_txt	纯文本 .txt	Plain text .txt
 sa_txt_sub	只有文字，没有格式	Text only, no formatting
 sa_png	图片（每页一张 PNG）	Images (one PNG per slide)
 sa_png_sub	放进以文件名命名的文件夹	Placed in a folder named after the file
-sa_cloud	飞书 / 云盘	Feishu / cloud drive
-sa_cloud_sub	这一版还没有接入	Not available in this version
+sa_cloud	存到云盘	Save to a cloud drive
+sa_cloud_sub	先在「账号与云盘」连接一个云盘	Connect a drive under Accounts & drives first
 save_to	保存到	Save to
 saveas_note	正在编辑的文件不受影响	The file you are editing is not affected
 saveas_go	另存	Save
@@ -290,3 +290,139 @@ perm_denied	没有权限读写这个位置	No permission to read or write this l
 picker_none	这台设备上没有文件选择器。请在「浏览」里找文件。	No file picker on this device. Find the file under Browse.
 pdf_page	第 %1$d / %2$d 页	Page %1$d / %2$d
 readonly_note	这种文件只读：可以看、铺开、另存	This kind of file is read-only: view, spread out, save as
+acct_browser_done	已连接。回到空间办公就能用了，这一页可以关掉。	Connected. Go back to Spatial Office; you can close this page.
+acct_cancelled	已取消，没有连接	Cancelled, not connected
+acct_connect	连接	Connect
+acct_connected_toast	已连接%1$s：%2$s	Connected to %1$s: %2$s
+acct_expired	登录已过期。改动留在这台设备上，重新登录后保存上去	Sign-in expired. Changes stay on this device and are saved once you sign in again
+acct_expired_note	登录已过期，改动没有丢，重新登录后再保存	Sign-in expired. Nothing is lost; sign in again, then save
+acct_failed	没连上：%1$s	Could not connect: %1$s
+acct_need_reg	需要开发者先登记应用（在 local.properties 填 %1$s，见 README）	The developer has to register the app first (set %1$s in local.properties, see README)
+acct_need_reg_toast	%1$s：需要开发者先登记应用，在 local.properties 填 %2$s 后重新打包	%1$s: the developer has to register the app first. Set %2$s in local.properties and rebuild
+acct_no_browser	这台设备上没有能打开登录页的浏览器	No browser on this device can open the sign-in page
+acct_off_now	没有连接。点 [连接] 在浏览器里登录，密码不经过这个应用	Not connected. Click Connect to sign in in the browser; your password never passes through this app
+acct_on	已连接：%1$s	Connected: %1$s
+acct_relogin	重新登录	Sign in again
+acct_revoked	授权被取消了，凭证已删除。改动留在这台设备上	Access was revoked and the token deleted. Changes stay on this device
+acct_signed_out	已退出%1$s，凭证已删除	Signed out of %1$s; the token is deleted
+acct_signout	退出登录	Sign out
+acct_store_fail	这台设备上存不了登录凭证	This device cannot store the sign-in token
+acct_waiting	等你在浏览器里同意…（10 分钟内有效）	Waiting for you to approve in the browser… (valid for 10 minutes)
+align_center	居中	Centre
+align_justify	两端对齐	Justify
+align_left	左对齐	Align left
+align_right	右对齐	Align right
+br_reg_head	这个位置还不能用	This place is not available yet
+br_reg_sub	开发者要先到对方的开发者后台登记应用，把应用 ID 填进 local.properties 的 %1$s，再重新打包。README「连接账号」写了每家去哪登记、回调地址填什么。	The developer first registers the app in the provider’s developer console, puts the ID in %1$s in local.properties and rebuilds. README “Connecting accounts” lists where to register and which callback address to enter.
+chart_bar	柱状图	Column chart
+chart_line	折线图	Line chart
+chart_n_of	第 %1$d 个，共 %2$d 个	%1$d of %2$d
+chart_other	其他图表	Other chart
+chart_pie	饼图	Pie chart
+chart_untitled	图表	Chart
+chart_view	查看图表	View charts
+cloud_kept_local	登录过期了，改动留在这台设备上没有丢。重新登录后再保存	Sign-in expired; your changes are kept on this device. Sign in again, then save
+cloud_kind_fdoc	飞书云文档	Feishu doc
+cloud_kind_fsheet	飞书电子表格	Feishu sheet
+cloud_loading	正在读取…	Loading…
+cloud_none_connected	还没有连接任何云盘	No cloud drive is connected
+cloud_offline	连不上。已经打开的文件可以接着改，联网后再保存	Cannot reach the service. Open files can still be edited; save once you are online
+cloud_readonly_save	这个文件在云端是只读的（Google 自己格式的文档、飞书幻灯片）。用 [另存为] 存一份副本	This file is read-only in the cloud (Google’s own formats, Feishu slides). Use Save as to keep a copy
+cloud_readonly_tag	只读	Read-only
+cloud_recent_none	还没有打开过云端文件	No cloud files opened yet
+cloud_save_failed	没保存上去：%1$s。改动还在，可以再试	Not saved: %1$s. Your changes are still here; try again
+cloud_slides_ro	飞书幻灯片这一版只读，已在浏览器里打开	Feishu slides are read-only in this version; opened in the browser
+cols_n	%1$d 列	%1$d columns
+delete_col	删除这一列	Delete column
+delete_row	删除这一行	Delete row
+dup_slide	复制这一页	Duplicate slide
+fill_blue	浅蓝	Light blue
+fill_gray	浅灰	Light grey
+fill_green	浅绿	Light green
+fill_none	无填充	No fill
+fill_red	浅红	Light red
+fill_yellow	浅黄	Light yellow
+filter_blank	空白	blank
+filter_by	只看「%1$s」	Only “%1$s”
+filter_clear	清除筛选	Clear filter
+filter_header	先选数据行里的一个值，再按它筛选	Pick a value in a data row first, then filter by it
+filter_on	%1$s 列只看「%2$s」：%3$d 行	Column %1$s showing only “%2$s”: %3$d rows
+find_hits	找到 %1$d 处	%1$d found
+find_label	查找	Find
+find_replace	查找和替换	Find and replace
+fmt_date	日期	Date
+fmt_number	数字 0.00	Number 0.00
+freeze_top	冻结首行	Freeze top row
+image_failed	「%1$s」不是能插入的图片	“%1$s” is not a picture that can be inserted
+ins_picture	图片…	Picture…
+ins_table	表格…	Table…
+insert	插入	Insert
+insert_col	右边插入一列	Insert column right
+lay_blank	空白	Blank
+lay_two	两栏	Two columns
+menu_chart	图表	Chart
+menu_data	数据	Data
+menu_fill	填充	Fill
+menu_insert	插入	Insert
+menu_object	所选对象	Selection
+menu_page	页面	Slide
+menu_paragraph	段落	Paragraph
+menu_rows	行列	Rows & columns
+menu_theme	主题	Theme
+next	下一个	Next
+numbering	编号	Numbering
+obj_bigger	放大	Larger
+obj_delete	删除	Delete
+obj_down	下移	Move down
+obj_left	左移	Move left
+obj_right	右移	Move right
+obj_smaller	缩小	Smaller
+obj_up	上移	Move up
+pick_picture	插入图片	Insert picture
+pick_picture_none	图片、下载、相机和文档文件夹里没有找到图片。可以用 [系统选择…]	No pictures found in Pictures, Download, Camera or Documents. Try System picker…
+pick_picture_note	列的是图片、下载、相机和文档文件夹里最新的图片	Newest pictures from Pictures, Download, Camera and Documents
+pick_system	系统选择…	System picker…
+prev	上一个	Previous
+reload	刷新	Reload
+replace_all	全部替换	Replace all
+replace_label	替换为	Replace with
+replaced_n	替换了 %1$d 处，可以撤销	Replaced %1$d; you can undo it
+rows_n	%1$d 行	%1$d rows
+sa_cloud_dest	云盘顶层 › %1$s	Top of the drive › %1$s
+sa_cloud_to	存一份到%1$s	Save a copy to %1$s
+sa_cloud_to_sub	放在云盘最上一层，原文件不动	Goes to the top of the drive; this file is not touched
+shape_arrow	箭头	Arrow
+shape_ellipse	椭圆	Ellipse
+shape_rect	矩形	Rectangle
+shape_round	圆角矩形	Rounded rectangle
+shape_triangle	三角形	Triangle
+signout_title	退出%1$s？	Sign out of %1$s?
+signout_msg	这台设备上的登录凭证会删除。还没保存上去的改动留在本机，再连接同一个账号后可以继续保存。	The sign-in token on this device is deleted. Changes not yet saved stay here and can be saved after you connect the same account again.
+sort_desc	按当前列降序排序	Sort descending by this column
+sorted_desc	已按 %1$s 列降序排列数据行	Sorted the data rows by column %1$s, descending
+strike	删除线	Strikethrough
+theme_dark	深色	Dark
+theme_forest	森林	Forest
+theme_light	浅色	Light
+theme_warm	暖色	Warm
+wc_chars	字符（不含空格）：%1$d	Characters (no spaces): %1$d
+wc_chars_sp	字符（含空格）：%1$d	Characters (with spaces): %1$d
+wc_paras	段落：%1$d	Paragraphs: %1$d
+wc_words	字数：%1$d	Words: %1$d
+word_count	字数统计	Word count
+how_to_format	排版和插入	Format and insert
+how_to_format_keys	Ctrl+B / I / U；底部工具条 [段落] [插入] [更多] 里有列表、对齐、图片、表格、删除线	Ctrl+B / I / U; the bottom toolbar's Paragraph, Insert and More hold lists, alignment, pictures, tables, strikethrough
+how_to_format_hand	捏住选中文字，再捏工具条上的按钮或菜单项	Pinch to select text, then pinch a toolbar button or menu item
+how_to_format_ctrl	扳机拖选文字，再扳机点工具条上的按钮或菜单项	Trigger-drag to select text, then trigger on a toolbar button or menu item
+how_to_find	查找替换、字数	Find, replace, word count
+how_to_find_keys	Ctrl+F；或 [更多] › [查找和替换] / [字数统计]	Ctrl+F; or More › Find and replace / Word count
+how_to_find_hand	捏 [更多]，再捏 [查找和替换] 或 [字数统计]	Pinch More, then Find and replace or Word count
+how_to_find_ctrl	扳机点 [更多]，再点 [查找和替换] 或 [字数统计]	Trigger on More, then Find and replace or Word count
+how_to_slides	幻灯片排序	Reorder slides
+how_to_slides_keys	按住左边缩略图拖到新位置；或 [页面] › [上移] [下移]	Hold a thumbnail on the left and drag it; or Slide › Move up / down
+how_to_slides_hand	捏住缩略图停一下再拖，松手就放下	Pinch and hold a thumbnail, then drag; let go to drop it
+how_to_slides_ctrl	扳机按住缩略图停一下再拖，松开就放下	Hold the trigger on a thumbnail, then drag; release to drop it
+how_to_cloud	连接云盘	Connect a cloud drive
+how_to_cloud_keys	主页「账号与云盘」点 [连接]，在浏览器里登录同意；「浏览」上面切到那个云盘	Home › Accounts & drives › Connect, approve in the browser; then switch Browse to that drive
+how_to_cloud_hand	捏 [连接]，在浏览器页面里同意；回来在「浏览」里捏云盘里的文件	Pinch Connect and approve on the browser page; back here, pinch a file under Browse
+how_to_cloud_ctrl	扳机点 [连接]，在浏览器页面里同意；回来在「浏览」里点云盘里的文件	Trigger on Connect and approve on the browser page; back here, trigger on a file under Browse

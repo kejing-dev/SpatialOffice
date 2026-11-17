@@ -55,9 +55,7 @@ internal fun BrowsePage(graph: Graph) {
             Segments(locs.mapIndexed { i, id -> i to tr(id) }, graph.browseLoc, "browse/loc", itemWidth = 136.dp) { graph.browseLoc = it; graph.browseDir = null }
         }
         if (graph.browseLoc != 0) {
-            // no provider is connected in this version; say so instead of showing made-up folders
-            Spacer(Modifier.height(24.dp))
-            InfoRow(R.drawable.ic_cloud, tr(R.string.br_off_head, tr(locs[graph.browseLoc])), tr(R.string.br_off_sub), "browse/off")
+            CloudBrowsePage(graph, io.embodit.spatialoffice.core.cloud.Provider.values()[graph.browseLoc - 1])
             return@PageBody
         }
         val dir = graph.browseDir
@@ -176,9 +174,13 @@ private fun HowToSheet(graph: Graph) {
     val rows = listOf(
         listOf(R.drawable.ic_folder, R.string.how_to_open, R.string.how_to_open_keys, R.string.how_to_open_hand, R.string.how_to_open_ctrl),
         listOf(R.drawable.ic_text, R.string.how_to_edit, R.string.how_to_edit_keys, R.string.how_to_edit_hand, R.string.how_to_edit_ctrl),
+        listOf(R.drawable.ic_text_bold, R.string.how_to_format, R.string.how_to_format_keys, R.string.how_to_format_hand, R.string.how_to_format_ctrl),
+        listOf(R.drawable.ic_search, R.string.how_to_find, R.string.how_to_find_keys, R.string.how_to_find_hand, R.string.how_to_find_ctrl),
+        listOf(R.drawable.ic_presentation, R.string.how_to_slides, R.string.how_to_slides_keys, R.string.how_to_slides_hand, R.string.how_to_slides_ctrl),
         listOf(R.drawable.ic_check_circle, R.string.how_to_save, R.string.how_to_save_keys, R.string.how_to_save_hand, R.string.how_to_save_ctrl),
         listOf(R.drawable.ic_spread, R.string.how_to_spread, R.string.how_to_spread_keys, R.string.how_to_spread_hand, R.string.how_to_spread_ctrl),
         listOf(R.drawable.ic_chart_3d, R.string.how_to_chart, R.string.how_to_chart_keys, R.string.how_to_chart_hand, R.string.how_to_chart_ctrl),
+        listOf(R.drawable.ic_cloud, R.string.how_to_cloud, R.string.how_to_cloud_keys, R.string.how_to_cloud_hand, R.string.how_to_cloud_ctrl),
         listOf(R.drawable.ic_expand, R.string.how_to_move, R.string.how_to_move_keys, R.string.how_to_move_hand, R.string.how_to_move_ctrl),
     )
     Sheet(
@@ -207,5 +209,46 @@ private fun HowToLine(icon: Int, text: String) {
     Row(Modifier.fillMaxWidth().padding(start = 32.dp), verticalAlignment = Alignment.Top) {
         Icon(painter = painterResource(icon), contentDescription = null, modifier = Modifier.padding(top = 2.dp).size(18.dp), tint = PicoTheme.colorScheme.labelSecondary)
         Txt(text, "howto/line", Modifier.weight(1f).padding(start = 10.dp), style = PicoTheme.typography.bodyMedium, maxLines = 3)
+    }
+}
+
+/** Browse › Feishu / Google Drive / OneDrive / Dropbox (PRD §9.5): folders and files, opened like local ones. */
+@Composable
+private fun CloudBrowsePage(graph: Graph, p: io.embodit.spatialoffice.core.cloud.Provider) {
+    val a = graph.accounts
+    val b = a.browse.getValue(p)
+    val name = tr(io.embodit.spatialoffice.platform.Accounts.nameRes(p))
+    if (!a.connected(p)) {
+        Spacer(Modifier.height(12.dp))
+        io.embodit.spatialoffice.ui.home.AccountRow(graph, p)
+        if (a.state(p) == io.embodit.spatialoffice.platform.AcctState.UNREGISTERED)
+            InfoRow(R.drawable.ic_info_circle, tr(R.string.br_reg_head), tr(R.string.br_reg_sub, a.configKey(p)), "browse/reg")
+        return
+    }
+    androidx.compose.runtime.LaunchedEffect(p, b.stack.size) { if (b.loadedFor != (b.stack.lastOrNull()?.id ?: "")) a.refresh(p) }
+    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(painter = painterResource(R.drawable.ic_cloud), contentDescription = null, modifier = Modifier.size(20.dp), tint = PicoTheme.colorScheme.labelSecondary)
+        Txt((listOf(name) + b.stack.map { it.name }).joinToString(" › "), "browse/cloud-path", Modifier.weight(1f).padding(horizontal = 10.dp), style = PicoTheme.typography.bodyLarge, maxLines = 2)
+        if (b.stack.isNotEmpty()) SecondaryButton(tr(R.string.browse_up), "browse/cloud-up", icon = R.drawable.ic_arrow_up, onClick = { a.up(p) })
+        Spacer(Modifier.width(8.dp))
+        SecondaryButton(tr(R.string.reload), "browse/cloud-reload", onClick = { a.refresh(p) })
+    }
+    when {
+        b.loading -> InfoRow(R.drawable.ic_history, tr(R.string.cloud_loading), null, "browse/cloud-loading")
+        b.error != null -> InfoRow(R.drawable.ic_info_circle, b.error ?: "", null, "browse/cloud-error")
+        b.items.isEmpty() -> InfoRow(R.drawable.ic_info_circle, tr(R.string.browse_empty), null, "browse/cloud-empty")
+        else -> b.items.take(60).forEach { f ->
+            val kind = io.embodit.spatialoffice.core.files.FileKind.ofName(
+                when (f.kind) { "docx", "doc" -> "x.docx"; "sheet", "bitable" -> "x.xlsx"; "slides" -> "x.pptx"; else -> io.embodit.spatialoffice.core.cloud.CloudApi.exportName(f) },
+            )
+            val meta = when {
+                f.folder -> ""
+                f.feishuOnline -> tr(if (f.kind == "docx") R.string.cloud_kind_fdoc else R.string.cloud_kind_fsheet)
+                f.readOnly -> kindLabel(kind) + " · " + tr(R.string.cloud_readonly_tag)
+                else -> kindLabel(kind) + (if (f.size > 0) " · " + sizeLabel(f.size) else "") + (if (f.modified.length >= 10) " · " + f.modified.take(10) else "")
+            }
+            if (f.folder) FileRow(f.name, "", kind, folder = true, tag = "browse/cloud-dir") { a.enter(p, f) }
+            else FileRow(f.name, meta, kind, tag = "browse/cloud-file") { a.open(p, f) }
+        }
     }
 }

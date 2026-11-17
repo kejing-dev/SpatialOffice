@@ -110,22 +110,51 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         val parts = slideParts()
         if (after < -1 || after > parts.lastIndex) throw IndexOutOfBoundsException("after = $after, slides = ${parts.size}")
         val layout = pickLayout(kind) ?: throw IllegalStateException("the deck has no slide layout to build a slide from")
+        val lType = layout.root?.let { Xml.attr(layout.xml, it, "type") }
+        // decks without a two-column or blank layout get the title-and-content one, with two text boxes / nothing on it
+        val twoBoxes = kind == SlideLayoutKind.TWO_COLUMN && lType != "twoObj" && lType != "twoTxTwoObj"
+        val bare = kind == SlideLayoutKind.BLANK
 
         val shapes = StringBuilder()
         var id = 2
+        var titleBox: LongArray? = null
         for (ph in layout.phs) {
             if (ph.type in FOOTER_TYPES) continue
+            if (bare) continue
+            if (twoBoxes && masterType(ph.type) != "title") continue
+            if (masterType(ph.type) == "title") titleBox = boxOf(layout.xml, ph.sp)
             val phEl = Xml.find(layout.xml, ph.sp, "p:ph") ?: continue
             val attrs = layout.xml.substring(phEl.start + "<p:ph".length, phEl.openEnd).trimEnd('>').trimEnd('/').trim()
             val name = Xml.find(layout.xml, ph.sp, "p:cNvPr")?.let { Xml.attr(layout.xml, it, "name") } ?: "Placeholder $id"
             shapes.append(PptxTemplates.placeholder(id, name, attrs))
             id++
         }
+        if (twoBoxes) {
+            val w = widthEmu
+            val h = heightEmu
+            val top = titleBox?.let { it[1] + it[3] + h / 40 } ?: (h / 4)
+            val margin = w / 16
+            val gap = w / 32
+            val colW = (w - 2 * margin - gap) / 2
+            val colH = h - top - h / 10
+            for (k in 0..1) {
+                val x = margin + k * (colW + gap)
+                shapes.append(PptxTemplates.textBox(id, x, top, colW, colH, "<a:p><a:endParaRPr lang=\"en-US\" sz=\"2000\"/></a:p>", ""))
+                id++
+            }
+        }
         val dir = parts.firstOrNull()?.substringBeforeLast('/') ?: OoxmlPackage.resolve(presPart, "slides/x").substringBeforeLast('/')
         val part = freeName(dir, "slide", ".xml")
         pkg.putText(part, PptxTemplates.slide(shapes.toString()))
         pkg.putText(OoxmlPackage.relsOf(part), PptxTemplates.rels(PptxTemplates.REL + "/slideLayout" to XmlEx.relativize(part, layout.part)))
         ContentTypes.addOverride(pkg, part, PptxTemplates.CT_SLIDE)
+        insertSlideEntry(part, after)
+        structureChanged()
+        return after + 1
+    }
+
+    /** Adds the presentation's relationship to [part] and its entry in the slide list after index [after] (-1 = first). */
+    private fun insertSlideEntry(part: String, after: Int) {
         val rid = Rels.add(pkg, presPart, PptxTemplates.REL + "/slide", XmlEx.relativize(presPart, part))
 
         val px = pkg.text(presPart)!!
@@ -148,8 +177,6 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
             }
         }
         pkg.putText(presPart, out)
-        structureChanged()
-        return after + 1
     }
 
     /**
@@ -214,6 +241,129 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         pkg.putText(part, insertIntoTree(sx, tree, PptxTemplates.textBox(id, x, y, w, h, paras, ns)))
         slideChanged(part)
         return id
+    }
+
+    /**
+     * Copies slide [index] (shapes, pictures, layout, speaker notes) and puts the copy right after it; returns the
+     * copy's index. Parts the slide points at (pictures, layout) are shared, not copied.
+     */
+    fun duplicateSlide(index: Int): Int {
+        val part = slidePart(index)
+        val notesText = slides[index].notes
+        val dir = part.substringBeforeLast('/')
+        val copy = freeName(dir, "slide", ".xml")
+        pkg.put(copy, pkg.bytes(part)!!)
+        val rels = Rels.of(pkg, part).filter { !it.type.endsWith("/notesSlide") }
+        val sb = StringBuilder(XmlEx.XML_DECL).append("<Relationships xmlns=\"${PptxTemplates.REL_PKG}\">")
+        for (r in rels) {
+            sb.append("<Relationship Id=\"").append(Xml.escape(r.id)).append("\" Type=\"").append(Xml.escape(r.type)).append("\" Target=\"")
+                .append(Xml.escape(r.target)).append('"')
+            if (r.external) sb.append(" TargetMode=\"External\"")
+            sb.append("/>")
+        }
+        pkg.putText(OoxmlPackage.relsOf(copy), sb.append("</Relationships>").toString())
+        ContentTypes.addOverride(pkg, copy, PptxTemplates.CT_SLIDE)
+        insertSlideEntry(copy, index)
+        structureChanged()
+        if (notesText.isNotEmpty()) setNotes(index + 1, notesText)
+        return index + 1
+    }
+
+    /** Adds a picture on top of the slide's shapes; returns its shape id. [ext] is "png" / "jpeg" / "jpg" / "gif". */
+    fun addPicture(slide: Int, bytes: ByteArray, ext: String, x: Long, y: Long, w: Long, h: Long): Int {
+        val part = slidePart(slide)
+        val e = ext.lowercase().let { if (it == "jpg") "jpeg" else it }
+        val base = OoxmlPackage.resolve(presPart, "media/x").substringBeforeLast('/')
+        val media = freeName(base, "image", ".$e")
+        pkg.put(media, bytes)
+        ContentTypes.addDefault(pkg, e, "image/$e")
+        val rid = Rels.add(pkg, part, PptxTemplates.REL + "/image", XmlEx.relativize(part, media))
+        val sx = pkg.text(part)!!
+        val root = Xml.root(sx) ?: throw IllegalStateException("slide $slide is not readable")
+        val tree = Xml.find(sx, root, "p:spTree") ?: throw IllegalStateException("slide $slide has no shape tree")
+        val id = maxShapeId(sx) + 1
+        pkg.putText(part, insertIntoTree(sx, tree, PptxTemplates.picture(id, rid, x, y, w, h)))
+        slideChanged(part)
+        return id
+    }
+
+    /** Adds a filled preset shape ([geom]: "rect", "roundRect", "ellipse", "triangle", "rightArrow", …) that can hold text. */
+    fun addShape(slide: Int, geom: String, x: Long, y: Long, w: Long, h: Long, fillRgb: Int): Int {
+        val part = slidePart(slide)
+        val sx = pkg.text(part)!!
+        val root = Xml.root(sx) ?: throw IllegalStateException("slide $slide is not readable")
+        val tree = Xml.find(sx, root, "p:spTree") ?: throw IllegalStateException("slide $slide has no shape tree")
+        val id = maxShapeId(sx) + 1
+        pkg.putText(part, insertIntoTree(sx, tree, PptxTemplates.shape(id, geom, x, y, w, h, fillRgb)))
+        slideChanged(part)
+        return id
+    }
+
+    /** Removes one top-level shape (text box, picture, drawn shape, placeholder) from a slide. */
+    fun deleteShape(slide: Int, shapeId: Int) {
+        val part = slidePart(slide)
+        val sx = pkg.text(part)!!
+        val e = topShapes(sx).firstOrNull { shapeId(sx, it) == shapeId } ?: throw IllegalArgumentException("slide $slide has no shape $shapeId")
+        pkg.putText(part, sx.substring(0, e.start) + sx.substring(e.end))
+        slideChanged(part)
+    }
+
+    /** Moves / resizes a shape. A placeholder that inherited its box gets one of its own. */
+    fun setShapeBox(slide: Int, shapeId: Int, x: Long, y: Long, w: Long, h: Long) {
+        val part = slidePart(slide)
+        val sx = pkg.text(part)!!
+        val e = topShapes(sx).firstOrNull { shapeId(sx, it) == shapeId } ?: throw IllegalArgumentException("slide $slide has no shape $shapeId")
+        if (e.name != "p:sp" && e.name != "p:pic") throw IllegalStateException("shape $shapeId cannot be moved here")
+        val spPr = Xml.child(sx, e, "p:spPr") ?: throw IllegalStateException("shape $shapeId has no shape properties")
+        val box = PptxTemplates.xfrm(x, y, w.coerceAtLeast(1), h.coerceAtLeast(1))
+        val xf = Xml.child(sx, spPr, "a:xfrm")
+        val out = when {
+            xf != null -> {
+                // keep rotation / flip attributes on the existing element
+                val open = sx.substring(xf.start, xf.openEnd).let { if (it.endsWith("/>")) it.dropLast(2) + ">" else it }
+                sx.substring(0, xf.start) + open + box.removePrefix("<a:xfrm>") + sx.substring(xf.end)
+            }
+            spPr.selfClosing -> sx.substring(0, spPr.start) + "<p:spPr>$box</p:spPr>" + sx.substring(spPr.end)
+            else -> sx.substring(0, spPr.openEnd) + box + sx.substring(spPr.openEnd)
+        }
+        pkg.putText(part, out)
+        slideChanged(part)
+    }
+
+    /** Theme colours of the first slide master: dk1, lt1, dk2, lt2, accent1–6, hlink, folHlink → 0xRRGGBB. */
+    fun colorScheme(): Map<String, Int> = firstMaster()?.let { themeColors(it) } ?: emptyMap()
+
+    /**
+     * Changes theme colours (same keys as [colorScheme]) in the theme of every slide master, so text, backgrounds and
+     * shapes that use theme colours follow. Only the colour values inside `a:clrScheme` change.
+     */
+    fun setColorScheme(colors: Map<String, Int>) {
+        val themes = LinkedHashSet<String>()
+        for (p in slideParts()) relTarget(p, "/slideLayout")?.let { relTarget(it, "/slideMaster") }?.let { m -> relTarget(m, "/theme")?.let { themes.add(it) } }
+        firstMaster()?.let { m -> relTarget(m, "/theme")?.let { themes.add(it) } }
+        for (th in themes) {
+            val tx = pkg.text(th) ?: continue
+            val scheme = Xml.root(tx)?.let { Xml.find(tx, it, "a:clrScheme") } ?: continue
+            val edits = ArrayList<Triple<Int, Int, String>>()
+            for (c in Xml.children(tx, scheme)) {
+                val rgb = colors[Xml.local(c.name)] ?: continue
+                val v = Xml.children(tx, c).firstOrNull() ?: continue
+                edits.add(Triple(v.start, v.end, "<a:srgbClr val=\"" + String.format("%06X", rgb and 0xFFFFFF) + "\"/>"))
+            }
+            if (edits.isNotEmpty()) pkg.putText(th, Xml.splice(tx, edits))
+        }
+        themeCache.clear()
+        slideCache.clear()
+        slidesCache = null
+        changed = true
+    }
+
+    private fun firstMaster(): String? {
+        val px = pkg.text(presPart) ?: return null
+        val rels = Rels.of(pkg, presPart)
+        return Xml.root(px)?.let { Xml.child(px, it, "p:sldMasterIdLst") }?.let { Xml.children(px, it).firstOrNull() }
+            ?.let { e -> rels.firstOrNull { it.id == ridOf(px, e) } }?.let { OoxmlPackage.resolve(presPart, it.target) }
+            ?: relTarget(presPart, "/slideMaster")
     }
 
     /** What is shown approximately or kept read-only. Counts are occurrences across the deck. */
@@ -367,6 +517,10 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
             SlideLayoutKind.TITLE_BODY ->
                 docs.firstOrNull { type(it) == "obj" } ?: docs.firstOrNull { type(it) == "tx" }
                     ?: docs.firstOrNull { has(it, "title") && has(it, "body", "obj") } ?: docs.first()
+            SlideLayoutKind.TWO_COLUMN ->
+                docs.firstOrNull { type(it) == "twoObj" } ?: docs.firstOrNull { type(it) == "twoTxTwoObj" } ?: pickLayout(SlideLayoutKind.TITLE_BODY)
+            SlideLayoutKind.BLANK ->
+                docs.firstOrNull { type(it) == "blank" } ?: pickLayout(SlideLayoutKind.TITLE_BODY)
         }
     }
 
@@ -642,6 +796,9 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         val b = box ?: longArrayOf(0, 0, 0, 0)
 
         val txBody = if (e.name == "p:sp") Xml.child(sx, e, "p:txBody") else null
+        val spPr = if (e.name == "p:sp") Xml.child(sx, e, "p:spPr") else null
+        val geom = spPr?.let { Xml.child(sx, it, "a:prstGeom") }?.let { Xml.attr(sx, it, "prst") }
+        val fill = spPr?.let { colorOf(sx, it, master) }
         var imagePart: String? = null
         val kind: ShapeKind
         var editable = false
@@ -671,7 +828,7 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         if (txBody == null) {
             val isText = kind == ShapeKind.TITLE || kind == ShapeKind.BODY || kind == ShapeKind.TEXT
             val font = if (isText) (fromChain(styleChain(sx, e, part), 0) { x, l -> Xml.child(x, l, "a:defRPr")?.let { Xml.attr(x, it, "sz")?.toFloatOrNull() } } ?: 1800f) / 100f else null
-            return Shape(id, kind, b[0], b[1], b[2], b[3], emptyList(), font, false, null, 0, imagePart, editable)
+            return Shape(id, kind, b[0], b[1], b[2], b[3], emptyList(), font, false, null, 0, imagePart, editable, geom, fill)
         }
 
         val chain = styleChain(sx, e, part)
@@ -690,7 +847,7 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         val algn = pPr?.let { Xml.attr(sx, it, "algn") } ?: fromChain(chain, level) { x, l -> Xml.attr(x, l, "algn") }
         return Shape(
             id, kind, b[0], b[1], b[2], b[3], paras, sz / 100f, boldAttr == "1" || boldAttr == "true", color,
-            when (algn) { "ctr" -> 1; "r" -> 2; else -> 0 }, imagePart, editable,
+            when (algn) { "ctr" -> 1; "r" -> 2; else -> 0 }, imagePart, editable, geom, fill,
         )
     }
 

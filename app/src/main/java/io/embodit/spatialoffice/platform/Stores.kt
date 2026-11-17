@@ -51,9 +51,9 @@ class SettingsStore(context: Context) {
     }
 }
 
-data class Recent(val key: String, val name: String, val display: String, val time: Long, val isUri: Boolean) {
+data class Recent(val key: String, val name: String, val display: String, val time: Long, val isUri: Boolean, val cloud: String? = null) {
     val kind: FileKind get() = FileKind.ofName(name)
-    fun ref(): FileRef = if (isUri) FileRef.Content(Uri.parse(key), name) else FileRef.Path(File(key))
+    fun ref(): FileRef = cloud?.let { FileRef.Cloud.fromJson(it) } ?: if (isUri) FileRef.Content(Uri.parse(key), name) else FileRef.Path(File(key))
 }
 
 /** Recently opened files, newest first, at most 20. Entries whose file is gone are dropped when listed. */
@@ -65,17 +65,17 @@ class RecentStore(context: Context) {
     private fun load(): List<Recent> = runCatching {
         (Json.parse(prefs.getString("list", "[]") ?: "[]") as List<*>).mapNotNull { e ->
             val m = e as? Map<*, *> ?: return@mapNotNull null
-            Recent(m["key"] as String, m["name"] as String, m["display"] as? String ?: "", (m["time"] as Double).toLong(), m["uri"] as? Boolean ?: false)
+            Recent(m["key"] as String, m["name"] as String, m["display"] as? String ?: "", (m["time"] as Double).toLong(), m["uri"] as? Boolean ?: false, m["cloud"] as? String)
         }
     }.getOrDefault(emptyList())
 
     private fun store(list: List<Recent>) {
         items = list
-        prefs.edit().putString("list", Json.write(list.map { mapOf("key" to it.key, "name" to it.name, "display" to it.display, "time" to it.time, "uri" to it.isUri) })).apply()
+        prefs.edit().putString("list", Json.write(list.map { mapOf("key" to it.key, "name" to it.name, "display" to it.display, "time" to it.time, "uri" to it.isUri, "cloud" to it.cloud) })).apply()
     }
 
     fun touch(ref: FileRef, display: String) {
-        val r = Recent(ref.key, ref.name, display, System.currentTimeMillis(), ref is FileRef.Content)
+        val r = Recent(ref.key, ref.name, display, System.currentTimeMillis(), ref !is FileRef.Path, (ref as? FileRef.Cloud)?.toJson())
         store((listOf(r) + items.filter { it.key != ref.key }).take(20))
     }
 

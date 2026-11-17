@@ -25,6 +25,25 @@ sealed class FileRef {
     data class Content(val uri: Uri, override val name: String) : FileRef() {
         override val key: String get() = uri.toString()
     }
+
+    /** A file in a connected cloud drive (PRD §9.5). [kind] / [mime] as the service lists it; [folder] = parent id. */
+    data class Cloud(
+        val provider: String, val id: String, override val name: String, val kind: String = "file", val mime: String = "",
+        val path: String = "", val url: String = "", val folder: String = "",
+    ) : FileRef() {
+        override val key: String get() = "cloud:$provider:$id"
+        fun item(): io.embodit.spatialoffice.core.cloud.CloudItem = io.embodit.spatialoffice.core.cloud.CloudItem(id, name, false, 0, "", kind, mime, path, url)
+        val readOnlyCloud: Boolean get() = item().readOnly
+        fun toJson(): String = io.embodit.spatialoffice.core.layout.Json.write(mapOf("p" to provider, "i" to id, "n" to name, "k" to kind, "m" to mime, "a" to path, "u" to url, "f" to folder))
+
+        companion object {
+            fun fromJson(s: String): Cloud? = runCatching {
+                val m = io.embodit.spatialoffice.core.layout.Json.parse(s) as Map<*, *>
+                fun g(k: String) = m[k]?.toString() ?: ""
+                Cloud(g("p"), g("i"), g("n"), g("k"), g("m"), g("a"), g("u"), g("f"))
+            }.getOrNull()
+        }
+    }
 }
 
 data class DirEntry(val file: File, val isDir: Boolean, val size: Long, val modified: Long) {
@@ -37,6 +56,9 @@ data class DirEntry(val file: File, val isDir: Boolean, val size: Long, val modi
  * without it the system picker or Share / Open with still hands single files over as content URIs.
  */
 class Storage(private val context: Context) {
+    /** Set by [Graph] once the accounts exist. */
+    var accounts: Accounts? = null
+
     val shared: File get() = Environment.getExternalStorageDirectory()
     val newDir: File get() = File(shared, Naming.NEW_DIR)
     val downloadDir: File get() = File(shared, Environment.DIRECTORY_DOWNLOADS)
@@ -60,6 +82,7 @@ class Storage(private val context: Context) {
     fun read(ref: FileRef): ByteArray = when (ref) {
         is FileRef.Path -> ref.file.readBytes()
         is FileRef.Content -> context.contentResolver.openInputStream(ref.uri)?.use { it.readBytes() } ?: error("cannot read")
+        is FileRef.Cloud -> accounts?.read(ref) ?: error("no accounts")
     }
 
     fun write(ref: FileRef, bytes: ByteArray) {
@@ -77,18 +100,21 @@ class Storage(private val context: Context) {
                 }
             }
             is FileRef.Content -> context.contentResolver.openOutputStream(ref.uri, "wt")?.use { it.write(bytes) } ?: error("cannot write")
+            is FileRef.Cloud -> accounts?.write(ref, bytes) ?: error("no accounts")
         }
     }
 
     fun canWrite(ref: FileRef): Boolean = when (ref) {
         is FileRef.Path -> if (ref.file.exists()) ref.file.canWrite() else ref.file.parentFile?.let { it.canWrite() || it.mkdirs() } ?: false
         is FileRef.Content -> runCatching { context.contentResolver.openOutputStream(ref.uri, "wa")?.close(); true }.getOrDefault(false)
+        is FileRef.Cloud -> !ref.readOnlyCloud
     }
 
     /** `Download/季度复盘.docx` for shared storage, the bare name for content URIs. */
     fun display(ref: FileRef): String = when (ref) {
         is FileRef.Path -> display(ref.file)
         is FileRef.Content -> ref.name
+        is FileRef.Cloud -> (io.embodit.spatialoffice.core.cloud.Provider.of(ref.provider)?.let { context.getString(Accounts.nameRes(it)) } ?: ref.provider) + " › " + ref.name
     }
 
     fun display(file: File): String {

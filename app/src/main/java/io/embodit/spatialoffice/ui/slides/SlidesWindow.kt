@@ -19,6 +19,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.GenericShape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
@@ -67,6 +74,8 @@ import io.embodit.spatialoffice.platform.DeckSession
 import io.embodit.spatialoffice.platform.Graph
 import io.embodit.spatialoffice.platform.Win
 import io.embodit.spatialoffice.ui.EditorTitleBar
+import io.embodit.spatialoffice.ui.MenuEntry
+import io.embodit.spatialoffice.ui.ToolMenu
 import io.embodit.spatialoffice.ui.FileTools
 import io.embodit.spatialoffice.ui.Ink
 import io.embodit.spatialoffice.ui.NoFile
@@ -117,28 +126,73 @@ fun SlidesWindow() {
 fun slideKeys(s: DeckSession, e: KeyEvent): Boolean {
     if (e.type != KeyEventType.KeyDown) return false
     return when (e.key) {
-        Key.PageDown -> { s.current = (s.current + 1).coerceAtMost(s.deck.slides.size - 1); true }
+        Key.PageDown -> { s.current = (s.current + 1).coerceAtMost(s.slideCount - 1); true }
         Key.PageUp -> { s.current = (s.current - 1).coerceAtLeast(0); true }
+        // Delete removes a picked picture or drawn shape (text boxes keep Delete for their text)
+        Key.Delete -> {
+            val sh = s.deck.slides.getOrNull(s.current)?.shapes?.firstOrNull { it.id == s.selected }
+            if (sh != null && (sh.kind == ShapeKind.PICTURE || sh.geom != null && sh.geom != "rect" || sh.fillRgb != null)) s.deleteSelected() else false
+        }
         else -> false
     }
 }
 
 @Composable
 private fun Thumbnails(s: DeckSession, modifier: Modifier) {
-    s.version
+    // the count is snapshot state: a new or copied slide is in the list in the same frame it is made
+    val n = s.slideCount
     val state = rememberLazyListState()
-    LaunchedEffect(s.current) { runCatching { state.animateScrollToItem(s.current.coerceAtLeast(0)) } }
+    LaunchedEffect(s.current, n) { runCatching { state.animateScrollToItem(s.current.coerceIn(0, (n - 1).coerceAtLeast(0))) } }
+    // long-press a thumbnail and drag it up or down to reorder; it lands where it is let go
+    var dragFrom by remember { mutableIntStateOf(-1) }
+    var dragDy by remember { mutableFloatStateOf(0f) }
+    val stepPx = with(androidx.compose.ui.platform.LocalDensity.current) { (THUMB_H + 16.dp).toPx() }
     LazyColumn(modifier, state = state, verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
-        items(s.deck.slides.size) { i ->
+        items(n, key = { it }) { i ->
             val on = i == s.current
-            Row(Modifier.fillMaxWidth().clickable { s.current = i }.semantics { contentDescription = "slide-thumb-${i + 1}" }, verticalAlignment = Alignment.CenterVertically) {
+            val lifted = i == dragFrom
+            Row(
+                Modifier.fillMaxWidth()
+                    .graphicsLayer { if (lifted) { translationY = dragDy; scaleX = 1.04f; scaleY = 1.04f } }
+                    .pointerInput(i, n) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { dragFrom = i; dragDy = 0f; s.current = i },
+                            onDrag = { change, dragAmount -> change.consume(); dragDy += dragAmount.y },
+                            onDragEnd = {
+                                val to = (i + Math.round(dragDy / stepPx)).coerceIn(0, n - 1)
+                                dragFrom = -1; dragDy = 0f
+                                s.moveSlideTo(i, to)
+                            },
+                            onDragCancel = { dragFrom = -1; dragDy = 0f },
+                        )
+                    }
+                    .clickable { s.current = i; s.selected = -1 }.semantics { contentDescription = "slide-thumb-${i + 1}" },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Txt((i + 1).toString(), "slides/thumb-no", Modifier.width(26.dp), style = PicoTheme.typography.labelLarge, color = if (on) PicoTheme.colorScheme.labelPrimary else PicoTheme.colorScheme.labelSecondary)
-                Box(Modifier.border(if (on) 3.dp else 1.dp, if (on) Ink.Select else Ink.Line, RoundedCornerShape(8.dp)).padding(3.dp)) {
+                Box(Modifier.border(if (on || lifted) 3.dp else 1.dp, if (on || lifted) Ink.Select else Ink.Line, RoundedCornerShape(8.dp)).padding(3.dp)) {
                     SlideCanvas(s, i, 170.dp, editable = false)
                 }
             }
         }
     }
+}
+
+private val THUMB_H = 170.dp * 9f / 16f + 6.dp
+
+private val Triangle = GenericShape { size, _ -> moveTo(size.width / 2f, 0f); lineTo(size.width, size.height); lineTo(0f, size.height); close() }
+private val Arrow = GenericShape { size, _ ->
+    val w = size.width; val h = size.height
+    moveTo(0f, h * 0.3f); lineTo(w * 0.62f, h * 0.3f); lineTo(w * 0.62f, 0f); lineTo(w, h / 2f); lineTo(w * 0.62f, h); lineTo(w * 0.62f, h * 0.7f); lineTo(0f, h * 0.7f); close()
+}
+
+/** Outline of a preset geometry this version draws; anything else is drawn as its bounding rectangle. */
+fun geomShape(geom: String?, width: Dp): androidx.compose.ui.graphics.Shape = when (geom) {
+    "ellipse" -> CircleShape
+    "roundRect" -> RoundedCornerShape(width / 6)
+    "triangle" -> Triangle
+    "rightArrow" -> Arrow
+    else -> RoundedCornerShape(0.dp)
 }
 
 /**
@@ -155,9 +209,17 @@ fun SlideCanvas(s: DeckSession, index: Int, width: Dp, editable: Boolean, modifi
     val perPt = perEmu * 12700f                        // dp per point
     Box(modifier.size(width, height).clip(RoundedCornerShape((width.value / 120f).dp)).background(slide.backgroundRgb?.let { Color(0xFF000000 or it.toLong()) } ?: Ink.Paper)) {
         for (sh in slide.shapes) {
-            val box = Modifier.offset((sh.x * perEmu).dp, (sh.y * perEmu).dp).size((sh.w * perEmu).coerceAtLeast(1f).dp, (sh.h * perEmu).coerceAtLeast(1f).dp)
+            val w = (sh.w * perEmu).coerceAtLeast(1f).dp
+            var box = Modifier.offset((sh.x * perEmu).dp, (sh.y * perEmu).dp).size(w, (sh.h * perEmu).coerceAtLeast(1f).dp)
+            sh.fillRgb?.takeIf { sh.kind != ShapeKind.PICTURE }?.let { rgb -> box = box.background(Color(0xFF000000 or rgb.toLong()), geomShape(sh.geom, w)) }
+            if (editable && s.selected == sh.id) box = box.border(3.dp, Ink.Select, RoundedCornerShape(4.dp))
             when (sh.kind) {
-                ShapeKind.PICTURE -> sh.imagePart?.let { s.image(it) }?.let { Image(bitmap = it.asImageBitmap(), contentDescription = null, contentScale = ContentScale.FillBounds, modifier = box) }
+                ShapeKind.PICTURE -> sh.imagePart?.let { s.image(it) }?.let { bmp ->
+                    Image(
+                        bitmap = bmp.asImageBitmap(), contentDescription = null, contentScale = ContentScale.FillBounds,
+                        modifier = if (editable) box.clickable { s.selected = sh.id }.semantics { contentDescription = "slide-picture-${sh.id}" } else box,
+                    )
+                }
                 ShapeKind.TITLE, ShapeKind.BODY, ShapeKind.TEXT -> ShapeText(s, index, sh, box, perPt, editable && sh.editable)
                 else -> Box(box.border((width.value / 600f).coerceAtLeast(0.5f).dp, Ink.Line, RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
                     if (editable) Text(tr(R.string.slide_other), style = TextStyle(fontSize = 13.sp, color = Ink.Hint, textAlign = TextAlign.Center), modifier = Modifier.padding(6.dp))
@@ -199,35 +261,62 @@ private fun ShapeText(s: DeckSession, slide: Int, sh: Shape, box: Modifier, perP
             onValueChange = { text = it; s.setText(slide, sh.id, it) },
             textStyle = style,
             cursorBrush = SolidColor(Ink.Select),
-            modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }.semantics { contentDescription = "slide-text-${sh.id}" },
+            modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused; if (it.isFocused) s.selected = sh.id }.semantics { contentDescription = "slide-text-${sh.id}" },
         )
     }
 }
 
+/** Colour presets for [Theme]: background (lt1), text (dk1), second text / accent pair, accents. */
+val THEMES: List<Pair<Int, Map<String, Int>>> = listOf(
+    R.string.theme_light to mapOf("lt1" to 0xFFFFFF, "dk1" to 0x111827, "lt2" to 0xF3F4F6, "dk2" to 0x1F2937, "accent1" to 0x2563EB, "accent2" to 0xF97316),
+    R.string.theme_dark to mapOf("lt1" to 0x111827, "dk1" to 0xF9FAFB, "lt2" to 0x1F2937, "dk2" to 0xE5E7EB, "accent1" to 0x60A5FA, "accent2" to 0xFBBF24),
+    R.string.theme_warm to mapOf("lt1" to 0xFFF7ED, "dk1" to 0x431407, "lt2" to 0xFFEDD5, "dk2" to 0x7C2D12, "accent1" to 0xEA580C, "accent2" to 0x0D9488),
+    R.string.theme_forest to mapOf("lt1" to 0xF0FDF4, "dk1" to 0x052E16, "lt2" to 0xDCFCE7, "dk2" to 0x14532D, "accent1" to 0x16A34A, "accent2" to 0x9333EA),
+)
+
+val SHAPE_FILL = 0x2563EB
+
 @Composable
 private fun SlidesToolbar(graph: Graph, s: DeckSession) {
     s.version
-    var layouts by remember { mutableStateOf(false) }
+    val hasSel = s.selected >= 0
     Toolbar(
         supportingContent = { FileTools(graph, Win.SLIDES, s, spreadLabel = R.string.storyline) },
         content = {
             ToolRow {
-                Box {
-                    ToolButton(tr(R.string.add_slide), "slides/add", icon = R.drawable.ic_plus, onClick = { layouts = !layouts })
-                    if (layouts) {
-                        Menu(
-                            onDismissRequest = { layouts = false },
-                            positionProvider = rememberMenuPositionProvider(horizontalPlacement = HorizontalPlacement.alignStart(), verticalPlacement = VerticalPlacement.above(offset = (-12).dp)),
-                        ) {
-                            MenuItem(title = { Txt(tr(R.string.lay_title), "slides/layout-item") }, onClick = { layouts = false; s.addSlide(SlideLayoutKind.TITLE) })
-                            MenuItem(title = { Txt(tr(R.string.lay_body), "slides/layout-item") }, onClick = { layouts = false; s.addSlide(SlideLayoutKind.TITLE_BODY) })
-                        }
-                    }
-                }
-                ToolIcon(R.drawable.ic_text, tr(R.string.text_box), onClick = { s.addTextBox("") })
-                ToolIcon(R.drawable.ic_arrow_up, tr(R.string.slide_up), onClick = { s.moveSlide(-1) }, enabled = s.current > 0)
-                ToolIcon(R.drawable.ic_arrow_down, tr(R.string.slide_down), onClick = { s.moveSlide(1) }, enabled = s.current < s.deck.slides.size - 1)
-                ToolIcon(R.drawable.ic_delete, tr(R.string.delete_slide), onClick = { if (!s.deleteSlide()) graph.say(Win.SLIDES, graph.str(R.string.last_slide)) })
+                ToolMenu(tr(R.string.add_slide), "slides/add", icon = R.drawable.ic_plus, entries = listOf(
+                    MenuEntry(tr(R.string.lay_title), "slides/lay-title") { s.addSlide(SlideLayoutKind.TITLE) },
+                    MenuEntry(tr(R.string.lay_body), "slides/lay-body") { s.addSlide(SlideLayoutKind.TITLE_BODY) },
+                    MenuEntry(tr(R.string.lay_two), "slides/lay-two") { s.addSlide(SlideLayoutKind.TWO_COLUMN) },
+                    MenuEntry(tr(R.string.lay_blank), "slides/lay-blank") { s.addSlide(SlideLayoutKind.BLANK) },
+                ))
+                ToolMenu(tr(R.string.menu_page), "slides/page", entries = listOfNotNull(
+                    MenuEntry(tr(R.string.dup_slide), "slides/dup") { s.duplicateSlide() },
+                    if (s.current > 0) MenuEntry(tr(R.string.slide_up), "slides/up") { s.moveSlide(-1) } else null,
+                    if (s.current < s.slideCount - 1) MenuEntry(tr(R.string.slide_down), "slides/down") { s.moveSlide(1) } else null,
+                    MenuEntry(tr(R.string.delete_slide), "slides/delete") { if (!s.deleteSlide()) graph.say(Win.SLIDES, graph.str(R.string.last_slide)) },
+                ))
+                ToolMenu(tr(R.string.menu_insert), "slides/insert", entries = listOf(
+                    MenuEntry(tr(R.string.text_box), "slides/textbox") { s.addTextBox("") },
+                    MenuEntry(tr(R.string.ins_picture), "slides/picture") { graph.pickImage(Win.SLIDES) { b, e, w, h -> s.addPicture(b, e, w, h) } },
+                    MenuEntry(tr(R.string.shape_rect), "slides/rect") { s.addShape("rect", SHAPE_FILL) },
+                    MenuEntry(tr(R.string.shape_round), "slides/round") { s.addShape("roundRect", SHAPE_FILL) },
+                    MenuEntry(tr(R.string.shape_ellipse), "slides/ellipse") { s.addShape("ellipse", SHAPE_FILL) },
+                    MenuEntry(tr(R.string.shape_triangle), "slides/triangle") { s.addShape("triangle", SHAPE_FILL) },
+                    MenuEntry(tr(R.string.shape_arrow), "slides/arrow") { s.addShape("rightArrow", SHAPE_FILL) },
+                ))
+                ToolMenu(tr(R.string.menu_object), "slides/object", enabled = hasSel, entries = listOf(
+                    MenuEntry(tr(R.string.obj_left), "slides/obj-left") { s.nudge(-1, 0) },
+                    MenuEntry(tr(R.string.obj_right), "slides/obj-right") { s.nudge(1, 0) },
+                    MenuEntry(tr(R.string.obj_up), "slides/obj-up") { s.nudge(0, -1) },
+                    MenuEntry(tr(R.string.obj_down), "slides/obj-down") { s.nudge(0, 1) },
+                    MenuEntry(tr(R.string.obj_bigger), "slides/obj-bigger") { s.nudge(0, 0, 1.2f) },
+                    MenuEntry(tr(R.string.obj_smaller), "slides/obj-smaller") { s.nudge(0, 0, 1f / 1.2f) },
+                    MenuEntry(tr(R.string.obj_delete), "slides/obj-delete") { s.deleteSelected() },
+                ))
+                ToolMenu(tr(R.string.menu_theme), "slides/theme", entries = THEMES.map { (name, colors) ->
+                    MenuEntry(tr(name), "slides/theme-item") { s.setColors(colors) }
+                })
                 ToolDivider()
                 UndoRedo(s)
             }

@@ -165,7 +165,15 @@ internal object Charts {
     fun barChartXml(
         title: String, sheet: String, r1: Int, c1: Int, r2: Int, c2: Int,
         names: List<String>, cats: List<String>, values: List<List<Double?>>,
+    ): String = chartXml("bar", title, sheet, r1, c1, r2, c2, names, cats, values)
+
+    /** Same layout as [barChartXml] as a column ("bar"), line ("line") or pie ("pie", first series only) chart. */
+    fun chartXml(
+        type: String, title: String, sheet: String, r1: Int, c1: Int, r2: Int, c2: Int,
+        names: List<String>, cats: List<String>, values: List<List<Double?>>,
     ): String {
+        val pie = type == "pie"
+        val tag = when (type) { "line" -> "lineChart"; "pie" -> "pieChart"; else -> "barChart" }
         val sb = StringBuilder()
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n")
         sb.append("<c:chartSpace xmlns:c=\"$NS_C\" xmlns:a=\"$NS_A\" xmlns:r=\"$REL_NS\">")
@@ -174,20 +182,34 @@ internal object Charts {
             sb.append("<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>").append(Xml.escape(title))
                 .append("</a:t></a:r></a:p></c:rich></c:tx><c:overlay val=\"0\"/></c:title><c:autoTitleDeleted val=\"0\"/>")
         } else sb.append("<c:autoTitleDeleted val=\"1\"/>")
-        sb.append("<c:plotArea><c:layout/><c:barChart><c:barDir val=\"col\"/><c:grouping val=\"clustered\"/><c:varyColors val=\"0\"/>")
+        sb.append("<c:plotArea><c:layout/><c:$tag>")
+        when (type) {
+            "line" -> sb.append("<c:grouping val=\"standard\"/><c:varyColors val=\"0\"/>")
+            "pie" -> sb.append("<c:varyColors val=\"1\"/>")
+            else -> sb.append("<c:barDir val=\"col\"/><c:grouping val=\"clustered\"/><c:varyColors val=\"0\"/>")
+        }
         val catRef = absRange(sheet, r1, c1 + 1, r1, c2)
-        for (i in names.indices) {
+        for (i in (if (pie) names.indices.take(1) else names.indices)) {
             val row = r1 + 1 + i
             sb.append("<c:ser><c:idx val=\"$i\"/><c:order val=\"$i\"/>")
             sb.append("<c:tx><c:strRef><c:f>").append(Xml.escape(absRange(sheet, row, c1, row, c1))).append("</c:f>")
                 .append(strCache(listOf(names[i]))).append("</c:strRef></c:tx>")
-            sb.append("<c:invertIfNegative val=\"0\"/>")
+            when (type) {
+                "line" -> sb.append("<c:marker><c:symbol val=\"circle\"/></c:marker>")
+                "pie" -> {}
+                else -> sb.append("<c:invertIfNegative val=\"0\"/>")
+            }
             sb.append("<c:cat><c:strRef><c:f>").append(Xml.escape(catRef)).append("</c:f>").append(strCache(cats)).append("</c:strRef></c:cat>")
             sb.append("<c:val><c:numRef><c:f>").append(Xml.escape(absRange(sheet, row, c1 + 1, row, c2))).append("</c:f>")
                 .append(numCache(values[i])).append("</c:numRef></c:val>")
+            if (type == "line") sb.append("<c:smooth val=\"0\"/>")
             sb.append("</c:ser>")
         }
-        sb.append("<c:gapWidth val=\"150\"/><c:axId val=\"$AX_CAT\"/><c:axId val=\"$AX_VAL\"/></c:barChart>")
+        when (type) {
+            "pie" -> { sb.append("<c:firstSliceAng val=\"0\"/></c:pieChart></c:plotArea><c:legend><c:legendPos val=\"r\"/><c:overlay val=\"0\"/></c:legend>"); sb.append("<c:plotVisOnly val=\"1\"/><c:dispBlanksAs val=\"gap\"/></c:chart></c:chartSpace>"); return sb.toString() }
+            "line" -> sb.append("<c:marker val=\"1\"/><c:axId val=\"$AX_CAT\"/><c:axId val=\"$AX_VAL\"/></c:lineChart>")
+            else -> sb.append("<c:gapWidth val=\"150\"/><c:axId val=\"$AX_CAT\"/><c:axId val=\"$AX_VAL\"/></c:barChart>")
+        }
         sb.append("<c:catAx><c:axId val=\"$AX_CAT\"/><c:scaling><c:orientation val=\"minMax\"/></c:scaling><c:delete val=\"0\"/>")
             .append("<c:axPos val=\"b\"/><c:numFmt formatCode=\"General\" sourceLinked=\"1\"/><c:majorTickMark val=\"out\"/>")
             .append("<c:minorTickMark val=\"none\"/><c:tickLblPos val=\"nextTo\"/><c:crossAx val=\"$AX_VAL\"/><c:crosses val=\"autoZero\"/>")

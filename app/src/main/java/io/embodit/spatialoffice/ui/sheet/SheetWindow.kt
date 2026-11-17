@@ -71,6 +71,9 @@ import io.embodit.spatialoffice.platform.Graph
 import io.embodit.spatialoffice.platform.SheetSession
 import io.embodit.spatialoffice.platform.Win
 import io.embodit.spatialoffice.ui.EditorTitleBar
+import io.embodit.spatialoffice.ui.MenuEntry
+import io.embodit.spatialoffice.ui.ToolMenu
+import io.embodit.spatialoffice.platform.Overlay
 import io.embodit.spatialoffice.ui.FileTools
 import io.embodit.spatialoffice.ui.Ink
 import io.embodit.spatialoffice.ui.NoFile
@@ -201,49 +204,59 @@ fun SheetGrid(
 ) {
     s.version
     val book = s.book
-    val rows = maxOf(book.rows(s.sheet) + 12, 24)
-    val lastCol = if (colCount != null) firstCol + colCount else maxOf(book.cols(s.sheet) + 4, 14)
+    val rows = maxOf(s.rowCount + 12, 24)
+    val lastCol = if (colCount != null) firstCol + colCount else maxOf(s.colCount + 4, 14)
     val cols = (firstCol until lastCol).toList()
     val range = remember(s.version, s.sheet) { runCatching { chartRange(s) }.getOrNull() }
     val scroll = if (colCount == null) Modifier.horizontalScroll(hScroll) else Modifier
+    val frozen = s.frozen.coerceAtMost(rows)
+    val shown = s.visibleRows(rows).filter { it >= frozen }
     Column(modifier.clip(RoundedCornerShape(12.dp)).background(Ink.Paper).border(1.dp, Ink.Line, RoundedCornerShape(12.dp))) {
         Row(Modifier.fillMaxWidth().height(ROW_H).background(Ink.Header)) {
             Box(Modifier.width(HEAD_W).height(ROW_H))
             Row(scroll) {
-                cols.forEach { c -> HeadCell(A1.colName(c), colWidth(s, c), c == s.col) }
+                cols.forEach { c -> HeadCell(A1.colName(c) + (if (c == s.filterCol) " ▾" else ""), colWidth(s, c), c == s.col) }
             }
         }
+        // frozen top rows stay above the scrolling part
+        for (r in 0 until frozen) GridRow(s, edit, r, cols, range, scroll, Modifier.background(Ink.Header.copy(alpha = 0.35f)))
+        if (frozen > 0) Box(Modifier.fillMaxWidth().height(2.dp).background(Ink.Select.copy(alpha = 0.6f)))
         LazyColumn(Modifier.fillMaxWidth().weight(1f), state = listState) {
-            items(rows) { r ->
-                Row(Modifier.height(ROW_H)) {
-                    HeadCell((r + 1).toString(), HEAD_W, r == s.row)
-                    Row(scroll) {
-                        cols.forEach { c ->
-                            val cell = book.cell(s.sheet, r, c)
-                            val selected = r == s.row && c == s.col
-                            val inRange = range != null && r >= range[0] && r <= range[2] && c >= range[1] && c <= range[3]
-                            Box(
-                                Modifier.width(colWidth(s, c)).height(ROW_H)
-                                    .background(if (selected) Ink.SelectFill else if (inRange) Ink.Range else Color.Transparent)
-                                    .border(if (selected) 2.dp else 0.5.dp, if (selected) Ink.Select else Ink.Line)
-                                    .clickable {
-                                        edit?.commit(s); s.select(r, c); edit?.load(s)
-                                        runCatching { edit?.focus?.requestFocus() }
-                                    }
-                                    .semantics { contentDescription = "cell-" + A1.name(r, c) }
-                                    .padding(horizontal = 8.dp),
-                                contentAlignment = if (cell.kind == CellKind.NUMBER) Alignment.CenterEnd else Alignment.CenterStart,
-                            ) {
-                                // a cell shows what fits, like every spreadsheet; the full value is in the formula bar
-                                Text(
-                                    if (selected && edit?.editing == true) edit.value.text else cell.display,
-                                    style = TextStyle(fontSize = 15.sp, color = if (cell.kind == CellKind.ERROR) Color(0xFFB3261E) else Ink.Text, fontWeight = if (cell.bold) FontWeight.Bold else null),
-                                    maxLines = 1, softWrap = false,
-                                    textAlign = if (cell.kind == CellKind.NUMBER) TextAlign.End else TextAlign.Start,
-                                )
-                            }
+            items(shown.size, key = { shown[it] }) { i -> GridRow(s, edit, shown[i], cols, range, scroll, Modifier) }
+        }
+    }
+}
+
+@Composable
+private fun GridRow(s: SheetSession, edit: CellEdit?, r: Int, cols: List<Int>, range: IntArray?, scroll: Modifier, modifier: Modifier) {
+    val book = s.book
+    Row(modifier.height(ROW_H)) {
+        HeadCell((r + 1).toString(), HEAD_W, r == s.row)
+        Row(scroll) {
+            cols.forEach { c ->
+                val cell = book.cell(s.sheet, r, c)
+                val selected = r == s.row && c == s.col
+                val inRange = range != null && r >= range[0] && r <= range[2] && c >= range[1] && c <= range[3]
+                val fill = if (s.isCsv) null else book.fillRgb(s.sheet, r, c)
+                Box(
+                    Modifier.width(colWidth(s, c)).height(ROW_H)
+                        .background(if (selected) Ink.SelectFill else if (fill != null) Color(0xFF000000 or fill.toLong()) else if (inRange) Ink.Range else Color.Transparent)
+                        .border(if (selected) 2.dp else 0.5.dp, if (selected) Ink.Select else Ink.Line)
+                        .clickable {
+                            edit?.commit(s); s.select(r, c); edit?.load(s)
+                            runCatching { edit?.focus?.requestFocus() }
                         }
-                    }
+                        .semantics { contentDescription = "cell-" + A1.name(r, c) }
+                        .padding(horizontal = 8.dp),
+                    contentAlignment = if (cell.kind == CellKind.NUMBER) Alignment.CenterEnd else Alignment.CenterStart,
+                ) {
+                    // a cell shows what fits, like every spreadsheet; the full value is in the formula bar
+                    Text(
+                        if (selected && edit?.editing == true) edit.value.text else cell.display,
+                        style = TextStyle(fontSize = 15.sp, color = if (cell.kind == CellKind.ERROR) Color(0xFFB3261E) else Ink.Text, fontWeight = if (cell.bold) FontWeight.Bold else null),
+                        maxLines = 1, softWrap = false,
+                        textAlign = if (cell.kind == CellKind.NUMBER) TextAlign.End else TextAlign.Start,
+                    )
                 }
             }
         }
@@ -260,6 +273,7 @@ private fun HeadCell(label: String, width: Dp, active: Boolean) {
 @Composable
 private fun SheetPicker(graph: Graph, s: SheetSession, edit: CellEdit) {
     s.version
+    s.sheetCount
     val names = s.book.sheetNames
     val chart = remember(s.version, s.sheet) { runCatching { s.book.charts().firstOrNull { it.sheet == s.sheet } }.getOrNull() }
     Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -310,45 +324,77 @@ fun openChart(graph: Graph, s: SheetSession) {
     graph.windows.open(Win.CHART)
 }
 
+/** Fill colours offered in the toolbar: light tints that keep black text readable (≥ 4.5:1). */
+val FILLS: List<Pair<Int, Int?>> = listOf(
+    R.string.fill_none to null, R.string.fill_yellow to 0xFFF3B0, R.string.fill_green to 0xD4F4DD,
+    R.string.fill_blue to 0xDBEAFE, R.string.fill_red to 0xFDE2E1, R.string.fill_gray to 0xE5E7EB,
+)
+
+/** Makes a chart of [type] ("bar" / "line" / "pie") from the data around the selection and shows it. */
+fun makeChart(graph: Graph, s: SheetSession, type: String) {
+    val region = currentRegion(s)
+    val title = s.book.sheetNames.getOrElse(s.sheet) { "" }
+    if (region == null || !s.addChart(region, title, type)) { graph.say(Win.SHEET, graph.str(R.string.chart_fail)); return }
+    graph.say(Win.SHEET, graph.str(R.string.chart_made, title))
+    graph.overlay = Overlay.ChartView(Win.SHEET, s.book.charts().lastIndex)
+}
+
 @Composable
 private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
     s.version
-    var fmtMenu by remember { mutableStateOf(false) }
     val cell = s.book.cell(s.sheet, s.row, s.col)
+    val hasCharts = remember(s.version) { runCatching { s.book.charts().isNotEmpty() }.getOrDefault(false) }
+    fun run(f: () -> Unit) { edit.commit(s); f(); edit.load(s) }
     Toolbar(
         supportingContent = { FileTools(graph, Win.SHEET, s) },
         content = {
             ToolRow {
                 ToolToggle(R.drawable.ic_text_bold, tr(R.string.bold), cell.bold, { on -> edit.commit(s); s.setBold(on) }, enabled = !s.isCsv)
-                Box {
-                    ToolButton(
-                        tr(when (cell.fmt) { NumFmt.CURRENCY -> R.string.fmt_currency; NumFmt.PERCENT -> R.string.fmt_percent; else -> R.string.fmt_general }),
-                        "sheet/fmt", onClick = { fmtMenu = !fmtMenu }, enabled = !s.isCsv,
-                    )
-                    if (fmtMenu) {
-                        Menu(
-                            onDismissRequest = { fmtMenu = false },
-                            positionProvider = rememberMenuPositionProvider(horizontalPlacement = HorizontalPlacement.alignStart(), verticalPlacement = VerticalPlacement.above(offset = (-12).dp)),
-                        ) {
-                            listOf(NumFmt.GENERAL to R.string.fmt_general, NumFmt.CURRENCY to R.string.fmt_currency, NumFmt.PERCENT to R.string.fmt_percent).forEach { (f, label) ->
-                                MenuItem(title = { Txt(tr(label), "sheet/fmt-item") }, onClick = { fmtMenu = false; edit.commit(s); s.setFmt(f) })
-                            }
-                        }
-                    }
-                }
+                ToolMenu(
+                    tr(when (cell.fmt) { NumFmt.CURRENCY -> R.string.fmt_currency; NumFmt.PERCENT -> R.string.fmt_percent; NumFmt.DATE -> R.string.fmt_date; NumFmt.OTHER -> R.string.fmt_number; else -> R.string.fmt_general }),
+                    "sheet/fmt", enabled = !s.isCsv,
+                    entries = listOf(NumFmt.GENERAL to R.string.fmt_general, NumFmt.OTHER to R.string.fmt_number, NumFmt.CURRENCY to R.string.fmt_currency, NumFmt.PERCENT to R.string.fmt_percent, NumFmt.DATE to R.string.fmt_date).map { (f, label) ->
+                        MenuEntry(tr(label), "sheet/fmt-item", checked = cell.fmt == f) { run { s.setFmt(f) } }
+                    },
+                )
+                ToolMenu(tr(R.string.menu_fill), "sheet/fill", enabled = !s.isCsv, entries = FILLS.map { (label, rgb) ->
+                    MenuEntry(tr(label), "sheet/fill-item") { run { s.setFill(rgb) } }
+                })
                 ToolIcon(R.drawable.ic_sigma, tr(R.string.autosum), onClick = {
                     edit.commit(s); if (s.autoSum() == null) graph.say(Win.SHEET, graph.str(R.string.no_num)); edit.load(s)
                 })
-                ToolIcon(R.drawable.ic_list_sort_down, tr(R.string.sort_asc), onClick = {
-                    edit.commit(s)
-                    graph.say(Win.SHEET, if (s.sortByColumn()) graph.str(R.string.sorted, A1.colName(s.col)) else graph.str(R.string.sort_refused))
-                    edit.load(s)
-                })
-                ToolButton(tr(R.string.insert_row), "sheet/insert-row", onClick = { edit.commit(s); s.insertRowBelow(); edit.load(s) })
-                ToolButton(tr(R.string.chart_3d), "sheet/chart", icon = R.drawable.ic_chart_3d, onClick = { edit.commit(s); openChart(graph, s) }, enabled = !s.isCsv)
+                ToolMenu(tr(R.string.menu_data), "sheet/data", icon = R.drawable.ic_list_sort_down, entries = listOfNotNull(
+                    MenuEntry(tr(R.string.sort_asc), "sheet/sort-asc") { run { graph.say(Win.SHEET, if (s.sortByColumn(true)) graph.str(R.string.sorted, A1.colName(s.col)) else graph.str(R.string.sort_refused)) } },
+                    MenuEntry(tr(R.string.sort_desc), "sheet/sort-desc") { run { graph.say(Win.SHEET, if (s.sortByColumn(false)) graph.str(R.string.sorted_desc, A1.colName(s.col)) else graph.str(R.string.sort_refused)) } },
+                    MenuEntry(tr(R.string.filter_by, cell.display.ifEmpty { tr(R.string.filter_blank) }), "sheet/filter") { run { sheetFilter(graph, s) } },
+                    if (s.filterCol >= 0) MenuEntry(tr(R.string.filter_clear), "sheet/filter-clear") { s.filterCol = -1; s.filterValue = null } else null,
+                    if (!s.isCsv) MenuEntry(tr(R.string.freeze_top), "sheet/freeze", checked = s.frozen > 0) { run { s.toggleFreeze() } } else null,
+                ))
+                ToolMenu(tr(R.string.menu_rows), "sheet/rows", entries = listOf(
+                    MenuEntry(tr(R.string.insert_row), "sheet/insert-row") { run { s.insertRowBelow() } },
+                    MenuEntry(tr(R.string.delete_row), "sheet/delete-row") { run { s.deleteRow() } },
+                    MenuEntry(tr(R.string.insert_col), "sheet/insert-col") { run { s.insertColumn() } },
+                    MenuEntry(tr(R.string.delete_col), "sheet/delete-col") { run { s.deleteColumn() } },
+                ))
+                ToolMenu(tr(R.string.menu_chart), "sheet/chart", icon = R.drawable.ic_chart_3d, enabled = !s.isCsv, entries = listOfNotNull(
+                    MenuEntry(tr(R.string.chart_bar), "sheet/chart-bar") { run { makeChart(graph, s, "bar") } },
+                    MenuEntry(tr(R.string.chart_line), "sheet/chart-line") { run { makeChart(graph, s, "line") } },
+                    MenuEntry(tr(R.string.chart_pie), "sheet/chart-pie") { run { makeChart(graph, s, "pie") } },
+                    if (hasCharts) MenuEntry(tr(R.string.chart_view), "sheet/chart-view") { graph.overlay = Overlay.ChartView(Win.SHEET) } else null,
+                    MenuEntry(tr(R.string.chart_3d), "sheet/chart-3d") { run { openChart(graph, s) } },
+                ))
                 ToolDivider()
                 UndoRedo(s)
             }
         },
     )
+}
+
+/** Data ▸ Filter by this value: shows only the rows whose value in this column equals the selected cell's. */
+fun sheetFilter(graph: Graph, s: SheetSession) {
+    if (s.row == 0) { graph.say(Win.SHEET, graph.str(R.string.filter_header)); return }
+    s.filterCol = s.col
+    s.filterValue = s.book.cell(s.sheet, s.row, s.col).display
+    val n = s.visibleRows(s.rowCount).count { it in 1 until s.rowCount }
+    graph.say(Win.SHEET, graph.str(R.string.filter_on, A1.colName(s.col), s.filterValue ?: "", n))
 }

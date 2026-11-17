@@ -13,7 +13,7 @@
     <string name="group_cloud" formatted="false">Cloud (sign-in required)</string>
     <string name="recent_empty" formatted="false">Nothing opened yet. Use New to start a file, or Browse to find files on this device.</string>
     <string name="first_hint" formatted="false">Next: choose New on the left to start a document, or click a file to open it.</string>
-    <string name="cloud_none" formatted="false">Cloud drives are not available in this version. Local files all work.</string>
+    <string name="cloud_none" formatted="false">No cloud drive connected. Connect one under Accounts &amp; drives; local files are not affected.</string>
     <string name="entry_head" formatted="false">Files open here from other places too</string>
     <string name="entry_sub" formatted="false">Browser downloads · system Share and Open with. One click opens them; nothing is converted first.</string>
     <string name="meta_doc" formatted="false">Document</string>
@@ -104,10 +104,10 @@
     <string name="how_to_move_keys" formatted="false">Drag the small dot under the window</string>
     <string name="how_to_move_hand" formatted="false">Pinch and drag the small dot under the window</string>
     <string name="how_to_move_ctrl" formatted="false">Hold the trigger on the small dot under the window and drag</string>
-    <string name="how_to_chart" formatted="false">3D chart</string>
-    <string name="how_to_chart_keys" formatted="false">Click [3D chart] in a sheet; click a bar to select its cell</string>
-    <string name="how_to_chart_hand" formatted="false">Pinch [3D chart]; pinch a bar to select its cell</string>
-    <string name="how_to_chart_ctrl" formatted="false">Trigger on [3D chart]; trigger on a bar to select its cell</string>
+    <string name="how_to_chart" formatted="false">Charts</string>
+    <string name="how_to_chart_keys" formatted="false">In a sheet click Chart and pick column, line, pie or 3D; in 3D click a bar to select its cell</string>
+    <string name="how_to_chart_hand" formatted="false">Pinch Chart and pick one; in 3D pinch a bar to select its cell</string>
+    <string name="how_to_chart_ctrl" formatted="false">Trigger on Chart and pick one; in 3D trigger on a bar to select its cell</string>
     <string name="key_save" formatted="false">Save</string>
     <string name="key_undo" formatted="false">Undo / redo</string>
     <string name="key_bold" formatted="false">Bold / italic / underline</string>
@@ -217,7 +217,7 @@
     <string name="layout_btn" formatted="false">Layout</string>
     <string name="lay_title" formatted="false">Title</string>
     <string name="lay_body" formatted="false">Title + body</string>
-    <string name="text_box" formatted="false">Insert text box</string>
+    <string name="text_box" formatted="false">Text box</string>
     <string name="delete_slide" formatted="false">Delete this slide</string>
     <string name="slide_up" formatted="false">Move slide up</string>
     <string name="slide_down" formatted="false">Move slide down</string>
@@ -279,8 +279,8 @@
     <string name="sa_txt_sub" formatted="false">Text only, no formatting</string>
     <string name="sa_png" formatted="false">Images (one PNG per slide)</string>
     <string name="sa_png_sub" formatted="false">Placed in a folder named after the file</string>
-    <string name="sa_cloud" formatted="false">Feishu / cloud drive</string>
-    <string name="sa_cloud_sub" formatted="false">Not available in this version</string>
+    <string name="sa_cloud" formatted="false">Save to a cloud drive</string>
+    <string name="sa_cloud_sub" formatted="false">Connect a drive under Accounts &amp; drives first</string>
     <string name="save_to" formatted="false">Save to</string>
     <string name="saveas_note" formatted="false">The file you are editing is not affected</string>
     <string name="saveas_go" formatted="false">Save</string>
@@ -293,4 +293,140 @@
     <string name="picker_none" formatted="false">No file picker on this device. Find the file under Browse.</string>
     <string name="pdf_page">Page %1$d / %2$d</string>
     <string name="readonly_note" formatted="false">This kind of file is read-only: view, spread out, save as</string>
+    <string name="acct_browser_done" formatted="false">Connected. Go back to Spatial Office; you can close this page.</string>
+    <string name="acct_cancelled" formatted="false">Cancelled, not connected</string>
+    <string name="acct_connect" formatted="false">Connect</string>
+    <string name="acct_connected_toast">Connected to %1$s: %2$s</string>
+    <string name="acct_expired" formatted="false">Sign-in expired. Changes stay on this device and are saved once you sign in again</string>
+    <string name="acct_expired_note" formatted="false">Sign-in expired. Nothing is lost; sign in again, then save</string>
+    <string name="acct_failed">Could not connect: %1$s</string>
+    <string name="acct_need_reg">The developer has to register the app first (set %1$s in local.properties, see README)</string>
+    <string name="acct_need_reg_toast">%1$s: the developer has to register the app first. Set %2$s in local.properties and rebuild</string>
+    <string name="acct_no_browser" formatted="false">No browser on this device can open the sign-in page</string>
+    <string name="acct_off_now" formatted="false">Not connected. Click Connect to sign in in the browser; your password never passes through this app</string>
+    <string name="acct_on">Connected: %1$s</string>
+    <string name="acct_relogin" formatted="false">Sign in again</string>
+    <string name="acct_revoked" formatted="false">Access was revoked and the token deleted. Changes stay on this device</string>
+    <string name="acct_signed_out">Signed out of %1$s; the token is deleted</string>
+    <string name="acct_signout" formatted="false">Sign out</string>
+    <string name="acct_store_fail" formatted="false">This device cannot store the sign-in token</string>
+    <string name="acct_waiting" formatted="false">Waiting for you to approve in the browser… (valid for 10 minutes)</string>
+    <string name="align_center" formatted="false">Centre</string>
+    <string name="align_justify" formatted="false">Justify</string>
+    <string name="align_left" formatted="false">Align left</string>
+    <string name="align_right" formatted="false">Align right</string>
+    <string name="br_reg_head" formatted="false">This place is not available yet</string>
+    <string name="br_reg_sub">The developer first registers the app in the provider’s developer console, puts the ID in %1$s in local.properties and rebuilds. README “Connecting accounts” lists where to register and which callback address to enter.</string>
+    <string name="chart_bar" formatted="false">Column chart</string>
+    <string name="chart_line" formatted="false">Line chart</string>
+    <string name="chart_n_of">%1$d of %2$d</string>
+    <string name="chart_other" formatted="false">Other chart</string>
+    <string name="chart_pie" formatted="false">Pie chart</string>
+    <string name="chart_untitled" formatted="false">Chart</string>
+    <string name="chart_view" formatted="false">View charts</string>
+    <string name="cloud_kept_local" formatted="false">Sign-in expired; your changes are kept on this device. Sign in again, then save</string>
+    <string name="cloud_kind_fdoc" formatted="false">Feishu doc</string>
+    <string name="cloud_kind_fsheet" formatted="false">Feishu sheet</string>
+    <string name="cloud_loading" formatted="false">Loading…</string>
+    <string name="cloud_none_connected" formatted="false">No cloud drive is connected</string>
+    <string name="cloud_offline" formatted="false">Cannot reach the service. Open files can still be edited; save once you are online</string>
+    <string name="cloud_readonly_save" formatted="false">This file is read-only in the cloud (Google’s own formats, Feishu slides). Use Save as to keep a copy</string>
+    <string name="cloud_readonly_tag" formatted="false">Read-only</string>
+    <string name="cloud_recent_none" formatted="false">No cloud files opened yet</string>
+    <string name="cloud_save_failed">Not saved: %1$s. Your changes are still here; try again</string>
+    <string name="cloud_slides_ro" formatted="false">Feishu slides are read-only in this version; opened in the browser</string>
+    <string name="cols_n">%1$d columns</string>
+    <string name="delete_col" formatted="false">Delete column</string>
+    <string name="delete_row" formatted="false">Delete row</string>
+    <string name="dup_slide" formatted="false">Duplicate slide</string>
+    <string name="fill_blue" formatted="false">Light blue</string>
+    <string name="fill_gray" formatted="false">Light grey</string>
+    <string name="fill_green" formatted="false">Light green</string>
+    <string name="fill_none" formatted="false">No fill</string>
+    <string name="fill_red" formatted="false">Light red</string>
+    <string name="fill_yellow" formatted="false">Light yellow</string>
+    <string name="filter_blank" formatted="false">blank</string>
+    <string name="filter_by">Only “%1$s”</string>
+    <string name="filter_clear" formatted="false">Clear filter</string>
+    <string name="filter_header" formatted="false">Pick a value in a data row first, then filter by it</string>
+    <string name="filter_on">Column %1$s showing only “%2$s”: %3$d rows</string>
+    <string name="find_hits">%1$d found</string>
+    <string name="find_label" formatted="false">Find</string>
+    <string name="find_replace" formatted="false">Find and replace</string>
+    <string name="fmt_date" formatted="false">Date</string>
+    <string name="fmt_number" formatted="false">Number 0.00</string>
+    <string name="freeze_top" formatted="false">Freeze top row</string>
+    <string name="image_failed">“%1$s” is not a picture that can be inserted</string>
+    <string name="ins_picture" formatted="false">Picture…</string>
+    <string name="ins_table" formatted="false">Table…</string>
+    <string name="insert" formatted="false">Insert</string>
+    <string name="insert_col" formatted="false">Insert column right</string>
+    <string name="lay_blank" formatted="false">Blank</string>
+    <string name="lay_two" formatted="false">Two columns</string>
+    <string name="menu_chart" formatted="false">Chart</string>
+    <string name="menu_data" formatted="false">Data</string>
+    <string name="menu_fill" formatted="false">Fill</string>
+    <string name="menu_insert" formatted="false">Insert</string>
+    <string name="menu_object" formatted="false">Selection</string>
+    <string name="menu_page" formatted="false">Slide</string>
+    <string name="menu_paragraph" formatted="false">Paragraph</string>
+    <string name="menu_rows" formatted="false">Rows &amp; columns</string>
+    <string name="menu_theme" formatted="false">Theme</string>
+    <string name="next" formatted="false">Next</string>
+    <string name="numbering" formatted="false">Numbering</string>
+    <string name="obj_bigger" formatted="false">Larger</string>
+    <string name="obj_delete" formatted="false">Delete</string>
+    <string name="obj_down" formatted="false">Move down</string>
+    <string name="obj_left" formatted="false">Move left</string>
+    <string name="obj_right" formatted="false">Move right</string>
+    <string name="obj_smaller" formatted="false">Smaller</string>
+    <string name="obj_up" formatted="false">Move up</string>
+    <string name="pick_picture" formatted="false">Insert picture</string>
+    <string name="pick_picture_none" formatted="false">No pictures found in Pictures, Download, Camera or Documents. Try System picker…</string>
+    <string name="pick_picture_note" formatted="false">Newest pictures from Pictures, Download, Camera and Documents</string>
+    <string name="pick_system" formatted="false">System picker…</string>
+    <string name="prev" formatted="false">Previous</string>
+    <string name="reload" formatted="false">Reload</string>
+    <string name="replace_all" formatted="false">Replace all</string>
+    <string name="replace_label" formatted="false">Replace with</string>
+    <string name="replaced_n">Replaced %1$d; you can undo it</string>
+    <string name="rows_n">%1$d rows</string>
+    <string name="sa_cloud_dest">Top of the drive › %1$s</string>
+    <string name="sa_cloud_to">Save a copy to %1$s</string>
+    <string name="sa_cloud_to_sub" formatted="false">Goes to the top of the drive; this file is not touched</string>
+    <string name="shape_arrow" formatted="false">Arrow</string>
+    <string name="shape_ellipse" formatted="false">Ellipse</string>
+    <string name="shape_rect" formatted="false">Rectangle</string>
+    <string name="shape_round" formatted="false">Rounded rectangle</string>
+    <string name="shape_triangle" formatted="false">Triangle</string>
+    <string name="signout_title">Sign out of %1$s?</string>
+    <string name="signout_msg" formatted="false">The sign-in token on this device is deleted. Changes not yet saved stay here and can be saved after you connect the same account again.</string>
+    <string name="sort_desc" formatted="false">Sort descending by this column</string>
+    <string name="sorted_desc">Sorted the data rows by column %1$s, descending</string>
+    <string name="strike" formatted="false">Strikethrough</string>
+    <string name="theme_dark" formatted="false">Dark</string>
+    <string name="theme_forest" formatted="false">Forest</string>
+    <string name="theme_light" formatted="false">Light</string>
+    <string name="theme_warm" formatted="false">Warm</string>
+    <string name="wc_chars">Characters (no spaces): %1$d</string>
+    <string name="wc_chars_sp">Characters (with spaces): %1$d</string>
+    <string name="wc_paras">Paragraphs: %1$d</string>
+    <string name="wc_words">Words: %1$d</string>
+    <string name="word_count" formatted="false">Word count</string>
+    <string name="how_to_format" formatted="false">Format and insert</string>
+    <string name="how_to_format_keys" formatted="false">Ctrl+B / I / U; the bottom toolbar\'s Paragraph, Insert and More hold lists, alignment, pictures, tables, strikethrough</string>
+    <string name="how_to_format_hand" formatted="false">Pinch to select text, then pinch a toolbar button or menu item</string>
+    <string name="how_to_format_ctrl" formatted="false">Trigger-drag to select text, then trigger on a toolbar button or menu item</string>
+    <string name="how_to_find" formatted="false">Find, replace, word count</string>
+    <string name="how_to_find_keys" formatted="false">Ctrl+F; or More › Find and replace / Word count</string>
+    <string name="how_to_find_hand" formatted="false">Pinch More, then Find and replace or Word count</string>
+    <string name="how_to_find_ctrl" formatted="false">Trigger on More, then Find and replace or Word count</string>
+    <string name="how_to_slides" formatted="false">Reorder slides</string>
+    <string name="how_to_slides_keys" formatted="false">Hold a thumbnail on the left and drag it; or Slide › Move up / down</string>
+    <string name="how_to_slides_hand" formatted="false">Pinch and hold a thumbnail, then drag; let go to drop it</string>
+    <string name="how_to_slides_ctrl" formatted="false">Hold the trigger on a thumbnail, then drag; release to drop it</string>
+    <string name="how_to_cloud" formatted="false">Connect a cloud drive</string>
+    <string name="how_to_cloud_keys" formatted="false">Home › Accounts &amp; drives › Connect, approve in the browser; then switch Browse to that drive</string>
+    <string name="how_to_cloud_hand" formatted="false">Pinch Connect and approve on the browser page; back here, pinch a file under Browse</string>
+    <string name="how_to_cloud_ctrl" formatted="false">Trigger on Connect and approve on the browser page; back here, trigger on a file under Browse</string>
 </resources>

@@ -26,6 +26,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.pico.spatial.ui.design.Icon
@@ -44,6 +46,8 @@ import io.embodit.spatialoffice.platform.Graph
 import io.embodit.spatialoffice.platform.Overlay
 import io.embodit.spatialoffice.platform.SaveAsTarget
 import io.embodit.spatialoffice.platform.Session
+import io.embodit.spatialoffice.platform.DocSession
+import io.embodit.spatialoffice.platform.SheetSession
 import io.embodit.spatialoffice.platform.Win
 import io.embodit.spatialoffice.platform.approx
 import io.embodit.spatialoffice.platform.held
@@ -60,6 +64,12 @@ fun SharedOverlays(graph: Graph, win: Win) {
         is Overlay.SaveAs -> if (s != null) SaveAsSheet(graph, win, s)
         is Overlay.Shortcuts -> ShortcutsSheet(graph)
         is Overlay.Compat -> if (s != null) CompatPanel(graph, s)
+        is Overlay.Find -> (s as? DocSession)?.let { FindSheet(graph, it) }
+        is Overlay.WordCount -> (s as? DocSession)?.let { WordCountDialog(graph, it) }
+        is Overlay.InsertTable -> (s as? DocSession)?.let { InsertTableDialog(graph, it) }
+        is Overlay.ImagePick -> ImagePickSheet(graph, win)
+        is Overlay.SignOut -> SignOutDialog(graph, o.provider)
+        is Overlay.ChartView -> (s as? SheetSession)?.let { ChartSheet(graph, it, o.index) }
         else -> {}
     }
 }
@@ -152,6 +162,7 @@ private fun SaveAsSheet(graph: Graph, win: Win, s: Session) {
                     SaveAsTarget.CSV -> tr(R.string.sa_csv) to tr(R.string.sa_csv_sub)
                     SaveAsTarget.TXT -> tr(R.string.sa_txt) to tr(R.string.sa_txt_sub)
                     SaveAsTarget.PNG -> tr(R.string.sa_png) to tr(R.string.sa_png_sub)
+                    SaveAsTarget.CLOUD -> "" to ""
                 }
                 val on = t == picked
                 Row(
@@ -167,12 +178,19 @@ private fun SaveAsSheet(graph: Graph, win: Win, s: Session) {
                     }
                 }
             }
-            // cloud targets are listed so the place is known, but they cannot be picked in this version
-            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(painter = painterResource(R.drawable.ic_cloud), contentDescription = null, modifier = Modifier.size(20.dp), tint = PicoTheme.colorScheme.labelTertiary)
+            // a copy to the first connected cloud drive; without a connection the row says where to connect
+            val cloud = io.embodit.spatialoffice.core.cloud.Provider.values().firstOrNull { graph.accounts.connected(it) }
+            val onCloud = picked == SaveAsTarget.CLOUD
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(16.dp))
+                    .background(if (onCloud) PicoTheme.colorScheme.fillSecondary else PicoTheme.colorScheme.fillLight)
+                    .clickable(enabled = cloud != null) { picked = SaveAsTarget.CLOUD }.padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(painter = painterResource(R.drawable.ic_cloud), contentDescription = null, modifier = Modifier.size(20.dp), tint = if (cloud != null) PicoTheme.colorScheme.labelPrimary else PicoTheme.colorScheme.labelSecondary)
                 Column(Modifier.weight(1f).padding(start = 14.dp)) {
-                    Txt(tr(R.string.sa_cloud), "saveas/cloud", style = PicoTheme.typography.titleMedium, color = PicoTheme.colorScheme.labelTertiary)
-                    Txt(tr(R.string.sa_cloud_sub), "saveas/cloud-sub", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelTertiary)
+                    Txt(if (cloud != null) tr(R.string.sa_cloud_to, tr(io.embodit.spatialoffice.platform.Accounts.nameRes(cloud))) else tr(R.string.sa_cloud), "saveas/cloud", style = PicoTheme.typography.titleMedium, maxLines = 2)
+                    Txt(tr(if (cloud != null) R.string.sa_cloud_to_sub else R.string.sa_cloud_sub), "saveas/cloud-sub", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2)
                 }
             }
             Spacer(Modifier.height(4.dp))
@@ -180,7 +198,7 @@ private fun SaveAsSheet(graph: Graph, win: Win, s: Session) {
                 Icon(painter = painterResource(R.drawable.ic_folder), contentDescription = null, modifier = Modifier.size(22.dp))
                 Column(Modifier.padding(start = 12.dp)) {
                     Txt(tr(R.string.save_to), "saveas/dest-label", style = PicoTheme.typography.titleMedium)
-                    Txt(graph.storage.display(dest), "saveas/dest", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
+                    Txt(if (picked == SaveAsTarget.CLOUD) tr(R.string.sa_cloud_dest, s.ref.name) else graph.storage.display(dest), "saveas/dest", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
                 }
             }
         }
@@ -261,3 +279,177 @@ private fun CompatRow(n: CompatNote, kind: FileKind) {
         Txt(sub, "compat/sub", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 4)
     }
 }
+
+@Composable
+private fun FindSheet(graph: Graph, s: DocSession) {
+    var find by remember { mutableStateOf("") }
+    var repl by remember { mutableStateOf("") }
+    val hits = remember(find, s.version) { if (find.isEmpty()) 0 else s.find(find).size }
+    Sheet(
+        modifier = Modifier.width(680.dp),
+        onDismissRequest = { graph.overlay = null },
+        title = { Txt(tr(R.string.find_replace), "find/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold) },
+        bottom = {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Txt(if (find.isEmpty()) "" else tr(R.string.find_hits, hits), "find/hits", Modifier.weight(1f), style = PicoTheme.typography.bodyLarge, color = PicoTheme.colorScheme.labelSecondary)
+                SecondaryButton(tr(R.string.close), "find/close", onClick = { graph.overlay = null })
+                PrimaryButton(tr(R.string.replace_all), "find/replace", enabled = hits > 0, onClick = {
+                    val n = s.replaceAll(find, repl)
+                    graph.say(Win.DOC, graph.str(R.string.replaced_n, n))
+                })
+            }
+        },
+    ) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LabeledField(tr(R.string.find_label), find, "find/find") { find = it }
+            LabeledField(tr(R.string.replace_label), repl, "find/replace-with") { repl = it }
+        }
+    }
+}
+
+@Composable
+fun LabeledField(label: String, value: String, tag: String, onChange: (String) -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Txt(label, "$tag/label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
+        Spacer(Modifier.height(6.dp))
+        androidx.compose.foundation.text.BasicTextField(
+            value = value, onValueChange = onChange, singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(fontSize = androidx.compose.ui.unit.TextUnit(18f, androidx.compose.ui.unit.TextUnitType.Sp), color = PicoTheme.colorScheme.labelPrimary),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(PicoTheme.colorScheme.interaction),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(14.dp)).background(PicoTheme.colorScheme.fillSecondary)
+                .padding(horizontal = 16.dp, vertical = 16.dp).androidSemantics(tag),
+        )
+    }
+}
+
+private fun Modifier.androidSemantics(tag: String): Modifier = this.then(Modifier.semantics { contentDescription = tag })
+
+@Composable
+private fun WordCountDialog(graph: Graph, s: DocSession) {
+    val r = remember(s.version) { s.wordCount() }
+    AlertDialog(
+        onDismissRequest = { graph.overlay = null },
+        title = { Txt(tr(R.string.word_count), "wc/title", style = PicoTheme.typography.headlineSmall, weight = FontWeight.Bold) },
+        content = {
+            // gate:allow button-gap four lines of counts, no buttons
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Txt(tr(R.string.wc_words, r.words), "wc/words", style = PicoTheme.typography.bodyLarge)
+                Txt(tr(R.string.wc_chars, r.charsNoSpaces), "wc/chars", style = PicoTheme.typography.bodyLarge)
+                Txt(tr(R.string.wc_chars_sp, r.chars), "wc/chars-sp", style = PicoTheme.typography.bodyLarge)
+                Txt(tr(R.string.wc_paras, r.paragraphs), "wc/paras", style = PicoTheme.typography.bodyLarge)
+            }
+        },
+        buttons = { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { PrimaryButton(tr(R.string.done), "wc/done", onClick = { graph.overlay = null }) } },
+    )
+}
+
+@Composable
+private fun InsertTableDialog(graph: Graph, s: DocSession) {
+    var rows by remember { mutableStateOf(3) }
+    var cols by remember { mutableStateOf(3) }
+    AlertDialog(
+        onDismissRequest = { graph.overlay = null },
+        title = { Txt(tr(R.string.ins_table), "table/title", style = PicoTheme.typography.headlineSmall, weight = FontWeight.Bold) },
+        content = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Stepper(tr(R.string.rows_n, rows), "table/rows", { rows = (rows - 1).coerceAtLeast(1) }, { rows = (rows + 1).coerceAtMost(30) })
+                Stepper(tr(R.string.cols_n, cols), "table/cols", { cols = (cols - 1).coerceAtLeast(1) }, { cols = (cols + 1).coerceAtMost(8) })
+            }
+        },
+        buttons = {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End)) {
+                SecondaryButton(tr(R.string.cancel), "table/cancel", onClick = { graph.overlay = null })
+                PrimaryButton(tr(R.string.insert), "table/insert", onClick = { graph.overlay = null; io.embodit.spatialoffice.ui.doc.docInsertTable(s, rows, cols) })
+            }
+        },
+    )
+}
+
+@Composable
+private fun Stepper(label: String, tag: String, minus: () -> Unit, plus: () -> Unit) {
+    Row(Modifier.width(420.dp).heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
+        Txt(label, "$tag/label", Modifier.weight(1f), style = PicoTheme.typography.titleMedium)
+        SecondaryButton("−", "$tag/minus", onClick = minus)
+        Spacer(Modifier.width(12.dp))
+        SecondaryButton("+", "$tag/plus", onClick = plus)
+    }
+}
+
+@Composable
+private fun ImagePickSheet(graph: Graph, win: Win) {
+    val files = remember(graph.filesVersion) { graph.imageFiles() }
+    Sheet(
+        modifier = Modifier.width(720.dp),
+        onDismissRequest = { graph.overlay = null },
+        title = { Txt(tr(R.string.pick_picture), "img/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold) },
+        bottom = {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Txt(tr(R.string.pick_picture_note), "img/note", Modifier.weight(1f), style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2)
+                SecondaryButton(tr(R.string.pick_system), "img/system", onClick = {
+                    graph.overlay = null
+                    graph.app.startActivity(android.content.Intent(graph.app, io.embodit.spatialoffice.platform.PickerActivity::class.java)
+                        .putExtra(io.embodit.spatialoffice.platform.PickerActivity.EXTRA_IMAGE, win.name).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                })
+            }
+        },
+    ) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            if (files.isEmpty()) Txt(tr(R.string.pick_picture_none), "img/none", style = PicoTheme.typography.bodyLarge, maxLines = 3)
+            files.forEach { f ->
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(14.dp)).background(PicoTheme.colorScheme.fillLight)
+                        .clickable { graph.imageChosen(win, io.embodit.spatialoffice.platform.FileRef.Path(f)) }.padding(horizontal = 16.dp, vertical = 8.dp)
+                        .semantics { contentDescription = "img-" + f.name },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(painter = painterResource(R.drawable.ic_image_unavailable), contentDescription = null, modifier = Modifier.size(22.dp))
+                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                        Txt(f.name, "img/name", style = PicoTheme.typography.titleMedium, maxLines = 2)
+                        Txt(graph.storage.display(f), "img/path", style = PicoTheme.typography.bodySmall, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SignOutDialog(graph: Graph, p: io.embodit.spatialoffice.core.cloud.Provider) {
+    val name = tr(io.embodit.spatialoffice.platform.Accounts.nameRes(p))
+    AlertDialog(
+        onDismissRequest = { graph.overlay = null },
+        title = { Txt(tr(R.string.signout_title, name), "signout/title", style = PicoTheme.typography.headlineSmall, weight = FontWeight.Bold, maxLines = 2) },
+        content = { Txt(tr(R.string.signout_msg), "signout/msg", style = PicoTheme.typography.bodyLarge, maxLines = 4) },
+        buttons = {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End)) {
+                SecondaryButton(tr(R.string.cancel), "signout/cancel", onClick = { graph.overlay = null })
+                SecondaryButton(tr(R.string.acct_signout), "signout/go", danger = true, onClick = { graph.overlay = null; graph.accounts.signOut(p) })
+            }
+        },
+    )
+}
+
+@Composable
+private fun ChartSheet(graph: Graph, s: SheetSession, index: Int) {
+    val charts = remember(s.version) { runCatching { s.book.charts() }.getOrDefault(emptyList()) }
+    if (charts.isEmpty()) { graph.overlay = null; return }
+    var i by remember(index, charts.size) { mutableStateOf(if (index in charts.indices) index else charts.lastIndex) }
+    val c = charts[i.coerceIn(0, charts.lastIndex)]
+    Sheet(
+        modifier = Modifier.width(860.dp),
+        onDismissRequest = { graph.overlay = null },
+        title = { Txt(c.title.ifEmpty { tr(R.string.chart_untitled) } + " · " + tr(chartTypeName(c.type)), "chartview/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold, maxLines = 2) },
+        bottom = {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Txt(tr(R.string.chart_n_of, i + 1, charts.size), "chartview/count", Modifier.weight(1f), style = PicoTheme.typography.bodyLarge, color = PicoTheme.colorScheme.labelSecondary)
+                SecondaryButton(tr(R.string.prev), "chartview/prev", enabled = i > 0, onClick = { i-- })
+                SecondaryButton(tr(R.string.next), "chartview/next", enabled = i < charts.lastIndex, onClick = { i++ })
+                PrimaryButton(tr(R.string.done), "chartview/done", onClick = { graph.overlay = null })
+            }
+        },
+    ) {
+        io.embodit.spatialoffice.ui.chart.FlatChart(c, Modifier.fillMaxWidth().height(380.dp))
+    }
+}
+
+fun chartTypeName(type: String): Int = when (type) { "line" -> R.string.chart_line; "pie" -> R.string.chart_pie; "scatter" -> R.string.chart_scatter; "bar" -> R.string.chart_bar; else -> R.string.chart_other }

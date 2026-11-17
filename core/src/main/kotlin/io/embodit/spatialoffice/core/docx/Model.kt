@@ -15,6 +15,7 @@ data class Run(
     val italic: Boolean = false,
     val underline: Boolean = false,
     val src: Int = -1,
+    val strike: Boolean = false,
 )
 
 sealed class DocBlock { abstract val id: Int }
@@ -26,11 +27,13 @@ data class Paragraph(
     val runs: List<Run>,
     val editable: Boolean,
     val readOnlyWhy: String?,
+    /** 0 start, 1 centre, 2 end, 3 justified. */
+    val align: Int = 0,
 ) : DocBlock() {
     val text: String get() = runs.joinToString("") { it.text }
 }
 
-/** Read-only in v0.1. A horizontally merged cell is followed by empty strings so every row lines up with the grid. */
+/** Cell text, row by row. A horizontally merged cell is followed by empty strings so every row lines up with the grid. */
 data class TableBlock(override val id: Int, val rows: List<List<String>>) : DocBlock()
 
 data class ImageBlock(override val id: Int, val part: String, val widthEmu: Long, val heightEmu: Long) : DocBlock()

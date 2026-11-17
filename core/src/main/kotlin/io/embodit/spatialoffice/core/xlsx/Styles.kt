@@ -96,18 +96,20 @@ internal class Styles(xml0: String) {
     var changed: Boolean = false
         private set
 
-    private class Xf(val numFmtId: Int, val fontId: Int, val raw: String)
+    private class Xf(val numFmtId: Int, val fontId: Int, val fillId: Int, val raw: String)
 
     private val xfs = ArrayList<Xf>()
     private val fonts = ArrayList<String>()
     private val fontBold = ArrayList<Boolean>()
+    private val fills = ArrayList<String>()
+    private val fillRgb = ArrayList<Int?>()
     private val customFmts = LinkedHashMap<Int, String>()
     private var pfx = ""
 
     init { parse() }
 
     private fun parse() {
-        xfs.clear(); fonts.clear(); fontBold.clear(); customFmts.clear()
+        xfs.clear(); fonts.clear(); fontBold.clear(); customFmts.clear(); fills.clear(); fillRgb.clear()
         val root = Xml.root(xml) ?: return
         pfx = XmlX.prefixOf(root.name)
         for (k in Xml.children(xml, root)) when (Xml.local(k.name)) {
@@ -121,9 +123,14 @@ internal class Styles(xml0: String) {
                 fonts.add(raw)
                 fontBold.add(isBold(raw))
             }
+            "fills" -> for (f in Xml.children(xml, k)) {
+                val raw = xml.substring(f.start, f.end)
+                fills.add(raw)
+                fillRgb.add(solidRgb(raw))
+            }
             "cellXfs" -> for (x in Xml.children(xml, k)) {
                 val a = Xml.attrs(xml, x)
-                xfs.add(Xf(a["numFmtId"]?.toIntOrNull() ?: 0, a["fontId"]?.toIntOrNull() ?: 0, xml.substring(x.start, x.end)))
+                xfs.add(Xf(a["numFmtId"]?.toIntOrNull() ?: 0, a["fontId"]?.toIntOrNull() ?: 0, a["fillId"]?.toIntOrNull() ?: 0, xml.substring(x.start, x.end)))
             }
         }
     }
@@ -135,7 +142,38 @@ internal class Styles(xml0: String) {
         return v == null || !(v == "0" || v == "false")
     }
 
+    /** 0xRRGGBB of a solid pattern fill given as an RGB colour; null for no fill, patterns and theme colours. */
+    private fun solidRgb(fillRaw: String): Int? {
+        val f = Xml.root(fillRaw) ?: return null
+        val pf = XmlX.kid(fillRaw, f, "patternFill") ?: return null
+        if (Xml.attr(fillRaw, pf, "patternType") != "solid") return null
+        val fg = XmlX.kid(fillRaw, pf, "fgColor") ?: return null
+        val rgb = Xml.attr(fillRaw, fg, "rgb") ?: return null
+        return rgb.takeLast(6).toIntOrNull(16)
+    }
+
     val styleCount: Int get() = xfs.size
+
+    fun fill(style: Int): Int? = xfs.getOrNull(style)?.let { fillRgb.getOrNull(it.fillId) }
+
+    /** Style index equal to [style] but with a solid fill of [rgb] (null = no fill). */
+    fun withFill(style: Int, rgb: Int?): Int {
+        if (fill(style) == rgb) return style
+        val xf = baseXf(style)
+        val fillId = if (rgb == null) 0 else {
+            val hex = String.format("FF%06X", rgb and 0xFFFFFF)
+            val raw = "<${pfx}fill><${pfx}patternFill patternType=\"solid\"><${pfx}fgColor rgb=\"$hex\"/><${pfx}bgColor indexed=\"64\"/></${pfx}patternFill></${pfx}fill>"
+            var id = fills.indexOf(raw)
+            if (id < 0) {
+                val root = Xml.root(xml)!!
+                if (XmlX.kid(xml, root, "fills") == null) throw UnsupportedOperationException("styles part has no fills")
+                append("fills", raw)
+                id = fills.size - 1
+            }
+            id
+        }
+        return xfWith(xf, mapOf("fillId" to fillId.toString(), "applyFill" to "1"), "applyFill")
+    }
 
     fun bold(style: Int): Boolean = xfs.getOrNull(style)?.let { fontBold.getOrNull(it.fontId) } ?: false
 

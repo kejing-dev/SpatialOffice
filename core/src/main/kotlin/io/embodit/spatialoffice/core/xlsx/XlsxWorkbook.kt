@@ -70,7 +70,11 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         var defaultWidth = 8.43f
         /** Rows were inserted or reordered: the whole `<sheetData>` content is regenerated on save. */
         var structural = false
-        val rowOps = ArrayList<Int>()
+        /** Row / column insertions and deletions since load, in order: [axis (0 rows, 1 columns), at, delta]. */
+        val ops = ArrayList<IntArray>()
+        /** Frozen top rows as read from the file; [freezeSet] when changed here. */
+        var frozen = 0
+        var freezeSet = false
         var pendingDrawingRid: String? = null
         var usedRows = -1
         var usedCols = -1
@@ -111,6 +115,9 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             val c = sheets.getOrNull(sheet)?.rows?.get(row)?.cells?.get(col) ?: return null
             return valueOf(sheet, c)
         }
+
+        override fun used(sheet: Int): IntArray =
+            if (sheet in sheets.indices) intArrayOf(rows(sheet), cols(sheet)) else intArrayOf(0, 0)
 
         override fun rangeValues(sheet: Int, r1: Int, c1: Int, r2: Int, c2: Int): List<Any?> {
             val out = ArrayList<Any?>()
@@ -203,6 +210,10 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
                 s.cols.add(ColInfo(min - 1, max - 1, a["width"]?.toFloatOrNull(), a["style"]?.toIntOrNull() ?: 0))
             }
             "sheetData" -> if (s.sheetData == null) { s.sheetData = k; s.pfx = XmlX.prefixOf(k.name); parseRows(s, k) }
+            "sheetViews" -> XmlX.kid(xml, k, "sheetView")?.let { v -> XmlX.kid(xml, v, "pane") }?.let { pane ->
+                val a = Xml.attrs(xml, pane)
+                if (a["state"] == "frozen" || a["state"] == "frozenSplit") s.frozen = a["ySplit"]?.toDoubleOrNull()?.toInt() ?: 0
+            }
         }
         return s
     }
@@ -678,28 +689,75 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
      * conditional formats and validations) is reported through [compat] with an `insert-row:` code.
      */
     fun insertRowBelow(sheet: Int, row: Int) {
-        val s = sheetAt(sheet)
         if (row < 0 || row >= A1.MAX_ROW) throw IndexOutOfBoundsException("row $row")
-        val at = row + 1
+        restructure(sheet, cols = false, at = row + 1, delta = 1)
+    }
+
+    /** Deletes row [row]; rows below move up. References to the deleted row become `#REF!` (as in every spreadsheet). */
+    fun deleteRow(sheet: Int, row: Int) {
+        if (row < 0 || row > A1.MAX_ROW) throw IndexOutOfBoundsException("row $row")
+        restructure(sheet, cols = false, at = row, delta = -1)
+    }
+
+    /** Inserts an empty column to the right of [col]; columns further right move by one. */
+    fun insertColumnRight(sheet: Int, col: Int) {
+        if (col < 0 || col >= A1.MAX_COL) throw IndexOutOfBoundsException("col $col")
+        restructure(sheet, cols = true, at = col + 1, delta = 1)
+    }
+
+    /** Deletes column [col]; columns to its right move left. */
+    fun deleteColumn(sheet: Int, col: Int) {
+        if (col < 0 || col > A1.MAX_COL) throw IndexOutOfBoundsException("col $col")
+        restructure(sheet, cols = true, at = col, delta = -1)
+    }
+
+    private fun restructure(sheet: Int, cols: Boolean, at: Int, delta: Int) {
+        val s = sheetAt(sheet)
         evaluateAll()
-        val moved = ArrayList(s.rows.tailMap(at, true).values)
-        if (moved.isNotEmpty() && moved[moved.size - 1].index >= A1.MAX_ROW) throw IllegalStateException("sheet is full")
-        for (r in moved) s.rows.remove(r.index)
-        for (r in moved) {
-            r.index++
-            for (c in r.cells.values) c.row = r.index
-            s.rows[r.index] = r
+        val what = (if (delta > 0) "insert-" else "delete-") + (if (cols) "col" else "row")
+        if (!cols) {
+            if (delta > 0) {
+                val moved = ArrayList(s.rows.tailMap(at, true).values)
+                if (moved.isNotEmpty() && moved[moved.size - 1].index >= A1.MAX_ROW) throw IllegalStateException("sheet is full")
+                for (r in moved) s.rows.remove(r.index)
+                for (r in moved) { r.index++; for (c in r.cells.values) c.row = r.index; s.rows[r.index] = r }
+            } else {
+                s.rows.remove(at)?.let { gone -> for (c in gone.cells.values) formulaCells.remove(c) }
+                val moved = ArrayList(s.rows.tailMap(at + 1, true).values)
+                for (r in moved) s.rows.remove(r.index)
+                for (r in moved) { r.index--; for (c in r.cells.values) c.row = r.index; s.rows[r.index] = r }
+            }
+        } else {
+            for (r in s.rows.values) {
+                val tail = ArrayList(r.cells.tailMap(at, true).values)
+                if (tail.isEmpty()) continue
+                if (delta > 0 && tail[tail.size - 1].col >= A1.MAX_COL) throw IllegalStateException("sheet is full")
+                for (c in tail) r.cells.remove(c.col)
+                for (c in tail) {
+                    if (delta < 0 && c.col == at) { formulaCells.remove(c); continue }
+                    c.col += delta
+                    r.cells[c.col] = c
+                }
+                r.touched = true
+            }
+            // column widths and styles follow their columns
+            val shifted = ArrayList<ColInfo>()
+            for (ci in s.cols) {
+                val rg = applyOps(intArrayOf(0, ci.min, 0, ci.max), listOf(intArrayOf(1, at, delta))) ?: continue
+                shifted.add(ColInfo(rg[1], rg[3], ci.width, ci.style))
+            }
+            s.cols.clear(); s.cols.addAll(shifted)
         }
         s.structural = true
-        s.rowOps.add(at)
+        s.ops.add(intArrayOf(if (cols) 1 else 0, at, delta))
         for (r in s.rows.values) for (c in r.cells.values) {
             if (c.sharedSi >= 0) { c.sharedSi = -1; c.sharedMaster = false; if (c.formula != null) c.contentChanged = true }
-            if (c.forcedOpaque && c.row != c.origRow) note("insert-row:array-formula")
+            if (c.forcedOpaque && (c.row != c.origRow || c.col != c.origCol)) note("$what:array-formula")
         }
         for (c in ArrayList(formulaCells)) {
             val f = c.formula ?: continue
             val t = sheets[c.sheet]
-            val nf = Formula.shiftRows(f, c.parsed!!.toks, t.name, s.name, at)
+            val nf = Formula.shift(f, c.parsed!!.toks, t.name, s.name, cols, at, delta)
             if (nf != f) setFormulaText(t, c, nf)
         }
         // chart series references and defined names live in other parts
@@ -708,62 +766,113 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             val xml = pkg.text(part) ?: continue
             val root = Xml.root(xml) ?: continue
             if (Xml.local(root.name) != "chartSpace") continue
-            shiftFormulaElements(xml, XmlX.findAllLocal(xml, root, "f"), s.name, at)?.let { pkg.putText(part, it) }
+            shiftFormulaElements(xml, XmlX.findAllLocal(xml, root, "f"), s.name, cols, at, delta)?.let { pkg.putText(part, it) }
         }
         pkg.text(wbPart)?.let { wbXml ->
             val names = Xml.root(wbXml)?.let { XmlX.kid(wbXml, it, "definedNames") }
-            if (names != null) shiftFormulaElements(wbXml, Xml.children(wbXml, names), s.name, at)?.let { pkg.putText(wbPart, it) }
+            if (names != null) shiftFormulaElements(wbXml, Xml.children(wbXml, names), s.name, cols, at, delta)?.let { pkg.putText(wbPart, it) }
         }
         for (k in s.rootKids) when (Xml.local(k.name)) {
-            "tableParts" -> note("insert-row:table")
-            "autoFilter" -> note("insert-row:filter")
-            "hyperlinks" -> note("insert-row:links")
-            "drawing" -> note("insert-row:drawing-anchor")
-            "legacyDrawing" -> note("insert-row:comments")
-            "conditionalFormatting" -> if (XmlX.findAllLocal(s.xml, k, "formula").isNotEmpty()) note("insert-row:conditional-format-formula")
-            "dataValidations" -> if (XmlX.findAllLocal(s.xml, k, "formula1").isNotEmpty()) note("insert-row:data-validation-formula")
+            "tableParts" -> note("$what:table")
+            "autoFilter" -> note("$what:filter")
+            "hyperlinks" -> note("$what:links")
+            "drawing" -> note("$what:drawing-anchor")
+            "legacyDrawing" -> note("$what:comments")
+            "conditionalFormatting" -> if (XmlX.findAllLocal(s.xml, k, "formula").isNotEmpty()) note("$what:conditional-format-formula")
+            "dataValidations" -> if (XmlX.findAllLocal(s.xml, k, "formula1").isNotEmpty()) note("$what:data-validation-formula")
         }
+        for (c in formulaCells) if (!c.opaque) { c.state = TODO; c.precs = null }
         chartDefs = null
         formulaLayoutChanged = true
         s.usedRows = -1; s.usedCols = -1
         dirty = true
     }
 
-    private fun shiftFormulaElements(xml: String, elems: List<Xml.Elem>, target: String, at: Int): String? {
+    /** Number of frozen top rows (0 = none). */
+    fun frozenRows(sheet: Int): Int = sheetAt(sheet).frozen
+
+    /** Freezes the top [rows] rows (0 unfreezes). Written to the sheet's view settings on save. */
+    fun setFrozenRows(sheet: Int, rows: Int) {
+        val s = sheetAt(sheet)
+        val n = rows.coerceIn(0, 100)
+        if (s.frozen == n) return
+        s.frozen = n
+        s.freezeSet = true
+        dirty = true
+    }
+
+    /** Fill colour of a cell as 0xRRGGBB, null when it has none. */
+    fun fillRgb(sheet: Int, row: Int, col: Int): Int? {
+        val s = sheetAt(sheet)
+        val c = s.rows[row]?.cells?.get(col)
+        return styles?.fill(c?.style ?: inheritedStyle(s, row, col))
+    }
+
+    /** Sets a solid fill colour (0xRRGGBB) on a cell, or clears it with null. */
+    fun setFill(sheet: Int, row: Int, col: Int, rgb: Int?) {
+        val s = sheetAt(sheet)
+        checkPos(row, col)
+        val existing = s.rows[row]?.cells?.get(col)
+        val cur = existing?.style ?: inheritedStyle(s, row, col)
+        if ((styles?.fill(cur)) == rgb) return
+        val ns = ensureStyles().withFill(cur, rgb)
+        val c = existing ?: createCell(s, row, col)
+        if (c.style == ns) return
+        c.style = ns
+        c.styleChanged = true
+        dirty = true
+    }
+
+    private fun shiftFormulaElements(xml: String, elems: List<Xml.Elem>, target: String, cols: Boolean, at: Int, delta: Int): String? {
         val edits = ArrayList<Triple<Int, Int, String>>()
         for (f in elems) {
             if (f.selfClosing) continue
             val text = Xml.text(xml, f)
-            val nt = Formula.shiftRows(text, Lexer.tokenize(text), null, target, at)
+            val nt = Formula.shift(text, Lexer.tokenize(text), null, target, cols, at, delta)
             if (nt != text) edits.add(Triple(f.openEnd, f.closeStart, Xml.escape(nt)))
         }
         return if (edits.isEmpty()) null else Xml.splice(xml, edits)
     }
 
-    private fun applyRowOps(rg: IntArray, ops: List<Int>): IntArray {
+    /** A rectangle (r1, c1, r2, c2) after [ops]; null when a deletion removed all of it. */
+    private fun applyOps(rg: IntArray, ops: List<IntArray>): IntArray? {
         val out = rg.copyOf()
-        for (at in ops) {
-            if (out[0] >= at) out[0]++
-            if (out[2] >= at) out[2]++
+        for (op in ops) {
+            val lo = if (op[0] == 0) 0 else 1
+            val hi = lo + 2
+            val at = op[1]
+            if (op[2] > 0) {
+                if (out[lo] >= at) out[lo]++
+                if (out[hi] >= at) out[hi]++
+            } else {
+                if (out[lo] == at && out[hi] == at) return null
+                val a = out[lo]; val b = out[hi]
+                if (a > at) out[lo] = a - 1
+                if (b > at || (b == at && b > a)) out[hi] = b - 1
+            }
         }
         return out
     }
 
-    /** A `ref` / `sqref` value (space-separated ranges) after the sheet's row insertions. */
-    private fun shiftRefList(value: String, ops: List<Int>): String = value.split(' ').joinToString(" ") { tok ->
+    /** A `ref` / `sqref` value (space-separated ranges) after the sheet's row / column insertions and deletions. */
+    private fun shiftRefList(value: String, ops: List<IntArray>): String = value.split(' ').mapNotNull { tok ->
         val rg = A1.parseRange(tok)
         if (rg == null || tok.indexOf('$') >= 0) tok
         else {
-            val n = applyRowOps(rg, ops)
-            if (tok.indexOf(':') >= 0) A1.name(n[0], n[1]) + ":" + A1.name(n[2], n[3]) else A1.name(n[0], n[1])
+            val n = applyOps(rg, ops)
+            when {
+                n == null -> null
+                tok.indexOf(':') >= 0 -> A1.name(n[0], n[1]) + ":" + A1.name(n[2], n[3])
+                else -> A1.name(n[0], n[1])
+            }
         }
-    }
+    }.joinToString(" ")
 
     private fun mergedRanges(s: Sheet): List<IntArray> {
         val out = ArrayList<IntArray>()
         for (k in s.rootKids) if (Xml.local(k.name) == "mergeCells") for (m in Xml.children(s.xml, k)) {
             val rg = Xml.attr(s.xml, m, "ref")?.let { A1.parseRange(it) } ?: continue
-            out.add(applyRowOps(rg, s.rowOps))
+            applyOps(rg, s.ops)?.let { out.add(it) }
         }
         return out
     }
@@ -941,7 +1050,10 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
      * Adds a clustered bar chart over [range] (first row = categories, first column = series names, one series per
      * further row), anchored to the right of the sheet's data.
      */
-    fun addBarChart(sheet: Int, range: String, title: String): ChartInfo {
+    fun addBarChart(sheet: Int, range: String, title: String): ChartInfo = addChart(sheet, range, title, "bar")
+
+    /** Like [addBarChart]; [type] is "bar" (columns), "line" or "pie" (first data row only). */
+    fun addChart(sheet: Int, range: String, title: String, type: String): ChartInfo {
         val s = sheetAt(sheet)
         val rg = A1.parseRange(range) ?: throw IllegalArgumentException("range: $range")
         val r1 = rg[0]
@@ -957,7 +1069,7 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         var n = 1
         while (pkg.has("xl/charts/chart$n.xml")) n++
         val chartPart = "xl/charts/chart$n.xml"
-        pkg.putText(chartPart, Charts.barChartXml(title, s.name, r1, c1, r2, c2, names, cats, values))
+        pkg.putText(chartPart, Charts.chartXml(type, title, s.name, r1, c1, r2, c2, names, cats, values))
         ContentTypes.addOverride(pkg, chartPart, Charts.CT_CHART)
 
         var drawing = Charts.drawingOf(pkg, s.part)?.takeIf { pkg.has(it) }
@@ -1194,9 +1306,12 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         fun shiftAttr(e: Xml.Elem, name: String) {
             val span = XmlX.attrValueSpan(xml, e, name) ?: return
             val old = xml.substring(span.first, span.second)
-            val new = shiftRefList(old, s.rowOps)
-            if (new != old) edits.add(Triple(span.first, span.second, new))
+            val new = shiftRefList(old, s.ops)
+            // a range that was deleted entirely takes its element with it
+            if (new.isEmpty()) edits.add(Triple(e.start, e.end, ""))
+            else if (new != old) edits.add(Triple(span.first, span.second, new))
         }
+        val colOps = s.ops.filter { it[0] == 1 }
         for (k in s.rootKids) when (Xml.local(k.name)) {
             "dimension" -> XmlX.attrValueSpan(xml, k, "ref")?.let { span ->
                 val new = if (maxR < 0) "A1" else A1.rangeName(minR, minC, maxR, maxC)
@@ -1205,12 +1320,21 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             "mergeCells" -> for (m in Xml.children(xml, k)) shiftAttr(m, "ref")
             "conditionalFormatting" -> shiftAttr(k, "sqref")
             "dataValidations" -> for (m in Xml.children(xml, k)) shiftAttr(m, "sqref")
+            "cols" -> if (colOps.isNotEmpty()) for (m in Xml.children(xml, k)) {
+                val a = Xml.attrs(xml, m)
+                val min = a["min"]?.toIntOrNull() ?: continue
+                val max = a["max"]?.toIntOrNull() ?: min
+                val n = applyOps(intArrayOf(0, min - 1, 0, max - 1), colOps)
+                if (n == null) edits.add(Triple(m.start, m.end, ""))
+                else if (n[1] != min - 1 || n[3] != max - 1) edits.add(Triple(m.start, m.openEnd, XmlX.startTag(xml, m, mapOf("min" to (n[1] + 1).toString(), "max" to (n[3] + 1).toString()), m.selfClosing)))
+            }
         }
     }
 
     private fun sheetXmlForSave(s: Sheet): String? {
         val edits = ArrayList<Triple<Int, Int, String>>()
         if (s.structural) structuralEdits(s, edits) else inPlaceEdits(s, edits)
+        if (s.freezeSet) freezeEdits(s, edits)
         val rid = s.pendingDrawingRid
         val root = s.root
         if (rid != null && root != null) {
@@ -1220,6 +1344,30 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             edits.add(Triple(pos, pos, "<${s.pfx}drawing " + (if (declared) "" else "xmlns:r=\"$REL\" ") + "r:id=\"$rid\"/>"))
         }
         return if (edits.isEmpty()) null else Xml.splice(s.xml, edits)
+    }
+
+    /** Writes the frozen-rows pane into the first sheet view, creating the view list when the sheet has none. */
+    private fun freezeEdits(s: Sheet, edits: MutableList<Triple<Int, Int, String>>) {
+        val xml = s.xml
+        val p = s.pfx
+        val root = s.root ?: return
+        val pane = if (s.frozen > 0) "<${p}pane ySplit=\"${s.frozen}\" topLeftCell=\"A${s.frozen + 1}\" activePane=\"bottomLeft\" state=\"frozen\"/>" else ""
+        val views = s.rootKids.firstOrNull { Xml.local(it.name) == "sheetViews" }
+        val view = views?.let { XmlX.kid(xml, it, "sheetView") }
+        if (view == null) {
+            if (pane.isEmpty()) return
+            val pos = s.rootKids.firstOrNull { Xml.local(it.name) in AFTER_VIEWS }?.start ?: root.closeStart
+            val block = "<${p}sheetViews><${p}sheetView workbookViewId=\"0\">$pane</${p}sheetView></${p}sheetViews>"
+            if (views != null) edits.add(Triple(views.start, views.end, block)) else edits.add(Triple(pos, pos, block))
+            return
+        }
+        val old = XmlX.kid(xml, view, "pane")
+        val sel = Xml.children(xml, view).filter { Xml.local(it.name) == "selection" }
+        // the old selections name panes that may no longer exist: drop them with the pane
+        if (old != null) edits.add(Triple(old.start, old.end, pane))
+        else if (view.selfClosing) edits.add(Triple(view.start, view.end, XmlX.startTag(xml, view, emptyMap(), false) + pane + "</" + view.name + ">"))
+        else edits.add(Triple(view.openEnd, view.openEnd, pane))
+        if (old != null) for (e in sel) edits.add(Triple(e.start, e.end, ""))
     }
 
     /** Stale calculation-chain entries make some applications report the file as damaged; the part is optional and is rebuilt by them. */
@@ -1267,6 +1415,7 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         private const val APP_NAME = "Spatial Office"
 
         private val EMPTY_CELL = Cell("", "", CellKind.EMPTY, null, false, false, NumFmt.GENERAL)
+        private val AFTER_VIEWS = setOf("sheetFormatPr", "cols", "sheetData")
         private val AFTER_DRAWING = setOf("legacyDrawing", "legacyDrawingHF", "drawingHF", "picture", "oleObjects", "controls", "webPublishItems", "tableParts", "extLst")
         private val NUMBER_INPUT = Regex("([+-]?)([\\$¥€£￥₩₹]?)([+-]?)((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\\.[0-9]*)?|\\.[0-9]+)([eE][+-]?[0-9]+)?\\s*(%?)")
         private val DATE_INPUT = Regex("([0-9]{4})[-/]([0-9]{1,2})[-/]([0-9]{1,2})(?:[ T]([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?)?")

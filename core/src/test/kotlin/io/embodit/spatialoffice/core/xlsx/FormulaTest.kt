@@ -247,7 +247,8 @@ class FormulaTest {
         assertEquals("#REF!+1", Formula.translate("A1+1", -1, 0))
         assertNull(Formula.parse("1+").root)
         assertNull(Formula.parse("SUM(A1").root)
-        assertFalse(Formula.parse("VLOOKUP(A1,B:C,2,0)").supported)
+        assertFalse(Formula.parse("INDEX(B:C,2,1)").supported)
+        assertTrue(Formula.parse("VLOOKUP(A1,B:C,2,0)").supported)        // v0.2 adds lookups
         assertFalse(Formula.parse("Rate*2").supported)               // a defined name
         assertNull(Formula.parse("SUM(Table1[Qty])").root)           // a structured reference
         assertTrue(Formula.parse("IF(A1>=10,ROUND(A1/3,2),\"-\")").supported)

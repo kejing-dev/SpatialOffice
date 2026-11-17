@@ -403,13 +403,13 @@ class XlsxEditTest {
         assertEquals(setOf(Fx.SHEET1, Fx.SHEET2), Fx.changedParts(src, saved))
 
         // a formula the evaluator does not know can be entered; it is stored as a formula without a cached value
-        wb.setCell(0, 8, 0, "=vlookup(A1,A1:B4,2,0)")
-        assertEquals("=VLOOKUP(A1,A1:B4,2,0)", wb.cell(0, 8, 0).input)
+        wb.setCell(0, 8, 0, "=index(A1:B4,2,1)")
+        assertEquals("=INDEX(A1:B4,2,1)", wb.cell(0, 8, 0).input)
         assertEquals(CellKind.ERROR, wb.cell(0, 8, 0).kind)
         assertEquals("#NAME?", wb.cell(0, 8, 0).display)
         val again = Fx.out("xlsx-cached-unknown-fn.xlsx", wb.save())
-        assertTrue(Fx.text(again, Fx.SHEET1).contains("<row r=\"9\"><c r=\"A9\"><f>VLOOKUP(A1,A1:B4,2,0)</f></c></row>"))
-        assertEquals("=VLOOKUP(A1,A1:B4,2,0)", XlsxWorkbook.open(again).cell(0, 8, 0).input)
+        assertTrue(Fx.text(again, Fx.SHEET1).contains("<row r=\"9\"><c r=\"A9\"><f>INDEX(A1:B4,2,1)</f></c></row>"))
+        assertEquals("=INDEX(A1:B4,2,1)", XlsxWorkbook.open(again).cell(0, 8, 0).input)
     }
 
     @Test fun replacingAFormulaDropsTheCalculationChainAndUnsharesFormulas() {

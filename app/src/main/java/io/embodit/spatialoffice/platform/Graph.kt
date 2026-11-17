@@ -33,7 +33,7 @@ const val TAG = "SpatialOffice"
 enum class HomePage { RECENT, BROWSE, NEW, ACCOUNT, SETTINGS }
 enum class Win { HOME, DOC, SHEET, SLIDES, CHART, STAGE }
 enum class StageMode { SPREAD, REHEARSAL }
-enum class SaveAsTarget { COPY, PDF, CSV, TXT, PNG }
+enum class SaveAsTarget { COPY, PDF, CSV, TXT, PNG, CLOUD }
 
 /** A dialog or sheet shown in one window. */
 sealed class Overlay {
@@ -46,6 +46,16 @@ sealed class Overlay {
     data class Compat(override val win: Win) : Overlay()
     data class Exit(override val win: Win = Win.HOME) : Overlay()
     data class HowTo(override val win: Win = Win.HOME) : Overlay()
+    /** Find and replace in the document. */
+    data class Find(override val win: Win = Win.DOC) : Overlay()
+    data class WordCount(override val win: Win = Win.DOC) : Overlay()
+    data class InsertTable(override val win: Win = Win.DOC) : Overlay()
+    /** Flat preview of the sheet's charts (bar / line / pie). */
+    data class ChartView(override val win: Win = Win.SHEET, val index: Int = -1) : Overlay()
+    /** Pick a picture for the document or the current slide. */
+    data class ImagePick(override val win: Win) : Overlay()
+    /** Confirm signing out of a cloud account. */
+    data class SignOut(val provider: io.embodit.spatialoffice.core.cloud.Provider, override val win: Win = Win.HOME) : Overlay()
 }
 
 data class Toast(val id: Long, val win: Win, val text: String, val action: String? = null, val onAction: (() -> Unit)? = null)
@@ -61,6 +71,7 @@ class Graph(val app: Application) {
     val recents = RecentStore(app)
     val layouts = LayoutStore(app, storage)
     val windows = WindowCtl(this)
+    val accounts = Accounts(app, this).also { storage.accounts = it }
 
     var homePage by mutableStateOf(HomePage.RECENT)
     var browseDir by mutableStateOf<File?>(null)
@@ -97,6 +108,39 @@ class Graph(val app: Application) {
     var chartScatter by mutableStateOf(false)
     var chartYaw by mutableStateOf(0f)
 
+    /** What to do with the picture chosen in the picture picker (document or current slide). */
+    var onImage: ((ByteArray, String, Int, Int) -> Unit)? = null
+        private set
+
+    fun pickImage(win: Win, then: (ByteArray, String, Int, Int) -> Unit) { onImage = then; overlay = Overlay.ImagePick(win) }
+
+    /** Reads, measures and hands a picture file to the waiting action. */
+    fun imageChosen(win: Win, ref: FileRef) {
+        val then = onImage ?: return
+        overlay = null; onImage = null
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val bytes = storage.read(ref)
+                    val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
+                    if (o.outWidth <= 0) error("not a picture")
+                    val ext = when (o.outMimeType) { "image/png" -> "png"; "image/gif" -> "gif"; else -> "jpeg" }
+                    arrayOf(bytes, ext, o.outWidth, o.outHeight)
+                }
+            }
+            r.onSuccess { (b, e, w, h) -> then(b as ByteArray, e as String, w as Int, h as Int); Log.i(TAG, "IMAGE inserted ${ref.name}") }
+                .onFailure { say(win, str(R.string.image_failed, ref.name)) }
+        }
+    }
+
+    /** Pictures the picker lists: the shared Pictures, Download, DCIM and Documents folders (newest first). */
+    fun imageFiles(): List<java.io.File> {
+        val dirs = listOf("Pictures", "Download", "DCIM", "DCIM/Camera", "Documents", "Documents/SpatialOffice").map { java.io.File(storage.shared, it) }
+        return dirs.flatMap { d -> d.listFiles()?.filter { f -> f.isFile && f.name.substringAfterLast('.').lowercase() in setOf("png", "jpg", "jpeg", "gif", "webp") }.orEmpty() }
+            .distinctBy { it.absolutePath }.sortedByDescending { it.lastModified() }.take(24)
+    }
+
     private var pendingOpen: FileRef? = null
     private var pendingNew: FileKind? = null
     private var toastSeq = 0L
@@ -118,6 +162,7 @@ class Graph(val app: Application) {
     // ---------------------------------------------------------------- open / new
 
     fun openIntent(intent: Intent?) {
+        intent?.data?.let { if (accounts.handleRedirect(it)) return }
         val ref = storage.fromIntent(intent) ?: return
         Log.i(TAG, "INTENT ${intent?.action} -> ${ref.name}")
         open(ref)
@@ -202,10 +247,11 @@ class Graph(val app: Application) {
     /** [Save] / Ctrl+S. */
     fun save(win: Win) {
         val s = session(win) ?: return
-        if (s.readOnly) return
+        if (s.readOnly) { if (s.ref is FileRef.Cloud) say(win, str(R.string.cloud_readonly_save)); return }
         if (s.isNew) { saveNew(s, win); return }
         if (!s.dirty) { say(win, str(R.string.saved_to, storage.display(s.ref))); return }
-        if (settings.value.keepBackup && layouts.backupOf(s.ref.key) == null) { overlay = Overlay.SaveFirst(win); return }
+        // a cloud drive keeps its own version history, so there is no local backup of cloud files
+        if (settings.value.keepBackup && layouts.backupOf(s.ref.key) == null && s.ref !is FileRef.Cloud) { overlay = Overlay.SaveFirst(win); return }
         write(s, win, backup = false)
     }
 
@@ -225,11 +271,19 @@ class Graph(val app: Application) {
                         backupFile = storage.backup(s.ref, storage.read(s.ref), zh)
                         backupFile?.let { layouts.markBackedUp(s.ref.key, it.absolutePath) }
                     }
-                    storage.write(s.ref, s.serialize())
+                    val ref = s.ref
+                    if (ref is FileRef.Cloud) {
+                        val now = accounts.write(ref, s.serialize())
+                        if (now != ref) withContext(Dispatchers.Main) { s.ref = now }
+                    } else storage.write(ref, s.serialize())
                     backupFile
                 }
             }
-            r.onFailure { e -> Log.e(TAG, "SAVE failed", e); say(win, str(R.string.save_failed, e.message ?: str(R.string.perm_denied))) }
+            r.onFailure { e ->
+                Log.e(TAG, "SAVE failed", e)
+                if (s.ref is FileRef.Cloud) say(win, str(if (e is CloudAuthException) R.string.cloud_kept_local else R.string.cloud_save_failed, e.message ?: ""))
+                else say(win, str(R.string.save_failed, e.message ?: str(R.string.perm_denied)))
+            }
                 .onSuccess { b ->
                     s.saved(); filesVersion++
                     recents.touch(s.ref, storage.display(s.ref))
@@ -277,6 +331,14 @@ class Graph(val app: Application) {
         val s = session(win) ?: return
         overlay = null
         val zh = settings.value.zh
+        if (target == SaveAsTarget.CLOUD) {
+            scope.launch {
+                val r = withContext(Dispatchers.IO) { runCatching { accounts.saveCopy(s.ref.name, if (s.readOnly) storage.read(s.ref) else s.serialize()) } }
+                r.onFailure { e -> Log.e(TAG, "SAVEAS cloud failed", e); say(win, str(R.string.cloud_save_failed, e.message ?: "")) }
+                    .onSuccess { where -> Log.i(TAG, "SAVEAS cloud -> $where"); say(win, str(R.string.saved_as, where)) }
+            }
+            return
+        }
         scope.launch {
             val r = withContext(Dispatchers.IO) { runCatching { Exporter.saveAs(this@Graph, s, target, zh) } }
             r.onFailure { e -> Log.e(TAG, "SAVEAS failed", e); say(win, str(R.string.save_failed, e.message ?: "")) }
@@ -438,7 +500,9 @@ class Graph(val app: Application) {
     fun dump(): String =
         "DUMP page=$homePage lang=${settings.value.lang} doc=${doc?.ref?.name}:${doc?.dirty} sheet=${sheet?.ref?.name}:${sheet?.dirty}@${sheet?.row},${sheet?.col} " +
             "deck=${deck?.ref?.name}:${deck?.dirty}#${deck?.current} overlay=${overlay?.javaClass?.simpleName} stage=$stageMode/$stageKind/$arrangement/$focus " +
-            "windows=${windows.dump()} allFiles=${storage.hasAllFiles}"
+            "windows=${windows.dump()} allFiles=${storage.hasAllFiles} blocks=${doc?.blockCount} slides=${deck?.slideCount} sel=${deck?.selected} " +
+            "rows=${sheet?.rowCount} frozen=${sheet?.frozen} filter=${sheet?.filterCol}:${sheet?.filterValue} accounts=" +
+            io.embodit.spatialoffice.core.cloud.Provider.values().joinToString(",") { it.id + ":" + accounts.state(it) }
 
     companion object {
         fun from(context: Context): Graph = (context.applicationContext as SpatialApplication).graph

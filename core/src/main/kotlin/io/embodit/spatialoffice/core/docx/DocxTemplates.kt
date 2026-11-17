@@ -123,4 +123,36 @@ internal object DocxTemplates {
         p.putText("word/styles.xml", stylesXml())
         return p
     }
+
+    /** An inline picture run; namespaces are declared on the elements so it fits any document part. */
+    fun inlinePicture(rid: String, id: Int, name: String, cx: Long, cy: Long): String {
+        val wp = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+        val a = "http://schemas.openxmlformats.org/drawingml/2006/main"
+        val pic = "http://schemas.openxmlformats.org/drawingml/2006/picture"
+        return "<w:r><w:drawing><wp:inline xmlns:wp=\"$wp\" distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">" +
+            "<wp:extent cx=\"$cx\" cy=\"$cy\"/><wp:docPr id=\"$id\" name=\"${name}\"/>" +
+            "<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a=\"$a\" noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>" +
+            "<a:graphic xmlns:a=\"$a\"><a:graphicData uri=\"$pic\"><pic:pic xmlns:pic=\"$pic\">" +
+            "<pic:nvPicPr><pic:cNvPr id=\"0\" name=\"${name}\"/><pic:cNvPicPr/></pic:nvPicPr>" +
+            "<pic:blipFill><a:blip xmlns:r=\"$NS_R\" r:embed=\"$rid\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>" +
+            "<pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"$cx\" cy=\"$cy\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr>" +
+            "</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>"
+    }
+
+    /** An empty bordered table, columns of equal width filling [widthTwips]. */
+    fun table(rows: Int, cols: Int, widthTwips: Int): String {
+        val w = widthTwips / cols
+        val border = "w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"A0A0A0\""
+        val sb = StringBuilder("<w:tbl><w:tblPr><w:tblW w:w=\"$widthTwips\" w:type=\"dxa\"/><w:tblBorders>")
+        for (side in listOf("top", "left", "bottom", "right", "insideH", "insideV")) sb.append("<w:$side $border/>")
+        sb.append("</w:tblBorders><w:tblLook w:val=\"04A0\"/></w:tblPr><w:tblGrid>")
+        repeat(cols) { sb.append("<w:gridCol w:w=\"$w\"/>") }
+        sb.append("</w:tblGrid>")
+        repeat(rows) {
+            sb.append("<w:tr>")
+            repeat(cols) { sb.append("<w:tc><w:tcPr><w:tcW w:w=\"$w\" w:type=\"dxa\"/></w:tcPr><w:p/></w:tc>") }
+            sb.append("</w:tr>")
+        }
+        return sb.append("</w:tbl>").toString()
+    }
 }

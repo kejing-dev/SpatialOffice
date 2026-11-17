@@ -74,6 +74,10 @@ import io.embodit.spatialoffice.platform.Graph
 import io.embodit.spatialoffice.platform.UiBlock
 import io.embodit.spatialoffice.platform.Win
 import io.embodit.spatialoffice.ui.EditorTitleBar
+import io.embodit.spatialoffice.ui.MenuEntry
+import io.embodit.spatialoffice.ui.ToolMenu
+import io.embodit.spatialoffice.platform.Overlay
+import androidx.compose.ui.text.style.TextAlign
 import io.embodit.spatialoffice.ui.FileTools
 import io.embodit.spatialoffice.ui.Ink
 import io.embodit.spatialoffice.ui.NoFile
@@ -103,12 +107,38 @@ fun paraStyle(style: ParaStyle): TextStyle = when (style) {
     else -> TextStyle(fontSize = 17.sp, lineHeight = 28.sp, color = Ink.Text)
 }
 
+fun aligned(style: TextStyle, align: Int): TextStyle = if (align == 0) style else style.copy(textAlign = when (align) { 1 -> TextAlign.Center; 2 -> TextAlign.End; else -> TextAlign.Justify })
+
+/** Numbers of numbered-list paragraphs (1, 2, 3 … per run of consecutive numbered paragraphs), by block id. */
+fun listNumbers(all: List<UiBlock>): Map<Int, Int> {
+    val out = HashMap<Int, Int>()
+    var n = 0
+    for (b in all) {
+        if (b is UiBlock.Para && b.style == ParaStyle.NUMBERED) { n++; out[b.id] = n } else n = 0
+    }
+    return out
+}
+
+@Composable
+private fun Marker(b: UiBlock.Para, numbers: Map<Int, Int>) {
+    when (b.style) {
+        ParaStyle.BULLET -> Text("•", style = paraStyle(b.style), modifier = Modifier.width(26.dp))
+        ParaStyle.NUMBERED -> Text("${numbers[b.id] ?: 1}.", style = paraStyle(b.style), modifier = Modifier.width(30.dp))
+        else -> {}
+    }
+}
+
 fun annotated(spans: List<Span>): AnnotatedString = buildAnnotatedString {
     for (s in spans) withStyle(
         SpanStyle(
             fontWeight = if (s.bold) FontWeight.Bold else null,
             fontStyle = if (s.italic) FontStyle.Italic else null,
-            textDecoration = if (s.underline) TextDecoration.Underline else null,
+            textDecoration = when {
+                s.underline && s.strike -> TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough))
+                s.underline -> TextDecoration.Underline
+                s.strike -> TextDecoration.LineThrough
+                else -> null
+            },
         ),
     ) { append(s.text) }
 }
@@ -137,6 +167,7 @@ private fun docKeys(graph: Graph, s: DocSession, focus: DocFocus, e: androidx.co
         Key.B -> toggle(s, focus, Attr.BOLD)
         Key.I -> toggle(s, focus, Attr.ITALIC)
         Key.U -> toggle(s, focus, Attr.UNDERLINE)
+        Key.F, Key.H -> if (!s.readOnly) graph.overlay = Overlay.Find(Win.DOC)
         else -> return false
     }
     return true
@@ -166,7 +197,9 @@ private fun hasAttr(s: DocSession, focus: DocFocus, attr: Attr): Boolean {
 @Composable
 fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks: List<UiBlock>? = null) {
     s.version
+    s.blockCount
     val all = blocks ?: s.blocks()
+    val numbers = listNumbers(all)
     LazyColumn(
         modifier.clip(RoundedCornerShape(12.dp)).background(Ink.Paper).padding(horizontal = 44.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 36.dp),
@@ -179,8 +212,8 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
         }
         items(all, key = { it.id }) { b ->
             when (b) {
-                is UiBlock.Para -> if (focus != null && b.editable && !s.readOnly) ParaEditor(s, b, focus, all) else ParaView(b)
-                is UiBlock.Table -> TableView(b)
+                is UiBlock.Para -> if (focus != null && b.editable && !s.readOnly) ParaEditor(s, b, focus, all, numbers) else ParaView(b, numbers)
+                is UiBlock.Table -> TableView(b, if (focus != null && s.richText && !s.readOnly) s else null)
                 is UiBlock.Image -> b.bitmap?.let { Image(bitmap = it.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) }
                 is UiBlock.Page -> Image(bitmap = b.bitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.FillWidth, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).border(1.dp, Ink.Line))
                 is UiBlock.Opaque -> OpaqueView(b)
@@ -190,16 +223,16 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
 }
 
 @Composable
-private fun ParaView(b: UiBlock.Para) {
+private fun ParaView(b: UiBlock.Para, numbers: Map<Int, Int> = emptyMap()) {
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        if (b.style == ParaStyle.BULLET || b.style == ParaStyle.NUMBERED) Text("•", style = paraStyle(b.style), modifier = Modifier.width(22.dp))
-        Text(annotated(b.spans), style = paraStyle(b.style), modifier = Modifier.weight(1f))
+        Marker(b, numbers)
+        Text(annotated(b.spans), style = aligned(paraStyle(b.style), b.align), modifier = Modifier.weight(1f))
         if (b.why != null && b.why != "html") Txt(tr(R.string.ph_readonly), "doc/readonly", Modifier.padding(start = 8.dp), style = PicoTheme.typography.labelMedium, color = Ink.Hint)
     }
 }
 
 @Composable
-private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: List<UiBlock>) {
+private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: List<UiBlock>, numbers: Map<Int, Int>) {
     val requester = remember(b.id) { FocusRequester() }
     var value by remember(b.id) { mutableStateOf(TextFieldValue(annotated(b.spans))) }
     // model changed underneath (format toggle, undo, style): rebuild the styled text, keep the caret
@@ -218,7 +251,7 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
         }
     }
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        if (b.style == ParaStyle.BULLET || b.style == ParaStyle.NUMBERED) Text("•", style = paraStyle(b.style), modifier = Modifier.width(22.dp))
+        Marker(b, numbers)
         BasicTextField(
             value = value,
             onValueChange = { nv ->
@@ -241,11 +274,11 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
                     focus.selection = nv.selection
                 }
             },
-            textStyle = paraStyle(b.style),
+            textStyle = aligned(paraStyle(b.style), b.align),
             cursorBrush = SolidColor(Ink.Select),
             modifier = Modifier.weight(1f).heightIn(min = 32.dp).focusRequester(requester)
                 .semantics { contentDescription = "paragraph-${b.id}" }
-                .onFocusChanged { if (it.isFocused) { focus.id = b.id; focus.selection = value.selection } }
+                .onFocusChanged { if (it.isFocused) { focus.id = b.id; s.caretBlock = b.id; focus.selection = value.selection } }
                 .onPreviewKeyEvent { e ->
                     if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     val editable = all.filterIsInstance<UiBlock.Para>().filter { it.editable }
@@ -286,12 +319,26 @@ private fun cut(spans: List<Span>, from: Int, to: Int): List<Span> {
 }
 
 @Composable
-private fun TableView(b: UiBlock.Table) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp).border(1.dp, Ink.Line)) {
+private fun TableView(b: UiBlock.Table, edit: DocSession?) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp).border(1.dp, Ink.Line).semantics { contentDescription = "table-${b.id}" }) {
         b.rows.forEachIndexed { r, row ->
             Row(Modifier.fillMaxWidth().background(if (r == 0) Ink.Header else Ink.Paper)) {
-                row.forEach { cell ->
-                    Text(cell, style = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, color = Ink.Text, fontWeight = if (r == 0) FontWeight.SemiBold else null), modifier = Modifier.weight(1f).border(0.5.dp, Ink.Line).padding(horizontal = 10.dp, vertical = 8.dp))
+                row.forEachIndexed { c, cell ->
+                    val style = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, color = Ink.Text, fontWeight = if (r == 0) FontWeight.SemiBold else null)
+                    val cellMod = Modifier.weight(1f).border(0.5.dp, Ink.Line).heightIn(min = 48.dp).padding(horizontal = 10.dp, vertical = 12.dp)
+                    if (edit == null) Text(cell, style = style, modifier = cellMod)
+                    else {
+                        var text by remember(b.id, r, c) { mutableStateOf(cell) }
+                        var focused by remember(b.id, r, c) { mutableStateOf(false) }
+                        if (!focused && text != cell) text = cell
+                        BasicTextField(
+                            value = text,
+                            onValueChange = { text = it; edit.setTableCell(b.id, r, c, it) },
+                            textStyle = style,
+                            cursorBrush = SolidColor(Ink.Select),
+                            modifier = cellMod.onFocusChanged { focused = it.isFocused }.semantics { contentDescription = "table-${b.id}-cell-$r-$c" },
+                        )
+                    }
                 }
             }
         }
@@ -315,44 +362,60 @@ private fun OpaqueView(b: UiBlock.Opaque) {
     }
 }
 
+/** Where an inserted picture or table goes: after the paragraph with the caret, else at the end. */
+private fun insertPoint(s: DocSession, focus: DocFocus): Int = focus.id.takeIf { id -> s.blocks().any { it.id == id } } ?: (s.blocks().lastOrNull()?.id ?: -1)
+
 @Composable
 private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
     s.version
-    var styles by remember { mutableStateOf(false) }
     val para = focused(s, focus)
     val canEdit = !s.readOnly && para?.editable == true
+    fun restyle(st: ParaStyle) { if (para != null) { s.setParagraph(para.id, para.spans, st); focus.want = para.id } }
+    fun align(a: Int) { if (para != null) { s.setParagraph(para.id, para.spans, para.style, a); focus.want = para.id } }
     Toolbar(
         supportingContent = { FileTools(graph, Win.DOC, s) },
         content = {
             if (!s.readOnly) ToolRow {
-                Box {
-                    ToolButton(styleName(para?.style ?: ParaStyle.BODY), "doc/style", onClick = { styles = !styles }, enabled = canEdit && s.styled)
-                    if (styles) {
-                        Menu(
-                            onDismissRequest = { styles = false },
-                            positionProvider = rememberMenuPositionProvider(horizontalPlacement = HorizontalPlacement.alignStart(), verticalPlacement = VerticalPlacement.above(offset = (-12).dp)),
-                        ) {
-                            listOf(ParaStyle.BODY, ParaStyle.H1, ParaStyle.H2, ParaStyle.H3, ParaStyle.TITLE).forEach { st ->
-                                MenuItem(title = { Txt(styleName(st), "doc/style-item") }, onClick = {
-                                    styles = false
-                                    if (para != null) { s.setParagraph(para.id, para.spans, st); focus.want = para.id }
-                                })
-                            }
-                        }
-                    }
-                }
+                ToolMenu(styleName(para?.style ?: ParaStyle.BODY), "doc/style", enabled = canEdit && s.styled, entries = listOf(ParaStyle.BODY, ParaStyle.H1, ParaStyle.H2, ParaStyle.H3, ParaStyle.TITLE).map { st ->
+                    MenuEntry(styleName(st), "doc/style-item", checked = para?.style == st) { restyle(st) }
+                })
                 ToolToggle(R.drawable.ic_text_bold, tr(R.string.bold), hasAttr(s, focus, Attr.BOLD), { toggle(s, focus, Attr.BOLD) }, enabled = canEdit && s.richText)
                 ToolToggle(R.drawable.ic_text_italic, tr(R.string.italic), hasAttr(s, focus, Attr.ITALIC), { toggle(s, focus, Attr.ITALIC) }, enabled = canEdit && s.richText)
                 ToolToggle(R.drawable.ic_text_underline, tr(R.string.underline), hasAttr(s, focus, Attr.UNDERLINE), { toggle(s, focus, Attr.UNDERLINE) }, enabled = canEdit && s.richText)
-                ToolToggle(R.drawable.ic_list_bulleted, tr(R.string.bullets), para?.style == ParaStyle.BULLET, { on ->
-                    if (para != null) { s.setParagraph(para.id, para.spans, if (on) ParaStyle.BULLET else ParaStyle.BODY); focus.want = para.id }
-                }, enabled = canEdit && s.styled)
+                ToolMenu(tr(R.string.menu_paragraph), "doc/paragraph", icon = R.drawable.ic_list_bulleted, enabled = canEdit && s.styled, entries = listOfNotNull(
+                    MenuEntry(tr(R.string.bullets), "doc/bullets", checked = para?.style == ParaStyle.BULLET) { restyle(if (para?.style == ParaStyle.BULLET) ParaStyle.BODY else ParaStyle.BULLET) },
+                    MenuEntry(tr(R.string.numbering), "doc/numbering", checked = para?.style == ParaStyle.NUMBERED) { restyle(if (para?.style == ParaStyle.NUMBERED) ParaStyle.BODY else ParaStyle.NUMBERED) },
+                ) + if (s.richText) listOf(
+                    MenuEntry(tr(R.string.align_left), "doc/align-left", checked = para?.align == 0) { align(0) },
+                    MenuEntry(tr(R.string.align_center), "doc/align-center", checked = para?.align == 1) { align(1) },
+                    MenuEntry(tr(R.string.align_right), "doc/align-right", checked = para?.align == 2) { align(2) },
+                    MenuEntry(tr(R.string.align_justify), "doc/align-justify", checked = para?.align == 3) { align(3) },
+                ) else emptyList())
+                ToolMenu(tr(R.string.menu_insert), "doc/insert", icon = R.drawable.ic_plus, enabled = s.richText, entries = listOf(
+                    MenuEntry(tr(R.string.ins_picture), "doc/picture") {
+                        val at = insertPoint(s, focus)
+                        graph.pickImage(Win.DOC) { b, e, w, h -> s.insertImage(at, b, e, w, h) }
+                    },
+                    MenuEntry(tr(R.string.ins_table), "doc/table") { graph.overlay = Overlay.InsertTable(Win.DOC) },
+                ))
+                ToolMenu(tr(R.string.more), "doc/more", icon = R.drawable.ic_ellipsis, entries = listOfNotNull(
+                    if (s.richText && canEdit) MenuEntry(tr(R.string.strike), "doc/strike", checked = hasAttr(s, focus, Attr.STRIKE)) { toggle(s, focus, Attr.STRIKE) } else null,
+                    MenuEntry(tr(R.string.find_replace), "doc/find") { graph.overlay = Overlay.Find(Win.DOC) },
+                    MenuEntry(tr(R.string.word_count), "doc/wordcount") { graph.overlay = Overlay.WordCount(Win.DOC) },
+                ))
                 ToolDivider()
                 UndoRedo(s)
-            } else Txt(tr(R.string.readonly_note), "doc/readonly-note", Modifier.padding(horizontal = 12.dp), style = PicoTheme.typography.bodyMedium)
+            } else Row(verticalAlignment = Alignment.CenterVertically) {
+                Txt(tr(R.string.readonly_note), "doc/readonly-note", Modifier.padding(horizontal = 12.dp), style = PicoTheme.typography.bodyMedium)
+                ToolButton(tr(R.string.word_count), "doc/wordcount-ro", onClick = { graph.overlay = Overlay.WordCount(Win.DOC) })
+            }
         },
     )
 }
+
+/** Paragraph id after which [DocWindow]'s Insert ▸ Table puts the table (debug and dialog share it). */
+fun docInsertTable(s: DocSession, rows: Int, cols: Int, afterId: Int? = null): Int =
+    s.insertTable(afterId ?: s.caretBlock.takeIf { id -> s.blocks().any { it.id == id } } ?: (s.blocks().lastOrNull()?.id ?: -1), rows, cols)
 
 @Composable
 private fun styleName(st: ParaStyle): String = tr(

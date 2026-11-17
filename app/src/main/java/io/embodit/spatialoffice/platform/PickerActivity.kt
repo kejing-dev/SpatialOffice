@@ -19,15 +19,21 @@ class PickerActivity : ComponentActivity() {
                 contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
             }.getOrNull() ?: uri.lastPathSegment ?: "file"
             Log.i(TAG, "PICKER picked $name")
-            graph.open(FileRef.Content(uri, name))
+            val forImage = intent.getStringExtra(EXTRA_IMAGE)
+            if (forImage != null) graph.imageChosen(Win.valueOf(forImage), FileRef.Content(uri, name)) else graph.open(FileRef.Content(uri, name))
         }
         finish()
+    }
+
+    companion object {
+        /** Set to a [Win] name to pick a picture for that editor instead of opening a file. */
+        const val EXTRA_IMAGE = "image_for"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (savedInstanceState != null) return
-        runCatching { picker.launch(arrayOf("*/*")) }.onFailure {
+        runCatching { picker.launch(arrayOf(if (intent.getStringExtra(EXTRA_IMAGE) != null) "image/*" else "*/*")) }.onFailure {
             Log.w(TAG, "PICKER unavailable: $it")
             Graph.from(this).let { g -> g.say(Win.HOME, g.str(R.string.picker_none)) }
             finish()

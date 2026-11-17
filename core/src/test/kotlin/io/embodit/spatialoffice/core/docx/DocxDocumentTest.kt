@@ -95,7 +95,7 @@ class DocxDocumentTest {
         assertEquals(CompatNote(CompatKind.READ_ONLY, "comments", 1), notes["comments"])
         assertEquals(CompatNote(CompatKind.READ_ONLY, "text-box", 1), notes["text-box"])
         assertEquals(CompatNote(CompatKind.READ_ONLY, "section", 1), notes["section"])
-        assertEquals(CompatNote(CompatKind.READ_ONLY, "table", 1), notes["table"])
+        assertNull(notes["table"])                                  // tables are editable since v0.2
         assertEquals(CompatNote(CompatKind.READ_ONLY, "field", 1), notes["field"])
         assertEquals(CompatNote(CompatKind.APPROX, "columns", 1), notes["columns"])
         assertEquals(CompatNote(CompatKind.APPROX, "merged-cells", 1), notes["merged-cells"])

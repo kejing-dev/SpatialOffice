@@ -21,6 +21,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -272,5 +274,37 @@ fun <T> Segments(options: List<Pair<T, String>>, selected: T, tag: String, modif
 fun Tag(text: String, tag: String, color: Color = PicoTheme.colorScheme.fillSecondary, ink: Color = PicoTheme.colorScheme.labelPrimary) {
     Box(Modifier.clip(RoundedCornerShape(10.dp)).background(color).padding(horizontal = 10.dp, vertical = 4.dp)) {
         Txt(text, "$tag/tag", style = PicoTheme.typography.labelMedium, color = ink)
+    }
+}
+
+/** One entry of a toolbar drop-down. [checked] adds a tick in front; disabled entries are left out by the caller. */
+data class MenuEntry(val label: String, val tag: String, val checked: Boolean = false, val onClick: () -> Unit)
+
+/**
+ * Toolbar button that opens a menu of related tools (B31: keep a toolbar to a handful of groups, the rest behind
+ * "More"). The menu opens above the bottom toolbar.
+ */
+@Composable
+fun ToolMenu(label: String, tag: String, entries: List<MenuEntry>, enabled: Boolean = true, icon: Int? = null, above: Boolean = true) {
+    var open by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    Box {
+        ToolButton(label, tag, onClick = { open = !open }, enabled = enabled && entries.isNotEmpty(), icon = icon)
+        if (open) {
+            com.pico.spatial.ui.design.menu.Menu(
+                onDismissRequest = { open = false },
+                positionProvider = com.pico.spatial.ui.design.menu.rememberMenuPositionProvider(
+                    horizontalPlacement = com.pico.spatial.ui.design.windows.popup.HorizontalPlacement.alignStart(),
+                    verticalPlacement = if (above) com.pico.spatial.ui.design.windows.popup.VerticalPlacement.above(offset = (-12).dp)
+                    else com.pico.spatial.ui.design.windows.popup.VerticalPlacement.below(offset = 8.dp),
+                ),
+            ) {
+                entries.forEach { e ->
+                    com.pico.spatial.ui.design.menu.MenuItem(
+                        title = { Txt((if (e.checked) "✓ " else "") + e.label, "$tag/item") },
+                        onClick = { open = false; e.onClick() },
+                    )
+                }
+            }
+        }
     }
 }

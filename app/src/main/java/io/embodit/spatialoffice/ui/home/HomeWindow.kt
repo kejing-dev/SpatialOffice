@@ -195,7 +195,9 @@ private fun RecentPage(graph: Graph) {
         })
     }
     PageBody {
-        val items = graph.recents.items
+        val all = graph.recents.items
+        val items = all.filter { it.cloud == null }
+        val cloudItems = all.filter { it.cloud != null }
         GroupLabel(tr(R.string.group_device), "recent")
         if (items.isEmpty()) {
             InfoRow(R.drawable.ic_info_circle, tr(R.string.recent_empty), tr(R.string.first_hint), "recent/empty")
@@ -206,7 +208,9 @@ private fun RecentPage(graph: Graph) {
         }
         if (!graph.settings.value.hintSeen && items.isNotEmpty()) LaunchedEffect(Unit) { graph.settings.update { it.copy(hintSeen = true) } }
         GroupLabel(tr(R.string.group_cloud), "recent")
-        InfoRow(R.drawable.ic_cloud, tr(R.string.cloud_none), null, "recent/cloud")
+        if (cloudItems.isNotEmpty()) cloudItems.take(4).forEach { r ->
+            FileRow(r.name, kindLabel(r.kind) + " · " + r.display.substringBefore(" › ") + " · " + timeLabel(r.time), r.kind, tag = "recent/cloud-row") { graph.open(r.ref()) }
+        } else InfoRow(R.drawable.ic_cloud, tr(if (graph.accounts.anyConnected) R.string.cloud_recent_none else R.string.cloud_none), null, "recent/cloud")
         Spacer(Modifier.height(4.dp))
         InfoRow(R.drawable.ic_info_circle, tr(R.string.entry_head), tr(R.string.entry_sub), "recent/entry")
     }
@@ -255,21 +259,43 @@ private fun NewCard(cover: Int, label: String, ext: String, tag: String, onClick
 private fun AccountPage(graph: Graph) {
     PageHeader(tr(R.string.nav_account), tr(R.string.account_sub), "account")
     PageBody {
-        // No app identity is registered with any provider yet, so nothing here pretends to sign in.
-        listOf(R.string.loc_feishu, R.string.loc_gdrive, R.string.loc_onedrive, R.string.loc_dropbox).forEach { name ->
-            ListItem(
-                headlineContent = { Txt(tr(name), "account/name", style = PicoTheme.typography.titleMedium) },
-                supportingContent = { Txt(tr(R.string.acct_off), "account/state", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2) },
-                leadingContent = {
-                    Box(Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(PicoTheme.colorScheme.fillSecondary), contentAlignment = Alignment.Center) {
-                        Icon(painter = painterResource(R.drawable.ic_cloud), contentDescription = null, modifier = Modifier.size(24.dp))
-                    }
-                },
-                trailingContent = { io.embodit.spatialoffice.ui.Tag(tr(R.string.acct_soon), "account") },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp),
-            )
-        }
+        io.embodit.spatialoffice.core.cloud.Provider.values().forEach { p -> AccountRow(graph, p) }
         Spacer(Modifier.height(4.dp))
         InfoRow(R.drawable.ic_lock, tr(R.string.scope_head), tr(R.string.scope_sub), "account/scope")
     }
+}
+
+/** One service: what state it is in, in words, and the one button that moves it on (PRD §9.2–9.3). */
+@Composable
+internal fun AccountRow(graph: Graph, p: io.embodit.spatialoffice.core.cloud.Provider) {
+    val a = graph.accounts
+    val info = a.info[p] ?: return
+    val name = tr(io.embodit.spatialoffice.platform.Accounts.nameRes(p))
+    val state = when (info.state) {
+        io.embodit.spatialoffice.platform.AcctState.UNREGISTERED -> tr(R.string.acct_need_reg, a.configKey(p))
+        io.embodit.spatialoffice.platform.AcctState.OFF -> info.note ?: tr(R.string.acct_off_now)
+        io.embodit.spatialoffice.platform.AcctState.WAITING -> tr(R.string.acct_waiting)
+        io.embodit.spatialoffice.platform.AcctState.ON -> tr(R.string.acct_on, info.name.ifEmpty { name })
+        io.embodit.spatialoffice.platform.AcctState.EXPIRED -> tr(R.string.acct_expired)
+        io.embodit.spatialoffice.platform.AcctState.REVOKED -> tr(R.string.acct_revoked)
+    }
+    ListItem(
+        headlineContent = { Txt(name, "account/name", style = PicoTheme.typography.titleMedium) },
+        supportingContent = { Txt(state, "account/state", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3) },
+        leadingContent = {
+            Box(Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).background(PicoTheme.colorScheme.fillSecondary), contentAlignment = Alignment.Center) {
+                Icon(painter = painterResource(R.drawable.ic_cloud), contentDescription = null, modifier = Modifier.size(24.dp))
+            }
+        },
+        trailingContent = {
+            when (info.state) {
+                io.embodit.spatialoffice.platform.AcctState.UNREGISTERED -> SecondaryButton(tr(R.string.acct_connect), "account/${p.id}/connect", onClick = { a.connect(p) })
+                io.embodit.spatialoffice.platform.AcctState.OFF -> io.embodit.spatialoffice.ui.PrimaryButton(tr(R.string.acct_connect), "account/${p.id}/connect", onClick = { a.connect(p) })
+                io.embodit.spatialoffice.platform.AcctState.WAITING -> SecondaryButton(tr(R.string.cancel), "account/${p.id}/cancel", onClick = { a.cancel(p) })
+                io.embodit.spatialoffice.platform.AcctState.ON -> SecondaryButton(tr(R.string.acct_signout), "account/${p.id}/signout", onClick = { graph.overlay = io.embodit.spatialoffice.platform.Overlay.SignOut(p) })
+                else -> io.embodit.spatialoffice.ui.PrimaryButton(tr(R.string.acct_relogin), "account/${p.id}/relogin", onClick = { a.connect(p) })
+            }
+        },
+        modifier = Modifier.fillMaxWidth().heightIn(min = 80.dp),
+    )
 }

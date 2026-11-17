@@ -14,8 +14,12 @@ data class Shape(
     val id: Int, val kind: ShapeKind, val x: Long, val y: Long, val w: Long, val h: Long,
     val paras: List<TextPara>, val fontPt: Float?, val bold: Boolean, val colorRgb: Int?,
     val align: Int, val imagePart: String?, val editable: Boolean,
+    /** Preset geometry of a drawn shape ("rect", "ellipse", "roundRect", "triangle", "rightArrow" …); null for none / text boxes. */
+    val geom: String? = null,
+    /** Solid fill as 0xRRGGBB; null when the shape has no plain fill. */
+    val fillRgb: Int? = null,
 )
 
 data class Slide(val index: Int, val shapes: List<Shape>, val notes: String, val backgroundRgb: Int?)
 
-enum class SlideLayoutKind { TITLE, TITLE_BODY }
+enum class SlideLayoutKind { TITLE, TITLE_BODY, TWO_COLUMN, BLANK }

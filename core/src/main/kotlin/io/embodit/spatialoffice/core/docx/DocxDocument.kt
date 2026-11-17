@@ -105,7 +105,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
      * run its [Run.src] names, with only bold / italic / underline switched.
      * @throws IllegalStateException when the block is not an editable paragraph.
      */
-    fun setParagraph(id: Int, runs: List<Run>, style: ParaStyle) {
+    fun setParagraph(id: Int, runs: List<Run>, style: ParaStyle, align: Int? = null) {
         val idx = indexOf(id)
         val e = entries[idx]
         val old = e.block as? Paragraph ?: throw IllegalStateException("block $id is not a paragraph")
@@ -113,7 +113,9 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
         val p = Xml.elemAt(xml, e.start) ?: throw IllegalStateException("paragraph $id is not readable")
         val kids = Xml.children(xml, p)
         val oldPPr = kids.firstOrNull { it.name == "w:pPr" }?.let { XmlEx.src(xml, it) } ?: ""
-        val newPPr = if (style == old.style) oldPPr else restylePPr(oldPPr, style, idx - 1, idx + 1)
+        var newPPr = if (style == old.style) oldPPr else restylePPr(oldPPr, style, idx - 1, idx + 1)
+        val newAlign = align ?: old.align
+        if (newAlign != alignOf(newPPr)) newPPr = withAlign(newPPr, newAlign)
 
         val firstRun = kids.indexOfFirst { it.name == "w:r" }
         val lead = StringBuilder()
@@ -127,8 +129,97 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
         val clean = normRuns(runs)
         val newXml = XmlEx.openTag(xml, p) + newPPr + lead + runsXml(clean, e.srcRPr) + trail + "</w:p>"
         replaceEntry(idx, newXml)
-        e.block = Paragraph(id, style, clean, true, null)
+        e.block = Paragraph(id, style, clean, true, null, newAlign)
         changedIds.add(id)
+    }
+
+    /** Inserts a picture (its own paragraph) after block [id]; [ext] is "png" / "jpeg" / "jpg" / "gif". Returns its id. */
+    fun insertImageAfter(id: Int, bytes: ByteArray, ext: String, widthEmu: Long, heightEmu: Long): Int {
+        if (bodyStart < 0) throw IllegalStateException("document has no body")
+        val e = ext.lowercase().let { if (it == "jpg") "jpeg" else it }
+        var n = 1
+        while (pkg.has("word/media/image$n.$e") || pkg.has("word/media/image$n.${if (e == "jpeg") "jpg" else e}")) n++
+        val part = "word/media/image$n.$e"
+        pkg.put(part, bytes)
+        ContentTypes.addDefault(pkg, e, "image/$e")
+        val rid = Rels.add(pkg, docPart, DocxTemplates.REL + "/image", XmlEx.relativize(docPart, part))
+        auxChanged = true
+        val docPrId = (Regex("<wp:docPr\\b[^>]*\\bid=\"(\\d+)\"").findAll(xml).mapNotNull { it.groupValues[1].toIntOrNull() }.maxOrNull() ?: 0) + 1
+        val newXml = "<w:p>" + DocxTemplates.inlinePicture(rid, docPrId, "Picture $docPrId", widthEmu, heightEmu) + "</w:p>"
+        return insertRaw(id, newXml) { nid -> ImageBlock(nid, part, widthEmu, heightEmu) }
+    }
+
+    /** Inserts an empty table of [rows] × [cols] after block [id] and returns its id. */
+    fun insertTableAfter(id: Int, rows: Int, cols: Int): Int {
+        require(rows in 1..200 && cols in 1..30) { "table size $rows × $cols" }
+        val newXml = DocxTemplates.table(rows, cols, 9000)
+        val nid = insertRaw(id, newXml) { nid -> TableBlock(nid, List(rows) { List(cols) { "" } }) }
+        // Word needs a paragraph between a table and whatever follows it only at the end of the body; add one when the table is last
+        val idx = indexOf(nid)
+        if (idx == entries.lastIndex) insertParagraphAfter(nid, emptyList(), ParaStyle.BODY)
+        return nid
+    }
+
+    /**
+     * Sets the text of one table cell ([col] counts grid columns, as [TableBlock.rows] does). The cell keeps its
+     * properties and the first paragraph's properties and run formatting; its paragraphs become one per line of [text].
+     */
+    fun setTableCell(id: Int, row: Int, col: Int, text: String) {
+        val idx = indexOf(id)
+        val e = entries[idx]
+        if (e.block !is TableBlock) throw IllegalStateException("block $id is not a table")
+        val tbl = Xml.elemAt(xml, e.start) ?: throw IllegalStateException("table $id is not readable")
+        val tr = Xml.children(xml, tbl, "w:tr").getOrNull(row) ?: throw IndexOutOfBoundsException("row $row")
+        var grid = 0
+        var tc: Xml.Elem? = null
+        for (c in Xml.children(xml, tr, "w:tc")) {
+            val span = Xml.child(xml, c, "w:tcPr")?.let { Xml.child(xml, it, "w:gridSpan") }?.let { Xml.attr(xml, it, "w:val")?.toIntOrNull() } ?: 1
+            if (col >= grid && col < grid + span) { tc = c; break }
+            grid += span
+        }
+        val cell = tc ?: throw IndexOutOfBoundsException("col $col")
+        val kids = Xml.children(xml, cell)
+        val tcPr = kids.firstOrNull { it.name == "w:tcPr" }?.let { XmlEx.src(xml, it) } ?: ""
+        val firstP = kids.firstOrNull { it.name == "w:p" }
+        val pPr = firstP?.let { Xml.child(xml, it, "w:pPr") }?.let { XmlEx.src(xml, it) } ?: ""
+        val rPr = firstP?.let { p -> Xml.children(xml, p, "w:r").firstOrNull()?.let { Xml.child(xml, it, "w:rPr") } }?.let { XmlEx.src(xml, it) } ?: ""
+        if (kids.any { it.name != "w:tcPr" && it.name != "w:p" }) throw IllegalStateException("cell holds more than text")
+        val paras = text.replace("\r\n", "\n").split('\n').joinToString("") { line ->
+            "<w:p>$pPr" + (if (line.isEmpty()) "" else runsXml(normRuns(listOf(Run(line))), listOf(rPr))) + "</w:p>"
+        }
+        val newCell = XmlEx.openTag(xml, cell) + tcPr + paras + "</w:tc>"
+        val delta = newCell.length - (cell.end - cell.start)
+        xml = xml.substring(0, cell.start) + newCell + xml.substring(cell.end)
+        e.end += delta
+        for (k in idx + 1 until entries.size) { entries[k].start += delta; entries[k].end += delta }
+        touched()
+        e.block = parseTable(id, Xml.elemAt(xml, e.start)!!)
+        changedIds.add(id)
+    }
+
+    private fun insertRaw(id: Int, newXml: String, block: (Int) -> DocBlock): Int {
+        val anchorIdx = if (id == -1) -1 else indexOf(id)
+        val pos = if (anchorIdx < 0) bodyStart else entries[anchorIdx].end
+        xml = xml.substring(0, pos) + newXml + xml.substring(pos)
+        for (k in anchorIdx + 1 until entries.size) { entries[k].start += newXml.length; entries[k].end += newXml.length }
+        val newId = nextId++
+        entries.add(anchorIdx + 1, Entry(newId, pos, pos + newXml.length, block(newId), emptyList(), true))
+        changedIds.add(newId)
+        touched()
+        return newId
+    }
+
+    private fun alignOf(pPr: String): Int {
+        if (pPr.isEmpty()) return 0
+        val e = XmlEx.childOf(pPr, "w:jc") ?: return 0
+        return when (Xml.attr(pPr, e, "w:val")) { "center" -> 1; "right", "end" -> 2; "both", "distribute" -> 3; else -> 0 }
+    }
+
+    private fun withAlign(pPr: String, align: Int): String {
+        var out = if (pPr.isEmpty()) "<w:pPr></w:pPr>" else XmlEx.removeChildren(pPr, setOf("w:jc"))
+        val v = when (align) { 1 -> "center"; 2 -> "right"; 3 -> "both"; else -> null }
+        if (v != null) out = XmlEx.insertChild(out, "<w:jc w:val=\"$v\"/>", "w:jc", PPR_ORDER)
+        return if (XmlEx.isEmpty(out)) "" else out
     }
 
     /**
@@ -196,19 +287,16 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
         add(CompatKind.READ_ONLY, "comments", if (comments > 0) comments else Regex("<w:commentReference[\\s/>]").findAll(xml).count())
 
         val opaque = LinkedHashMap<String, Int>()
-        var tables = 0
         var fields = 0
         var complex = 0
         for (e in entries) {
             when (val b = e.block) {
                 is OpaqueBlock -> opaque[b.kind] = (opaque[b.kind] ?: 0) + 1
-                is TableBlock -> tables++
                 is Paragraph -> if (!b.editable) { if (b.readOnlyWhy == "field") fields++ else if (b.readOnlyWhy == "complex") complex++ }
                 else -> {}
             }
         }
         for (k in listOf("text-box", "smart-graphic", "chart", "section", "other")) add(CompatKind.READ_ONLY, k, opaque[k] ?: 0)
-        add(CompatKind.READ_ONLY, "table", tables)
         add(CompatKind.READ_ONLY, "field", fields)
         add(CompatKind.READ_ONLY, "complex", complex)
 
@@ -329,7 +417,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
      */
     private fun modelRun(r: Xml.Elem, src: Int): Run {
         val rPr = rPrOf(r)
-        return Run(runText(r), runToggle(rPr, "w:b"), runToggle(rPr, "w:i"), runToggle(rPr, "w:u"), src)
+        return Run(runText(r), runToggle(rPr, "w:b"), runToggle(rPr, "w:i"), runToggle(rPr, "w:u"), src, runToggle(rPr, "w:strike"))
     }
 
     private fun runToggle(rPr: String, prop: String): Boolean =
@@ -371,6 +459,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
         val pPr = kids.firstOrNull { it.name == "w:pPr" }?.let { XmlEx.src(xml, it) } ?: ""
         val seg = xml.substring(p.start, p.end)
         val style = styleOf(pPr)
+        val align = alignOf(pPr)
 
         val tracked = TRACKED.containsMatchIn(seg)
         val graphic = GRAPHIC.containsMatchIn(seg)
@@ -388,7 +477,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
                 if (r.text.isNotEmpty()) runs.add(r)
                 i++
             }
-            return Entry(id, p.start, p.end, Paragraph(id, style, runs, true, null), srcRPr, false)
+            return Entry(id, p.start, p.end, Paragraph(id, style, runs, true, null, align), srcRPr, false)
         }
 
         val found = ArrayList<Xml.Elem>()
@@ -482,6 +571,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
             rPr = withToggle(rPr, "w:b", r.bold)
             rPr = withToggle(rPr, "w:i", r.italic)
             rPr = withToggle(rPr, "w:u", r.underline)
+            rPr = withToggle(rPr, "w:strike", r.strike)
             sb.append("<w:r>")
             if (rPr.isNotEmpty() && !XmlEx.isEmpty(rPr)) sb.append(rPr)
             val buf = StringBuilder()
@@ -511,7 +601,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
         var rPr = rPrIn
         if (runToggle(rPr, prop) == want) return rPr
         if (rPr.isNotEmpty()) {
-            rPr = XmlEx.removeChildren(rPr, when (prop) { "w:b" -> setOf("w:b", "w:bCs"); "w:i" -> setOf("w:i", "w:iCs"); else -> setOf("w:u") })
+            rPr = XmlEx.removeChildren(rPr, when (prop) { "w:b" -> setOf("w:b", "w:bCs"); "w:i" -> setOf("w:i", "w:iCs"); "w:strike" -> setOf("w:strike"); else -> setOf("w:u") })
         }
         if (runToggle(rPr, prop) == want) return rPr       // what is left (a character style, or nothing) already says so
         val el = if (prop == "w:u") (if (want) "<w:u w:val=\"single\"/>" else "<w:u w:val=\"none\"/>")

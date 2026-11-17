@@ -56,6 +56,20 @@ internal object PptxTemplates {
             "<p:spPr>${xfrm(x, y, w, h)}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>" +
             "<p:txBody><a:bodyPr wrap=\"square\" rtlCol=\"0\"><a:spAutoFit/></a:bodyPr><a:lstStyle/>$paras</p:txBody></p:sp>"
 
+    /** A picture shape stretched over its box. */
+    fun picture(id: Int, rid: String, x: Long, y: Long, w: Long, h: Long): String =
+        "<p:pic xmlns:a=\"$NS_A\" xmlns:r=\"$NS_R\"><p:nvPicPr><p:cNvPr id=\"$id\" name=\"Picture $id\"/><p:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>" +
+            "<p:blipFill><a:blip r:embed=\"$rid\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>" +
+            "<p:spPr>${xfrm(x, y, w, h)}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr></p:pic>"
+
+    /** A filled preset shape with an empty, centred text body. */
+    fun shape(id: Int, geom: String, x: Long, y: Long, w: Long, h: Long, fillRgb: Int): String {
+        val hex = String.format("%06X", fillRgb and 0xFFFFFF)
+        return "<p:sp xmlns:a=\"$NS_A\"><p:nvSpPr><p:cNvPr id=\"$id\" name=\"Shape $id\"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>" +
+            "<p:spPr>${xfrm(x, y, w, h)}<a:prstGeom prst=\"${Xml.escape(geom)}\"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val=\"$hex\"/></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr>" +
+            "<p:txBody><a:bodyPr rtlCol=\"0\" anchor=\"ctr\"/><a:lstStyle/><a:p><a:pPr algn=\"ctr\"/><a:endParaRPr lang=\"en-US\" sz=\"1800\"><a:solidFill><a:srgbClr val=\"FFFFFF\"/></a:solidFill></a:endParaRPr></a:p></p:txBody></p:sp>"
+    }
+
     fun notesSlide(imgPh: String, bodyPh: String, paras: String): String = XmlEx.XML_DECL +
         "<p:notes $NS><p:cSld><p:spTree>$TREE_HEAD" +
         placeholder(2, "Slide Image Placeholder 1", imgPh, locks = "<a:spLocks noGrp=\"1\" noRot=\"1\" noChangeAspect=\"1\"/>", text = false) +

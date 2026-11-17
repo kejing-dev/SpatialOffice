@@ -273,6 +273,8 @@ internal object Formula {
         "SUM", "AVERAGE", "MIN", "MAX", "COUNT", "COUNTA", "IF", "ROUND", "ABS", "AND", "OR", "NOT", "INT",
         "IFERROR", "MOD", "SQRT", "POWER", "ROUNDUP", "ROUNDDOWN", "PRODUCT", "LEN", "CONCATENATE", "CONCAT",
         "UPPER", "LOWER", "TRIM", "TRUE", "FALSE",
+        "COUNTIF", "SUMIF", "AVERAGEIF", "COUNTBLANK", "MEDIAN", "LARGE", "SMALL", "LEFT", "RIGHT", "MID",
+        "SIGN", "CEILING", "FLOOR", "VLOOKUP", "HLOOKUP", "EXACT", "REPT",
     )
 
     private class Bad : RuntimeException() {
@@ -428,13 +430,39 @@ internal object Formula {
      * Adjusts references into sheet [target] after a row was inserted at 0-based index [at] (rows ≥ [at] moved down by one).
      * [own] is the sheet the formula lives on (used for unqualified references; null = only qualified references apply).
      */
-    fun shiftRows(text: String, toks: List<Tok>, own: String?, target: String, at: Int): String = rewriteRefs(text, toks) { r ->
+    fun shiftRows(text: String, toks: List<Tok>, own: String?, target: String, at: Int): String = shift(text, toks, own, target, false, at, 1)
+
+    /**
+     * Adjusts references into sheet [target] after one row ([cols] = false) or column was inserted at 0-based index
+     * [at] ([delta] = 1: everything from [at] on moves by one) or deleted ([delta] = -1: [at] goes away, later ones move
+     * back by one). A reference that pointed only at the deleted line becomes `#REF!`.
+     */
+    fun shift(text: String, toks: List<Tok>, own: String?, target: String, cols: Boolean, at: Int, delta: Int): String = rewriteRefs(text, toks) { r ->
         val sheet = r.sheet ?: own
-        if (sheet == null || !sheet.equals(target, ignoreCase = true) || r.kind == RefTok.COLS) null
+        val skipKind = if (cols) RefTok.ROWS else RefTok.COLS
+        if (sheet == null || !sheet.equals(target, ignoreCase = true) || r.kind == skipKind) null
         else {
-            val n1 = if (r.r1 >= at && r.r1 < A1.MAX_ROW) r.r1 + 1 else r.r1
-            val n2 = if (r.r2 >= at && r.r2 < A1.MAX_ROW) r.r2 + 1 else r.r2
-            if (n1 == r.r1 && n2 == r.r2) null else r.copy(r1 = n1, r2 = n2).areaText()
+            val a1 = if (cols) r.c1 else r.r1
+            val a2 = if (cols) r.c2 else r.r2
+            val max = if (cols) A1.MAX_COL else A1.MAX_ROW
+            var n1 = a1
+            var n2 = a2
+            var gone = false
+            if (delta > 0) {
+                if (a1 >= at && a1 < max) n1 = a1 + 1
+                if (a2 >= at && a2 < max) n2 = a2 + 1
+            } else {
+                if (a1 == at && a2 == at) gone = true
+                if (a1 > at) n1 = a1 - 1
+                if (a2 >= at && a2 > a1 || a2 > at) n2 = a2 - 1
+                if (n2 < n1) gone = true
+            }
+            when {
+                gone -> "#REF!"
+                n1 == a1 && n2 == a2 -> null
+                cols -> r.copy(c1 = n1, c2 = if (r.kind == RefTok.CELL) n1 else n2).areaText()
+                else -> r.copy(r1 = n1, r2 = if (r.kind == RefTok.CELL) n1 else n2).areaText()
+            }
         }
     }
 
@@ -461,6 +489,8 @@ internal interface CellHost {
     fun cellValue(sheet: Int, row: Int, col: Int): Any?
     /** Values of the non-empty cells of a rectangle, row by row. */
     fun rangeValues(sheet: Int, r1: Int, c1: Int, r2: Int, c2: Int): List<Any?>
+    /** Rows and columns in use on [sheet], so whole-column references are walked only as far as there is data. */
+    fun used(sheet: Int): IntArray = intArrayOf(A1.MAX_ROW + 1, A1.MAX_COL + 1)
 }
 
 internal class RangeV(val sheet: Int, val r1: Int, val c1: Int, val r2: Int, val c2: Int)
@@ -749,7 +779,165 @@ internal class Evaluator(private val host: CellHost) {
                 }
                 return sb.toString()
             }
+            "COUNTIF", "SUMIF", "AVERAGEIF" -> {
+                val need = if (n.name == "COUNTIF") 2 else 2..3
+                if ((need is Int && a.size != need) || (need is IntRange && a.size !in need)) return ErrVal.VALUE
+                val rng = eval(a[0], x) as? RangeV ?: return ErrVal.VALUE
+                val crit = value(a[1], x)
+                if (crit is ErrVal) return crit
+                val test = criterion(crit)
+                val sumR = if (a.size == 3) (eval(a[2], x) as? RangeV ?: return ErrVal.VALUE) else rng
+                var count = 0
+                var sum = 0.0
+                for ((dr, dc) in cellsOf(rng)) {
+                    val v = host.cellValue(rng.sheet, rng.r1 + dr, rng.c1 + dc)
+                    if (!test(v)) continue
+                    if (n.name == "COUNTIF") { count++; continue }
+                    val s = host.cellValue(sumR.sheet, sumR.r1 + dr, sumR.c1 + dc)
+                    if (s is ErrVal) return s
+                    if (s is Double) { sum += s; count++ }
+                }
+                return when (n.name) {
+                    "COUNTIF" -> count.toDouble()
+                    "SUMIF" -> clean(sum)
+                    else -> if (count == 0) ErrVal.DIV0 else clean(sum / count)
+                }
+            }
+            "COUNTBLANK" -> {
+                if (a.size != 1) return ErrVal.VALUE
+                val rng = eval(a[0], x) as? RangeV ?: return ErrVal.VALUE
+                val total = (rng.r2 - rng.r1 + 1).toLong() * (rng.c2 - rng.c1 + 1)
+                val filled = host.rangeValues(rng.sheet, rng.r1, rng.c1, rng.r2, rng.c2).count { it != "" }
+                return (total - filled).toDouble()
+            }
+            "MEDIAN" -> {
+                val xs = ArrayList<Double>()
+                nums(a, x, xs)?.let { return it }
+                if (xs.isEmpty()) return ErrVal.NUM
+                xs.sort()
+                val m = xs.size / 2
+                return if (xs.size % 2 == 1) xs[m] else clean((xs[m - 1] + xs[m]) / 2)
+            }
+            "LARGE", "SMALL" -> {
+                if (a.size != 2) return ErrVal.VALUE
+                val xs = ArrayList<Double>()
+                nums(listOf(a[0]), x, xs)?.let { return it }
+                val k = num(value(a[1], x))
+                if (k is ErrVal) return k
+                val i = Math.ceil(k as Double).toInt()
+                if (i < 1 || i > xs.size) return ErrVal.NUM
+                xs.sort()
+                return if (n.name == "SMALL") xs[i - 1] else xs[xs.size - i]
+            }
+            "LEFT", "RIGHT", "MID" -> {
+                if (n.name == "MID" && a.size != 3) return ErrVal.VALUE
+                if (n.name != "MID" && (a.isEmpty() || a.size > 2)) return ErrVal.VALUE
+                val v = value(a[0], x)
+                if (v is ErrVal) return v
+                val s = text(v)
+                if (n.name == "MID") {
+                    val st = num(value(a[1], x)); if (st is ErrVal) return st
+                    val ln = num(value(a[2], x)); if (ln is ErrVal) return ln
+                    val from = (st as Double).toInt(); val len = (ln as Double).toInt()
+                    if (from < 1 || len < 0) return ErrVal.VALUE
+                    if (from > s.length) return ""
+                    return s.substring(from - 1, minOf(s.length, from - 1 + len))
+                }
+                val k = if (a.size == 2) num(value(a[1], x)) else 1.0
+                if (k is ErrVal) return k
+                val c = (k as Double).toInt()
+                if (c < 0) return ErrVal.VALUE
+                return if (n.name == "LEFT") s.take(c) else s.takeLast(c)
+            }
+            "SIGN" -> {
+                if (a.size != 1) return ErrVal.VALUE
+                val v = num(value(a[0], x)); if (v is ErrVal) return v
+                return Math.signum(v as Double).let { if (it == 0.0) 0.0 else it }
+            }
+            "CEILING", "FLOOR" -> {
+                if (a.isEmpty() || a.size > 2) return ErrVal.VALUE
+                val v = num(value(a[0], x)); if (v is ErrVal) return v
+                val sig = if (a.size == 2) num(value(a[1], x)) else 1.0
+                if (sig is ErrVal) return sig
+                v as Double; sig as Double
+                if (sig == 0.0) return if (n.name == "FLOOR") ErrVal.DIV0 else 0.0
+                if (v > 0 && sig < 0) return ErrVal.NUM
+                val q = v / sig
+                val r = if (n.name == "CEILING") Math.ceil(q - 1e-12) else Math.floor(q + 1e-12)
+                return clean(BigDecimal(r).multiply(BigDecimal(sig.toString())).toDouble())
+            }
+            "VLOOKUP", "HLOOKUP" -> {
+                if (a.size < 3 || a.size > 4) return ErrVal.VALUE
+                val key = value(a[0], x)
+                if (key is ErrVal) return key
+                val tbl = eval(a[1], x) as? RangeV ?: return ErrVal.VALUE
+                val idx = num(value(a[2], x)); if (idx is ErrVal) return idx
+                val k = (idx as Double).toInt()
+                val approx = if (a.size == 4) bool(value(a[3], x)).let { if (it is ErrVal) return it; it as Boolean } else true
+                val v = n.name == "VLOOKUP"
+                val used = host.used(tbl.sheet)
+                val lastLine = if (v) minOf(tbl.r2, used[0] - 1) else minOf(tbl.c2, used[1] - 1)
+                val first = if (v) tbl.r1 else tbl.c1
+                if (k < 1 || k > (if (v) tbl.c2 - tbl.c1 + 1 else tbl.r2 - tbl.r1 + 1)) return ErrVal.REF
+                var hit = -1
+                for (i in first..lastLine) {
+                    val cv = if (v) host.cellValue(tbl.sheet, i, tbl.c1) else host.cellValue(tbl.sheet, tbl.r1, i)
+                    if (cv == null) continue
+                    val c = compare(cv, key)
+                    if (!approx) { if (c == 0 && rank(cv) == rank(key)) { hit = i; break } }
+                    else if (rank(cv) == rank(key)) { if (c <= 0) hit = i else break }
+                }
+                if (hit < 0) return ErrVal("#N/A")
+                return (if (v) host.cellValue(tbl.sheet, hit, tbl.c1 + k - 1) else host.cellValue(tbl.sheet, tbl.r1 + k - 1, hit)) ?: 0.0
+            }
+            "EXACT" -> {
+                if (a.size != 2) return ErrVal.VALUE
+                val p = value(a[0], x); if (p is ErrVal) return p
+                val q = value(a[1], x); if (q is ErrVal) return q
+                return text(p) == text(q)
+            }
+            "REPT" -> {
+                if (a.size != 2) return ErrVal.VALUE
+                val p = value(a[0], x); if (p is ErrVal) return p
+                val q = num(value(a[1], x)); if (q is ErrVal) return q
+                val c = (q as Double).toInt()
+                if (c < 0 || c.toLong() * text(p).length > 32767) return ErrVal.VALUE
+                return text(p).repeat(c)
+            }
         }
         return ErrVal.NAME
+    }
+
+    /** (row offset, col offset) of every cell in [r] that lies inside the sheet's used area. */
+    private fun cellsOf(r: RangeV): Sequence<Pair<Int, Int>> {
+        val used = host.used(r.sheet)
+        val r2 = minOf(r.r2, used[0] - 1)
+        val c2 = minOf(r.c2, used[1] - 1)
+        return sequence { for (rr in r.r1..r2) for (cc in r.c1..c2) yield(Pair(rr - r.r1, cc - r.c1)) }
+    }
+
+    /** COUNTIF-style test: "&gt;5", "&lt;=3", "&lt;&gt;x", "=x", plain values, `*` and `?` wildcards in text. */
+    private fun criterion(c: Any?): (Any?) -> Boolean {
+        if (c is Double || c is Boolean) return { v -> v != null && rank(v) == rank(c) && compare(v, c) == 0 }
+        val s = text(c)
+        val op = listOf("<=", ">=", "<>", "<", ">", "=").firstOrNull { s.startsWith(it) } ?: ""
+        val rest = s.substring(op.length)
+        val numArg = Num.parse(rest)
+        if (op.isEmpty() || op == "=" || op == "<>") {
+            val eq: (Any?) -> Boolean
+            if (numArg != null) eq = { v -> v is Double && v == numArg }
+            else if (rest.isEmpty()) eq = { v -> v == null || v == "" }
+            else if (rest.contains('*') || rest.contains('?')) {
+                val pattern = rest.split('*').joinToString(".*") { part -> part.split('?').joinToString(".") { Regex.escape(it) } }
+                val re = Regex(pattern, RegexOption.IGNORE_CASE)
+                eq = { v -> v is String && re.matches(v) }
+            } else eq = { v -> v is String && v.equals(rest, ignoreCase = true) }
+            return if (op == "<>") { v -> !eq(v) } else eq
+        }
+        val target: Any = numArg ?: rest
+        return { v ->
+            if (v == null || rank(v) != rank(target)) false
+            else { val k = compare(v, target); when (op) { "<" -> k < 0; ">" -> k > 0; "<=" -> k <= 0; else -> k >= 0 } }
+        }
     }
 }

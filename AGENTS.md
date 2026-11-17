@@ -58,14 +58,44 @@ Each command calls the same function as the control it stands for; the app logs 
 | `spread` | `doc` `sheet` `slides` | enter the spread layout; `arr` `row` `arc` `layers`; `focus` index; `recenter`; `collapse` |
 | `rehearse` | — | slide rehearsal (`collapse` ends it) |
 | `radius` `0..2`, `openmode` `window` `spread` | | settings |
+| `slide-add` | `title` `body` `two` `blank` | new slide after the current one (same as New slide ▾) |
+| `slide-dup` / `slide-del` / `slide-move` | — / — / `from:to` | duplicate, delete, move (as the thumbnail drag) |
+| `textbox`, `shape` | text / `rect` `roundRect` `ellipse` `triangle` `rightArrow` | insert on the current slide (the new object is picked) |
+| `sel`, `nudge`, `obj-del` | shape id / `dx,dy[,scale]` / — | pick an object, move or scale it (1/20 of the slide per step), delete it |
+| `theme` | `0`–`3` | light / dark / warm / forest colour scheme |
+| `img` | `doc <path>` or `slides <path>` | insert a picture file (as Insert ▸ Picture…) |
+| `img-pick` | `doc` `slides` | show the picture picker |
+| `table`, `table-cell` | `rows,cols` / `r,c=text` | insert a table after the caret paragraph / set a cell of the last table |
+| `para` | `<i> style <body|h1|h2|h3|bullet|numbered>`, `<i> align <0-3>`, `<i> strike <0|1>`, `<i> bold <0|1>` | format the i-th editable paragraph |
+| `addpara` | `<style> <text>` | append a paragraph |
+| `find`, `replace`, `wordcount`, `inserttable` | — / `old=new` / — / — | find-and-replace sheet, replace all, word count, insert-table dialog |
+| `fill`, `fmt`, `bold` | `RRGGBB`/`none` · `general` `other` `currency` `percent` `date` · `1`/`0` | selected cell |
+| `freeze`, `filter`, `filter-clear`, `sort` | — / — / — / `asc` `desc` | Data ▸ … on the selected cell's column |
+| `row-ins`, `row-del`, `col-ins`, `col-del` | — | Rows & columns ▸ … at the selection |
+| `chart-add`, `chartview` | `bar` `line` `pie` / index | make a chart from the data around the selection / show the flat chart sheet |
+| `browse` | `0`–`4` | Browse page at Device / Feishu / Google Drive / OneDrive / Dropbox |
+| `connect` | `feishu` `gdrive` `onedrive` `dropbox` | same as [Connect] (opens the system browser when the app is registered) |
+| `saveas-cloud` | `doc` `sheet` `slides` | Save as ▸ a copy to the first connected drive |
 | `dump` | — | log state only |
+
+v0.2.0 screenshot states (both languages): doc toolbar menus (Paragraph, Insert, More), find & replace, word count,
+insert table, picture picker, a doc with numbered list + centred heading + strikethrough + picture + table; slides with
+New slide ▾, two-column and blank slides, a picked shape, a picture, dark theme; sheet with fill colours, frozen top row,
+a filter, Data / Rows & columns / Chart menus, flat line and pie charts; Accounts page (unregistered rows) and
+Browse › Feishu.
 
 Screenshot states: home (5 pages × 2 languages), new-doc / new-sheet / new-slides, doc, sheet, slides, compat,
 save-first, save-as, unsaved, shortcuts, how-to, exit-confirm, chart columns / scatter, spread row / arc / layers
 for each kind, rehearsal.
 
+## Cloud accounts
+
+`platform/Accounts.kt` (sign-in, tokens in EncryptedSharedPreferences, file calls) on top of the pure
+`core/cloud/` (requests, PKCE, answer parsing, Feishu online doc / sheet diffs). Each service needs an app
+registration in `local.properties`; see README "连接账号". Unregistered services say so and send nothing.
+
 ## Not in this version
 
-Cloud accounts (no app identity registered with any provider: the screens say so), editing tables / images /
-charts inside documents and slides, tracked-change paragraphs (read-only), web-page editing, pinned cards,
-named layouts, 3D objects on slides.
+Font / size / colour of text, comments and tracked changes (read-only), charts inside documents and slides,
+animations, merged cells / conditional formats (kept, not editable), QR-code sign-in, cloud version conflict
+check, Feishu inbox, web-page editing, pinned cards, named layouts, 3D objects on slides.

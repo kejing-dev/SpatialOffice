@@ -1,9 +1,9 @@
 package io.embodit.spatialoffice.core.text
 
 /** A stretch of text with one format. [src] = index of the run in the opened file whose other formatting it keeps (−1 = none). */
-data class Span(val text: String, val bold: Boolean = false, val italic: Boolean = false, val underline: Boolean = false, val src: Int = -1)
+data class Span(val text: String, val bold: Boolean = false, val italic: Boolean = false, val underline: Boolean = false, val src: Int = -1, val strike: Boolean = false)
 
-enum class Attr { BOLD, ITALIC, UNDERLINE }
+enum class Attr { BOLD, ITALIC, UNDERLINE, STRIKE }
 
 /**
  * Editing a paragraph as formatted spans while the text field only reports "the text is now X". Typing keeps the
@@ -99,9 +99,36 @@ object RichText {
         return left to right
     }
 
-    private fun sameFormat(a: Span, b: Span) = a.bold == b.bold && a.italic == b.italic && a.underline == b.underline && a.src == b.src
-    private fun get(s: Span, attr: Attr) = when (attr) { Attr.BOLD -> s.bold; Attr.ITALIC -> s.italic; Attr.UNDERLINE -> s.underline }
+    private fun sameFormat(a: Span, b: Span) = a.bold == b.bold && a.italic == b.italic && a.underline == b.underline && a.strike == b.strike && a.src == b.src
+    private fun get(s: Span, attr: Attr) = when (attr) { Attr.BOLD -> s.bold; Attr.ITALIC -> s.italic; Attr.UNDERLINE -> s.underline; Attr.STRIKE -> s.strike }
     private fun with(s: Span, attr: Attr, on: Boolean) = when (attr) {
-        Attr.BOLD -> s.copy(bold = on); Attr.ITALIC -> s.copy(italic = on); Attr.UNDERLINE -> s.copy(underline = on)
+        Attr.BOLD -> s.copy(bold = on); Attr.ITALIC -> s.copy(italic = on); Attr.UNDERLINE -> s.copy(underline = on); Attr.STRIKE -> s.copy(strike = on)
+    }
+
+    /** Offsets of every match of [find] in [text] (non-overlapping, left to right). */
+    fun matches(text: String, find: String, ignoreCase: Boolean = true): List<Int> {
+        if (find.isEmpty()) return emptyList()
+        val out = ArrayList<Int>()
+        var i = text.indexOf(find, 0, ignoreCase)
+        while (i >= 0) { out.add(i); i = text.indexOf(find, i + find.length, ignoreCase) }
+        return out
+    }
+
+    /**
+     * Replaces every match of [find] by [replacement]; the new text takes the format of the first character it
+     * replaces. Returns the spans and the number of replacements.
+     */
+    fun replaceAll(spans: List<Span>, find: String, replacement: String, ignoreCase: Boolean = true): Pair<List<Span>, Int> {
+        val hits = matches(text(spans), find, ignoreCase)
+        if (hits.isEmpty()) return spans to 0
+        var cur = spans
+        for (at in hits.asReversed()) {
+            val fmt = formatAt(cur, at) ?: Span("")
+            val (left, rest) = split(cur, at)
+            val (_, right) = split(rest, find.length)
+            val mid = if (replacement.isEmpty()) emptyList() else listOf(fmt.copy(text = replacement))
+            cur = normalize(left + mid + right)
+        }
+        return cur to hits.size
     }
 }

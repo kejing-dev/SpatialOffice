@@ -7,6 +7,17 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
 
+    <!-- Cloud accounts (optional, PRD §9): talking to Feishu / Google Drive / OneDrive / Dropbox -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- the system browser for the providers' own sign-in pages -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
     <application
         android:name=".platform.SpatialApplication"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -46,6 +57,14 @@
                 <data android:mimeType="text/html" />
                 <data android:mimeType="image/png" />
                 <data android:mimeType="image/jpeg" />
+            </intent-filter>
+
+            <!-- OAuth callback of services registered with a custom scheme (OneDrive by default) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="spatialoffice" android:host="oauth" />
             </intent-filter>
 
             <!-- system Share -->
