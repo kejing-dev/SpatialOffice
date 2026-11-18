@@ -62,7 +62,11 @@ class WindowCtl(private val graph: Graph) {
     fun onLifecycle(win: Win, event: String) {
         state[win] = event
         when (event) {
-            "ON_RESUME" -> resumedAt[win] = SystemClock.elapsedRealtime()
+            "ON_RESUME" -> {
+                resumedAt[win] = SystemClock.elapsedRealtime()
+                // q4-1: the sheet is up: make the 3D chart's materials / meshes in the background, before anyone asks
+                if (win == Win.SHEET) { io.embodit.spatialoffice.ui.chart.ChartResources.prewarmPalette(graph); io.embodit.spatialoffice.ui.chart.ChartResources.prewarm(graph) }
+            }
             "ON_DESTROY" -> { resumedAt.remove(win); askedAt.remove(win); if (win == Win.STAGE) stageDestroyedAt = SystemClock.elapsedRealtime() }
         }
         Log.i(TAG, "WINDOW ${win.name} $event")
@@ -111,8 +115,15 @@ class WindowCtl(private val graph: Graph) {
         }
     }
 
+    /** v0.2.4 (q4-1): when the chart was last asked for (uptime ms), for the logged open time (asked → built). */
+    @Volatile var chartAskedAt = 0L
+        private set
+
     private fun openChartWhenSheetIsUp() {
         if (chartGate.waiting) { Log.i(TAG, "CHART gate already waiting"); return }
+        chartAskedAt = SystemClock.uptimeMillis()
+        // q4-1: make the chart's materials / meshes in the background while the gate and the system bring the volume up
+        io.embodit.spatialoffice.ui.chart.ChartResources.prewarm(graph)
         Log.i(TAG, "CHART gate ask sheet=${state[Win.SHEET]} resumedAt=${resumedAt[Win.SHEET]}")
         chartGate.ask(SystemClock.elapsedRealtime())
         main.removeCallbacks(chartTick)

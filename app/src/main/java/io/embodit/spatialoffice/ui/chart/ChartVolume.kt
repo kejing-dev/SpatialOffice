@@ -1,6 +1,17 @@
 package io.embodit.spatialoffice.ui.chart
 
+import android.os.SystemClock
 import android.util.Log
+import android.view.Choreographer
+import android.os.Looper
+import androidx.compose.ui.graphics.toArgb
+import io.embodit.spatialoffice.core.layout.ChartPlan
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,7 +66,6 @@ import com.pico.spatial.ui.foundation.content.SpatialView
 import com.pico.spatial.ui.foundation.gesture.TargetEntity
 import com.pico.spatial.ui.foundation.gesture.detectSpatialTapGesture
 import io.embodit.spatialoffice.R
-import io.embodit.spatialoffice.core.xlsx.A1
 import io.embodit.spatialoffice.core.xlsx.ChartInfo
 import io.embodit.spatialoffice.platform.Graph
 import io.embodit.spatialoffice.platform.SheetSession
@@ -84,36 +94,42 @@ private val TITLE = TextStyle(fontSize = 18.sp, lineHeight = 22.sp)
 private val VALUE = TextStyle(fontSize = 18.sp, lineHeight = 24.sp)
 private val BUTTON = ChartPanels.BUTTON_DP.dp
 
-/** One mark of the chart and the cell it shows. */
-data class Mark(val series: Int, val index: Int, val value: Double, val row: Int, val col: Int)
+/** One mark of the chart and the cell it shows (planned in core, [ChartPlan]). */
+typealias Mark = ChartPlan.Mark
 
 /** The cell behind value [index] of a series reference such as `Sales!$B$2:$M$2` (row-major). */
-fun refCell(ref: String?, index: Int): Pair<Int, Int>? {
-    val r = ref?.substringAfterLast('!')?.replace("$", "") ?: return null
-    val parts = r.split(':')
-    val a = A1.parse(parts[0]) ?: return null
-    val b = A1.parse(parts.getOrElse(1) { parts[0] }) ?: return null
-    val rows = abs(b.first - a.first) + 1; val cols = abs(b.second - a.second) + 1
-    if (index !in 0 until rows * cols) return null
-    return if (rows == 1) a.first to minOf(a.second, b.second) + index else if (cols == 1) minOf(a.first, b.first) + index to a.second
-    else minOf(a.first, b.first) + index / cols to minOf(a.second, b.second) + index % cols
-}
+fun refCell(ref: String?, index: Int): Pair<Int, Int>? = ChartPlan.refCell(ref, index)
 
 /**
  * The 3D chart: a standard chart from the file drawn as columns (x = categories, z = series, height = value) or as
  * points. Everything sits on a base plate under a pivot that turns about the vertical axis.
  *
  * ```
- * root (volume centre) └ fit (uniform scale to the volume's real size) └ pivot (yaw) ├ base plate ├ marks…
+ * root (volume centre) └ fit (uniform scale to the volume's real size) └ pivot (yaw) └ marks group ├ base plate ├ marks…
  * ```
+ *
+ * v0.2.4 (QA #4 q4-1): v0.2.3 made a new UnlitMaterial and a new box mesh for each of 31 boxes on the main thread;
+ * every `setBaseColor` / `createBox` waits on the engine thread, the chart took 5–7.5 s and the system showed
+ * "not responding". Now [ChartPlan] lists the boxes; one material per colour, one mesh per size and the hit shapes
+ * are made on a background thread; the entities (the SDK wants them on the main thread) are made in short batches
+ * with a frame between them and hung in as one group (`CHART built … longest <ms>`). [MainWatch] logs the longest
+ * main-thread frame gap while the chart opens.
  */
 internal class ChartScene {
     val root = Entity()
     private val fit = Entity()
     private val pivot = Entity()
-    private val marks = HashMap<Entity, Mark>()
+    @Volatile private var marks: Map<Entity, Mark> = emptyMap()
+    private var group: Entity? = null
     private var signature = ""
     private var scale = 1f
+    private val materials get() = ChartResources.materials
+    private val meshes get() = ChartResources.meshes
+    private val hits get() = ChartResources.hits
+    /** When the volume asked for its first build (for the open time). */
+    var openedAt = 0L
+    var builds = 0
+        private set
 
     init {
         root.addChild(fit); fit.addChild(pivot)
@@ -143,86 +159,196 @@ internal class ChartScene {
     }
 
     fun markOf(e: Entity?): Mark? {
+        val m = marks
         var cur = e
-        while (cur != null) { marks[cur]?.let { return it }; cur = cur.getParent() }
+        while (cur != null) { m[cur]?.let { return it }; cur = cur.getParent() }
         return null
     }
 
-    fun render(chart: ChartInfo?, scatter: Boolean, selRow: Int, selCol: Int) {
+    /**
+     * Rebuilds the marks when the data, type or selection changed. Called on the main thread. The resources that wait
+     * on the engine (materials, meshes, hit shapes) are made in [prepare] on [Dispatchers.Default], cached per
+     * colour / size; the SDK only lets entities be made on the main thread, so they are made here a few at a time,
+     * yielding a frame between batches ([BATCH_MS]), into a group that is hung into the volume in one step at the end.
+     */
+    suspend fun render(chart: ChartInfo?, scatter: Boolean, selRow: Int, selCol: Int) {
         val sig = (chart?.series?.joinToString("|") { it.values.joinToString(",") + "/" + (it.xValues?.joinToString(",") ?: "") } ?: "") + "#$scatter#$selRow,$selCol"
         if (sig == signature) return
-        signature = sig
-        for (c in pivot.getChildren().toList()) { runCatching { pivot.removeChild(c) }; runCatching { c.destroy(true) } }
-        marks.clear()
-        chart ?: return
-        runCatching { build(chart, scatter, selRow, selCol) }.onFailure { Log.e(TAG, "CHART build failed", it) }
+        val t0 = SystemClock.uptimeMillis()
+        val boxes = chart?.let { ChartPlan.boxes(it, scatter, selRow, selCol, PALETTE) } ?: emptyList()
+        val made = withContext(Dispatchers.Default) { runCatching { ChartResources.prepare(boxes) }.onFailure { Log.e(TAG, "CHART prepare failed", it) }.getOrNull() } ?: return
+        val t1 = SystemClock.uptimeMillis()
+        // main thread, in batches: entities into a detached group
+        val g = Entity()
+        val map = HashMap<Entity, Mark>()
+        var longest = 0L; var batches = 0; var i = 0
+        while (i < boxes.size) {
+            val b0 = SystemClock.uptimeMillis()
+            while (i < boxes.size && SystemClock.uptimeMillis() - b0 < BATCH_MS) { entity(boxes[i], g, map); i++ }
+            val took = SystemClock.uptimeMillis() - b0
+            if (took > longest) longest = took
+            batches++
+            if (i < boxes.size) withFrameNanos { }
+        }
+        val t2 = SystemClock.uptimeMillis()
+        // one step: swap the finished group in (the old one is destroyed on a later frame)
+        val old = group
+        old?.let { runCatching { pivot.removeChild(it) } }
+        pivot.addChild(g)
+        group = g; marks = map; signature = sig
+        val swap = SystemClock.uptimeMillis() - t2
+        if (old != null) { withFrameNanos { }; val d0 = SystemClock.uptimeMillis(); runCatching { old.destroy(true) }; Log.i(TAG, "CHART old group destroyed in ${SystemClock.uptimeMillis() - d0} ms") }
+        builds++
+        val first = builds == 1 && openedAt > 0
+        Log.i(TAG, "CHART built type=${if (scatter) "scatter" else "columns"} series=${chart?.series?.size ?: 0} marks=${map.size} boxes=${boxes.size} " +
+            "materials=${materials.size} meshes=${meshes.size} newResources=$made background=${t1 - t0} ms entities=${t2 - t1} ms in $batches batches (longest $longest ms) swap=$swap ms" +
+            if (first) " open=${t2 + swap - openedAt} ms (asked → built)" else "")
     }
 
-    private fun mat(c: Color, lighten: Float = 0f): UnlitMaterial = UnlitMaterial.create(BlendingMode.OPAQUE).apply {
-        setBaseColor(Color4(c.red + (1f - c.red) * lighten, c.green + (1f - c.green) * lighten, c.blue + (1f - c.blue) * lighten, 1f))
-    }
-
-    private fun box(w: Float, h: Float, d: Float, x: Float, y: Float, z: Float, m: UnlitMaterial, mark: Mark? = null): Entity {
+    /** Main thread: one box with its cached resources, into [g]. */
+    private fun entity(b: ChartPlan.Box, g: Entity, map: HashMap<Entity, Mark>) {
         val e = Entity()
-        // gate:allow geometry data marks of a chart (columns, points) and its base plate; abstract, no prop or character
-        e.components.set(ModelComponent(MeshResource.createBox(Vector3(w, h, d), 0f), m))
-        e.components[TransformComponent::class.java]?.setPosition(Vector3(x, y, z))
-        if (mark != null) {
-            // gate:allow geometry invisible hit box of one chart mark (a little larger than the mark, so thin columns are easy to hit)
-            e.components.set(CollisionComponent(collisionShape = listOf(ShapeResource.createBox(Vector3(w * 1.15f, h.coerceAtLeast(0.02f), d * 1.15f))), physicsMaterial = PhysicsMaterialResource()))
+        // the SDK wants components made on the main thread (v0.2.4 emulator: IllegalStateException off it)
+        val p = ChartResources.partsOf(b)
+        e.components.set(p.model)
+        e.components[TransformComponent::class.java]?.setPosition(Vector3(b.x, b.y, b.z))
+        val mark = b.mark
+        if (mark != null && p.hit != null) {
+            e.components.set(p.hit)
             e.components.set(InteractableComponent())
-            marks[e] = mark
+            map[e] = mark
         }
-        pivot.addChild(e)
-        return e
+        g.addChild(e)
     }
 
-    private fun build(chart: ChartInfo, scatter: Boolean, selRow: Int, selCol: Int) {
-        val w = 0.60f; val d = 0.32f; val hMax = 0.26f; val floor = -0.16f
-        box(w + 0.04f, 0.008f, d + 0.04f, 0f, floor - 0.004f, 0f, mat(Color(0xFFE9ECF2)))
-        val series = chart.series.take(6)
-        if (series.isEmpty()) return
-        val max = series.flatMap { it.values }.filterNotNull().maxOrNull()?.takeIf { it > 0 } ?: 1.0
-        val white = Color.White
-        if (!scatter) {
-            val nCat = series.maxOf { it.values.size }.coerceAtLeast(1)
-            val cellW = w / nCat; val cellD = d / series.size
-            series.forEachIndexed { si, s ->
-                val color = Ink.Series[si % Ink.Series.size]
-                s.values.forEachIndexed { ci, v ->
-                    val value = v ?: return@forEachIndexed
-                    val cell = refCell(s.valuesRef, ci)
-                    val selected = cell != null && cell.first == selRow && cell.second == selCol
-                    val h = (value / max * hMax).toFloat().coerceAtLeast(0.004f)
-                    val x = -w / 2 + cellW * (ci + 0.5f); val z = -d / 2 + cellD * (si + 0.5f)
-                    val mark = Mark(si, ci, value, cell?.first ?: -1, cell?.second ?: -1)
-                    box(cellW * 0.72f, h, cellD * 0.72f, x, floor + h / 2, z, mat(color, if (selected) 0.45f else 0f), mark)
-                    // a lighter cap makes the top face read without lighting; the selected column gets a white one
-                    box(cellW * 0.72f, 0.004f, cellD * 0.72f, x, floor + h + 0.002f, z, mat(if (selected) white else color, if (selected) 0f else 0.35f))
-                }
-            }
-        } else {
-            // points: x = the series' x values (or the position), height = value, one row of depth per series
-            val xs = series.flatMap { s -> s.xValues?.filterNotNull() ?: s.values.indices.map { it.toDouble() } }
-            val x0 = xs.minOrNull() ?: 0.0; val x1 = (xs.maxOrNull() ?: 1.0).let { if (it == x0) x0 + 1 else it }
-            val cellD = d / series.size
-            series.forEachIndexed { si, s ->
-                val color = Ink.Series[si % Ink.Series.size]
-                s.values.forEachIndexed { ci, v ->
-                    val value = v ?: return@forEachIndexed
-                    val xv = s.xValues?.getOrNull(ci) ?: ci.toDouble()
-                    val cell = refCell(s.valuesRef, ci)
-                    val selected = cell != null && cell.first == selRow
-                    val x = (-w / 2 + (xv - x0) / (x1 - x0) * w).toFloat(); val z = -d / 2 + cellD * (si + 0.5f)
-                    val y = floor + (value / max * hMax).toFloat()
-                    // v0.2.2: bigger points (QA #2: hard to see with a small data set)
-                    val size = if (selected) 0.042f else 0.032f
-                    box(size, size, size, x, y, z, mat(if (selected) white else color), Mark(si, ci, value, cell?.first ?: -1, cell?.second ?: -1))
-                    box(0.002f, (y - floor).coerceAtLeast(0.001f), 0.002f, x, floor + (y - floor) / 2, z, mat(color, 0.5f)) // drop line to the base
-                }
-            }
+    companion object {
+        val PALETTE = Ink.Series.map { it.toArgb() }
+        /** Main-thread time per batch of entities before yielding a frame. */
+        private const val BATCH_MS = 24L
+    }
+}
+
+/**
+ * The chart's materials (one per colour), box meshes (one per size) and hit shapes, kept for the whole process
+ * (v0.2.4, q4-1): made on a background thread, first when the chart is asked for ([prewarm], while the system makes
+ * the volume) so the volume finds them ready, and reused by every later opening and rebuild.
+ */
+internal object ChartResources {
+    val materials = ConcurrentHashMap<Int, UnlitMaterial>()
+    val meshes = ConcurrentHashMap<Long, MeshResource>()
+    val hits = ConcurrentHashMap<Long, ShapeResource>()
+
+    /** Background thread: makes what [boxes] need and is not made yet; returns how many were made. */
+    fun prepare(boxes: List<ChartPlan.Box>): Int = synchronized(this) {
+        val t0 = SystemClock.uptimeMillis()
+        var made = 0
+        for (b in boxes) {
+            if (kept(materials, b.argb) { mat(b.argb) }) made++
+            // gate:allow geometry data marks of a chart (columns, points) and its base plate; abstract, no prop or character
+            if (kept(meshes, b.meshKey) { ChartPlan.size(b.meshKey).let { (w, h, d) -> MeshResource.createBox(Vector3(w, h, d), 0f) } }) made++
+            // gate:allow geometry invisible hit box of one chart mark (a little larger than the mark, so thin columns are easy to hit)
+            b.hitKey?.let { hk -> if (kept(hits, hk) { ChartPlan.size(hk).let { (w, h, d) -> ShapeResource.createBox(Vector3(w, h, d)) } }) made++ }
         }
-        Log.i(TAG, "CHART built type=${if (scatter) "scatter" else "columns"} series=${series.size} marks=${marks.size}")
+        Log.i(TAG, "CHART prepared ${boxes.size} boxes on ${Thread.currentThread().name}: $made new resources in ${SystemClock.uptimeMillis() - t0} ms")
+        made
+    }
+
+    /** The components of one box (its model and, for a mark, its hit box), from the cached resources. */
+    class Parts(val model: ModelComponent, val hit: CollisionComponent?)
+
+    /**
+     * Makes [key]'s resource if it is missing or no longer valid; true if it made one. Made global: a resource made
+     * for one volume is released with that volume otherwise (v0.2.4 emulator: reopening the chart crashed with
+     * "You can't construct ModelComponent with a closed MeshResource … convert the original into a global resource
+     * via toGlobal()").
+     */
+    /** `Resource.isValid()` is public in the bytecode but not visible from Kotlin in SDK 6.2.8: read it by reflection. */
+    private val isValidMethod by lazy { runCatching { com.pico.spatial.core.ecs.resource.Resource::class.java.getMethod("isValid") }.getOrNull() }
+    private fun valid(r: com.pico.spatial.core.ecs.resource.Resource): Boolean = isValidMethod?.let { m -> runCatching { m.invoke(r) as Boolean }.getOrDefault(false) } ?: true
+
+    private fun <K, R : com.pico.spatial.core.ecs.resource.Resource> kept(map: ConcurrentHashMap<K, R>, key: K, make: () -> R): Boolean {
+        val cur = map[key]
+        if (cur != null && valid(cur)) return false
+        val r = make()
+        runCatching { r.toGlobal() }.onFailure { Log.w(TAG, "CHART toGlobal: $it") }
+        map[key] = r
+        return true
+    }
+
+    fun partsOf(b: ChartPlan.Box): Parts {
+        // a resource released in between (never expected once global): make it again here
+        val ok = materials[b.argb]?.let(::valid) == true && meshes[b.meshKey]?.let(::valid) == true && (b.hitKey == null || b.mark == null || hits[b.hitKey!!]?.let(::valid) == true)
+        if (!ok) Log.w(TAG, "CHART remade ${prepare(listOf(b))} resources on the main thread")
+        // gate:allow geometry data marks of a chart (columns, points) and its base plate; abstract, no prop or character
+        val model = ModelComponent(meshes.getValue(b.meshKey), materials.getValue(b.argb))
+        // gate:allow geometry invisible hit box of one chart mark (a little larger than the mark, so thin columns are easy to hit)
+        val hit = b.hitKey?.takeIf { b.mark != null }?.let { CollisionComponent(collisionShape = listOf(hits.getValue(it)), physicsMaterial = PhysicsMaterialResource()) }
+        return Parts(model, hit)
+    }
+
+    /** Every colour the chart can use (series colours and their lighter variants, base plate, white) made ahead. */
+    fun prewarmPalette(graph: Graph) {
+        graph.scope.launch(Dispatchers.Default) {
+            val t0 = SystemClock.uptimeMillis(); var made = 0
+            synchronized(this@ChartResources) {
+                val keys = listOf(ChartPlan.BASE, ChartPlan.WHITE) + ChartScene.PALETTE.flatMap { c -> listOf(0f, 0.35f, 0.45f, 0.5f).map { ChartPlan.lighten(c, it) } }
+                runCatching { for (k in keys) if (kept(materials, k) { mat(k) }) made++ }.onFailure { Log.w(TAG, "CHART prewarm palette: $it") }
+            }
+            Log.i(TAG, "CHART prewarmed palette: $made materials in ${SystemClock.uptimeMillis() - t0} ms on ${Thread.currentThread().name}")
+        }
+    }
+
+    /** Starts making the resources of the sheet's current chart (both types) in the background. */
+    fun prewarm(graph: Graph) {
+        val s = graph.sheet ?: return
+        val chart = runCatching { s.book.charts().getOrNull(graph.chartIndex) }.getOrNull() ?: return
+        val row = s.row; val col = s.col
+        graph.scope.launch(Dispatchers.Default) {
+            runCatching {
+                ChartResources.prepare(ChartPlan.boxes(chart, graph.chartScatter, row, col, ChartScene.PALETTE))
+                ChartResources.prepare(ChartPlan.boxes(chart, !graph.chartScatter, row, col, ChartScene.PALETTE))
+            }.onFailure { Log.w(TAG, "CHART prewarm: $it") }
+        }
+    }
+
+    private fun mat(argb: Int): UnlitMaterial = UnlitMaterial.create(BlendingMode.OPAQUE).apply {
+        setBaseColor(Color4(((argb ushr 16) and 0xFF) / 255f, ((argb ushr 8) and 0xFF) / 255f, (argb and 0xFF) / 255f, 1f))
+    }
+}
+
+/**
+ * Logs the longest gap between main-thread frames while it runs (v0.2.4, q4-1: no single main-thread step > 100 ms).
+ */
+internal class MainWatch(private val label: String) : Choreographer.FrameCallback {
+    @Volatile private var last = 0L
+    private var worst = 0L
+    private var frames = 0
+    @Volatile private var running = false
+    private var sampler: Thread? = null
+    fun start() {
+        if (running) return; running = true; last = 0L; worst = 0L; frames = 0
+        Choreographer.getInstance().postFrameCallback(this)
+        // while the main thread is held > 150 ms, log what it is doing once per stall
+        sampler = Thread({
+            var sampledFor = -1L
+            while (running) {
+                runCatching { Thread.sleep(50) }
+                val l = last
+                if (l > 0 && SystemClock.uptimeMillis() - l > 150 && sampledFor != l) {
+                    sampledFor = l
+                    val st = Looper.getMainLooper().thread.stackTrace.take(14).joinToString(" < ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+                    Log.w(TAG, "MAINWATCH $label stall sample: $st")
+                }
+            }
+        }, "mainwatch").apply { isDaemon = true; start() }
+    }
+    fun stop(): Long { if (!running) return worst; running = false; Choreographer.getInstance().removeFrameCallback(this); Log.i(TAG, "MAINWATCH $label frames=$frames longest=${worst} ms"); return worst }
+    override fun doFrame(frameTimeNanos: Long) {
+        if (!running) return
+        val now = SystemClock.uptimeMillis()
+        if (last > 0) { val gap = now - last; if (gap > worst) worst = gap; if (gap > 100) Log.w(TAG, "MAINWATCH $label main thread held $gap ms") }
+        last = now; frames++
+        Choreographer.getInstance().postFrameCallback(this)
     }
 }
 
@@ -232,7 +358,9 @@ fun ChartVolume() {
     WindowFrame(Win.CHART) { graph ->
         val s = graph.sheet
         val context = LocalContext.current
-        val scene = remember { ChartScene() }
+        val scene = remember { ChartScene().also { it.openedAt = graph.windows.chartAskedAt.takeIf { a -> a > 0 } ?: SystemClock.uptimeMillis() } }
+        // q4-1: watch the main thread from the volume's first frame until 3 s after the chart is built
+        val watch = remember { MainWatch("chart-open").also { it.start() } }
         // metres per dp of this volume's attachment panels; the panels are scaled to ChartPanels.M_PER_DP (q3-1)
         val baseMPerDp = LocalPhysicalLengthConverter.current.dpToLength(1.dp, LengthUnit.Meters)
         var panelsPlaced by remember { mutableStateOf(-1f) }
@@ -241,9 +369,10 @@ fun ChartVolume() {
         val chart = remember(s, s?.version, graph.chartIndex) { runCatching { s?.book?.charts()?.getOrNull(graph.chartIndex) }.getOrNull() }
         LaunchedEffect(ready, chart, graph.chartScatter, s?.row, s?.col) {
             if (ready) scene.render(chart, graph.chartScatter, s?.row ?: -1, s?.col ?: -1)
+            if (ready && scene.builds == 1) { delay(3000); watch.stop() }
         }
         LaunchedEffect(ready, graph.chartYaw) { if (ready) scene.setYaw(graph.chartYaw) }
-        DisposableEffect(Unit) { onDispose { Log.i(TAG, "CHART volume disposed") } }
+        DisposableEffect(Unit) { onDispose { watch.stop(); Log.i(TAG, "CHART volume disposed") } }
         SpatialView(
             modifier = Modifier.fillMaxSize().onSizeChanged { viewSize = it }
                 .pointerInput(s) {

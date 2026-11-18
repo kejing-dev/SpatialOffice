@@ -12,7 +12,9 @@ import com.pico.spatial.ui.foundation.dsl.Stage
 import com.pico.spatial.ui.foundation.dsl.WindowContainer
 import com.pico.spatial.ui.foundation.dsl.WindowContainerSize
 import com.pico.spatial.ui.platform.LengthUnit
+import io.embodit.spatialoffice.platform.ContainerIds
 import io.embodit.spatialoffice.platform.Containers
+import io.embodit.spatialoffice.core.layout.LiveAnchor
 import io.embodit.spatialoffice.core.layout.WindowFit
 import io.embodit.spatialoffice.ui.chart.ChartVolume
 import io.embodit.spatialoffice.ui.doc.DocWindow
@@ -33,7 +35,7 @@ private fun beside(containers: List<ContainerProxy>, vararg ids: String): Contai
  * editor 22°–60° to the right, mostly out of view (QA #1 q1-1; WindowFit / WindowFitTest check all 8 corners).
  */
 internal fun editorPlacement(containers: List<ContainerProxy>, id: String): Placement {
-    android.util.Log.i("SpatialOffice", "PLACE $id ${io.embodit.spatialoffice.core.layout.WindowFit.editorSpot()} among " + containers.joinToString { "${it.id}/${it.state}" })
+    android.util.Log.i("SpatialOffice", "PLACE $id ${io.embodit.spatialoffice.core.layout.WindowFit.editorSpot()} among " + containers.joinToString { "${it.id}#${ContainerIds.of(it)}/${it.state}" })
     return Placement.none()
 }
 
@@ -45,14 +47,19 @@ internal fun editorPlacement(containers: List<ContainerProxy>, id: String): Plac
  * volume 0.24 m tall, all of it is 27°–35° up and clear of the sheet: WindowFitV022Test checks the 8 corners.
  */
 internal fun chartPlacement(containers: List<ContainerProxy>): Placement {
-    val sheet = containers.firstOrNull { it.id == Containers.SHEET }
     val mode = ChartPlace.mode
-    android.util.Log.i("SpatialOffice", "PLACE ${Containers.CHART} mode=$mode anchor=${sheet?.id} among " + containers.joinToString { "${it.id}/${it.state}" })
+    // v0.2.4 (QA #4 q4-2): the list keeps destroyed windows under the same name (after the 2nd rehearsal two
+    // SpatialOfficeSheet entries; v0.2.3 took the first, a destroyed one, and the chart fell back to the front).
+    // Anchor only to the live instance (ContainerIds), else another live window; never a destroyed one.
+    val listed = containers.map { LiveAnchor.Listed(it.id, ContainerIds.of(it)) }
+    val dead = ContainerIds.dead.toSet()
+    val i = LiveAnchor.anchor(listed, Containers.SHEET, listOf(Containers.DOC, Containers.SLIDES, Containers.HOME), ContainerIds::live, dead)
+    val anchor = i?.let { containers[it] }
+    android.util.Log.i("SpatialOffice", "PLACE ${Containers.CHART} mode=$mode anchor=${anchor?.id}#${i?.let { listed[it].instance }} liveSheet=#${ContainerIds.live(Containers.SHEET)} dead=$dead among " +
+        containers.withIndex().joinToString { (k, c) -> "${c.id}#${listed[k].instance}${if (listed[k].instance in dead) "(destroyed)" else ""}/${c.state}" })
     // v0.2.3 (q3-2): WindowCtl opens the chart only once the sheet is up, so the sheet is here; should it not be,
-    // the chart still goes on top of a window (never Placement.none(), which is in front of the user, over the grid)
-    val anchorId = io.embodit.spatialoffice.core.layout.ChartOpenGate.anchor(containers.map { it.id }, Containers.SHEET, listOf(Containers.DOC, Containers.SLIDES, Containers.HOME))
-    val anchor = sheet ?: containers.firstOrNull { it.id == anchorId }
-    if (sheet == null) android.util.Log.w("SpatialOffice", "PLACE ${Containers.CHART}: no sheet window, above $anchorId instead")
+    // the chart still goes on top of a live window (never Placement.none(), which is in front of the user, over the grid)
+    if (anchor?.id != Containers.SHEET) android.util.Log.w("SpatialOffice", "PLACE ${Containers.CHART}: no live sheet window, above ${anchor?.id} instead")
     if (anchor == null) return Placement.none()
     val (side, gap) = mode.split(':').let { it[0] to (it.getOrNull(1)?.toFloatOrNull() ?: 0f) }
     return when (side) {

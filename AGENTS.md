@@ -40,6 +40,20 @@ panel is a Sheet over its editor (v0.2.2; the Subwindow hung 36°–48° to the 
 front of the user (`Placement.right(home)` put them 22°–60° to the right, QA #1 q1-1; `core/layout/WindowFit` +
 `WindowFitTest` check all 8 corners). Nothing is placed from the head pose.
 
+v0.2.4 (QA #4): **q4-1** the chart is no longer built on the main thread. `core/layout/ChartPlan` lists the boxes;
+`ChartResources` (ChartVolume.kt) makes one material per colour, one mesh per size and the hit shapes on a background
+thread, keeps them for the process (`toGlobal()`: otherwise the SDK releases them with the volume and the next opening
+crashes with "closed MeshResource"), and prewarms them when the sheet window comes up and again when the chart is asked
+for. Entities must be made on the main thread (the SDK throws off it), so they are made in ≤ 24 ms batches with a frame
+between, into a group hung in at once. Logs: `CHART prepared …`, `CHART built … entities=… (longest … ms) open=… ms
+(asked → built)`; `MAINWATCH chart-open` logs every main-thread gap > 100 ms with a stack sample of what held it.
+**q4-2** the placement list keeps destroyed windows under the same name (`isOnstage=true` too), so the chart anchors to
+the live sheet by container instance id: every window reports its id on ON_CREATE / ON_DESTROY (`platform/ContainerIds`,
+log `CONTAINER …`), `chartPlacement()` picks with `core/layout/LiveAnchor` (log `PLACE SpatialOfficeChart … anchor=
+SpatialOfficeSheet#<id> liveSheet=#<id> dead=[…] among …#<id>(destroyed)`). The SDK getters are internal, read by
+reflection. Tests: `ChartPlanTest`, `LiveAnchorTest` (3 rehearsals + 3 spreads replayed against a list that keeps
+destroyed entries; the v0.2.3 first-by-name rule picks a destroyed sheet in all 6).
+
 ## The save rule
 
 Opening never changes a file. Saving rewrites only the parts that hold an edit, and inside such a part only the
@@ -97,6 +111,7 @@ Each command calls the same function as the control it stands for; the app logs 
 | `conflict-answer` | `<win> overwrite|copy|cancel` | answer it (same function as the buttons) |
 | `inbox` | — | check the Feishu inbox now |
 | `dump` | — | log state only (v0.2.1 adds `tableCaret`, `cols`) |
+| `mainwatch` | seconds (default 10) | log the longest main-thread frame gap over that time (`MAINWATCH baseline …`), the emulator's own load for comparing with `MAINWATCH chart-open` |
 
 v0.2.0 screenshot states (both languages): doc toolbar menus (Paragraph, Insert, More), find & replace, word count,
 insert table, picture picker, a doc with numbered list + centred heading + strikethrough + picture + table; slides with

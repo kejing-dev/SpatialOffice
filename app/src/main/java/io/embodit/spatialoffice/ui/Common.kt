@@ -114,8 +114,18 @@ fun WindowFrame(win: Win, content: @Composable (Graph) -> Unit) {
         onDispose { graph.windows.detach(win, nav) }
     }
     val owner = LocalLifecycleOwner.current
+    // v0.2.4 (q4-2): this window's container instance, so placements anchor to the live window, not a destroyed one
+    val instance = remember(base) { io.embodit.spatialoffice.platform.ContainerIds.of(base) }
     DisposableEffect(owner) {
-        val obs = LifecycleEventObserver { _, e -> graph.windows.onLifecycle(win, e.name) }
+        val name = io.embodit.spatialoffice.platform.Containers.id(win)
+        val obs = LifecycleEventObserver { _, e ->
+            when (e) {
+                androidx.lifecycle.Lifecycle.Event.ON_CREATE -> io.embodit.spatialoffice.platform.ContainerIds.created(name, instance)
+                androidx.lifecycle.Lifecycle.Event.ON_DESTROY -> io.embodit.spatialoffice.platform.ContainerIds.destroyed(name, instance)
+                else -> {}
+            }
+            graph.windows.onLifecycle(win, e.name)
+        }
         owner.lifecycle.addObserver(obs)
         onDispose { owner.lifecycle.removeObserver(obs) }
     }

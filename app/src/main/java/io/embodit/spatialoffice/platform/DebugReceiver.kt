@@ -137,6 +137,8 @@ object DebugReceiver {
             "conflict-answer" -> { val (w, c) = arg.split(" ", limit = 2); g.resolveConflict(win(w), c) }
             "inbox" -> g.scope.launch { runCatching { g.accounts.checkInbox() } }
             "dump" -> {}
+            // v0.2.4 (q4-1): longest main-thread frame gap over <arg> seconds (baseline of the emulator's own load)
+            "mainwatch" -> { val w = io.embodit.spatialoffice.ui.chart.MainWatch("baseline"); w.start(); android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ w.stop() }, (arg?.toLongOrNull() ?: 10L) * 1000) }
             else -> Log.w(TAG, "DEBUG unknown command $cmd")
         }
     }
