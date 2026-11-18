@@ -70,6 +70,12 @@ object Naming {
     /** Default name for "save as a copy". */
     fun copyName(name: String, zh: Boolean): String = tagged(name, if (zh) "（副本）" else " (copy)")
 
+    /**
+     * Name of the copy uploaded beside a Feishu Drive file when the in-place version upload is refused (v0.2.3, user
+     * 2026-11-17: "save a copy besides"): `季度复盘 (空间办公 副本).docx` / `report (Spatial Office copy).docx`.
+     */
+    fun appCopyName(name: String, zh: Boolean): String = tagged(name, if (zh) " (空间办公 副本)" else " (Spatial Office copy)")
+
     fun withExt(name: String, ext: String): String = name.substringBeforeLast('.', name) + "." + ext
 
     private fun tagged(name: String, tag: String): String {

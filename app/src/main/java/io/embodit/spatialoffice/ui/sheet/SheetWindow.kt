@@ -285,7 +285,9 @@ private fun SheetPicker(graph: Graph, s: SheetSession, edit: CellEdit) {
             }
         }
         if (chart?.range != null) Txt(
-            tr(R.string.range_hint, chart.title.ifEmpty { tr(R.string.chart_3d) }, chart.range ?: ""), "sheet/range-hint",
+            tr(R.string.range_hint, chart.title.ifEmpty { tr(R.string.chart_3d) }, chart.range ?: "") +
+                // v0.2.3: the chart's "click a bar" hint lives here, under the volume (its panel keeps to value + controls)
+                (if (graph.windows.isOpen(Win.CHART)) "  ·  " + tr(if (graph.chartScatter) R.string.tip_dot else R.string.tip_bar) else ""), "sheet/range-hint",
             Modifier.weight(1f).padding(start = 16.dp), style = PicoTheme.typography.bodySmall, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2,
         )
     }
@@ -321,7 +323,7 @@ fun openChart(graph: Graph, s: SheetSession) {
         graph.say(Win.SHEET, graph.str(R.string.chart_made, title))
     }
     graph.chartIndex = index.coerceAtLeast(0)
-    graph.chartYaw = 0f
+    graph.chartYaw = io.embodit.spatialoffice.ui.chart.CHART_DEFAULT_YAW
     graph.windows.open(Win.CHART)
 }
 

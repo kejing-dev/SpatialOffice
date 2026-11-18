@@ -57,6 +57,7 @@ fun CloudOverlays(graph: Graph, win: Win) {
         is Overlay.Scan -> ScanDialog(graph, o.provider)
         is Overlay.Connected -> ConnectedDialog(graph, o.provider)
         is Overlay.Conflict -> ConflictDialog(graph, win)
+        is Overlay.CopyBeside -> CopyBesideDialog(graph, o.original, o.copy)
         else -> {}
     }
 }
@@ -190,6 +191,20 @@ private fun ConnectedDialog(graph: Graph, p: Provider) {
 }
 
 /** §9.3: the cloud copy changed since it was opened. Never overwrites quietly. */
+@Composable
+private fun CopyBesideDialog(graph: Graph, original: String, copy: String) {
+    AlertDialog(
+        onDismissRequest = { graph.overlay = null },
+        title = { Txt(tr(R.string.copy_beside_title), "copybeside/title", style = PicoTheme.typography.headlineSmall, weight = FontWeight.Bold, maxLines = 2) },
+        content = { Txt(tr(R.string.copy_beside_msg, original, copy), "copybeside/msg", style = PicoTheme.typography.bodyLarge, maxLines = 6) },
+        buttons = {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End)) {
+                SecondaryButton(tr(R.string.got_it), "copybeside/ok", onClick = { graph.overlay = null })
+            }
+        },
+    )
+}
+
 @Composable
 private fun ConflictDialog(graph: Graph, win: Win) {
     val s = graph.session(win) ?: return

@@ -27,8 +27,14 @@ tools/.venv/bin/python tools/verify/verify_xlsx.py        # same with openpyxl
 | `tools/` | `strings.tsv` + `gen_strings.py`, `svg2vd.py`, test-fixture generators and verifiers. |
 
 Containers (`Main.kt`): home window (default, 1120 × 660 dp), one Planar window per editor, a Volumetric window for the
-chart (0.90 × 0.26 × 0.32 m, `chartPlacement()` = `Placement.top(sheet)` since v0.2.2: in front it covered the grid,
-below / beside it left the view, `build/v0.2.2/placement-trials.md` in the factory), one Mixed Stage. The compatibility
+chart (1.76 × 0.26 × 0.32 m since v0.2.3, `chartPlacement()` = `Placement.top(sheet)` since v0.2.2: in front it covered the grid,
+below / beside it left the view, `build/v0.2.2/placement-trials.md` in the factory), one Mixed Stage.
+v0.2.3: the chart's two panels have a fixed physical size (`core/layout/ChartPanels`: 0.0019 m per dp, text ≥ 15 sp,
+50 dp buttons; the app scales each attachment by that over the volume's own m/dp, logged as `CHART panels base=…`);
+`ChartPanelSizeTest` checks text ≥ 0.5° and buttons ≥ 48 dp of a window at the viewing distance. The volume clips its
+attachments, so the panels stay inside it. The chart opens only after the sheet window is up (`core/layout/ChartOpenGate`,
+`WindowCtl.openChartWhenSheetIsUp`, log `CHART gate …`; `ChartReopenTest` replays the rehearsal and spread timelines),
+opens turned −35° (`CHART_DEFAULT_YAW`), and its "click a bar" hint is in the sheet window's footer. The compatibility
 panel is a Sheet over its editor (v0.2.2; the Subwindow hung 36°–48° to the right). Every Sheet uses `SheetClose`
 (close button labelled in the app language). Since v0.2.1 every editor and the chart open with `editorPlacement()` = the system's spot in
 front of the user (`Placement.right(home)` put them 22°–60° to the right, QA #1 q1-1; `core/layout/WindowFit` +
@@ -60,6 +66,7 @@ Each command calls the same function as the control it stands for; the app logs 
 | `cell` | `B2=123` | set a cell; `select` `B2`; `sheet` index |
 | `slide` | index | current slide |
 | `chart`, `chart-type` (`columns` `scatter`), `chart-yaw` degrees | | 3D chart volume |
+| `copybeside` | `doc` `sheet` `slides` | show the notice the Feishu fallback shows (original kept, edits saved as "<name> (空间办公 副本)"); screenshot only |
 | `chart-place` | `top:0` (default) `bottom:<dp>` `left:<dp>` `right:<dp>` `none` | placement the next chart opening uses (emulator trials only) |
 | `spread` | `doc` `sheet` `slides` | enter the spread layout; `arr` `row` `arc` `layers`; `focus` index; `recenter`; `collapse` |
 | `rehearse` | — | slide rehearsal (`collapse` ends it) |

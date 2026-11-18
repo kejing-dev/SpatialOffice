@@ -476,3 +476,6 @@ br_after_feishu	你云盘里的文件夹和文件，最上面是「空间办公 
 br_after_other	你云盘里的文件夹和文件。点文件直接打开，改完存回原处，云盘里多一个历史版本	Your drive’s folders and files. Tap a file to open it; saving puts it back in place and the drive keeps a version
 br_local_head	本机文件照常用	Local files work as usual
 br_local_sub	不连接也能在「本机」打开、编辑、保存	Without any account you can open, edit and save under Device
+copy_beside_title	原文件没动，另存了一份	Original untouched; saved a copy
+copy_beside_msg	飞书没让这个文件原地更新。「%1$s」原样留着，你的改动存成了旁边的「%2$s」，之后保存都写进这份副本。	Feishu would not update this file in place. “%1$s” is left as it was; your changes were saved as “%2$s” beside it, and later saves go to that copy.
+how_to_cloud_note	飞书云盘文件不能原地更新时：原文件不动，改动另存为同一文件夹里的「名字 (空间办公 副本)」，并弹窗告诉你	If Feishu won’t update a Drive file in place, the original stays as it is and your edits go to “name (Spatial Office copy)” beside it; a dialog tells you

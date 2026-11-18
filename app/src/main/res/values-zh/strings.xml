@@ -478,4 +478,7 @@
     <string name="br_after_other" formatted="false">你云盘里的文件夹和文件。点文件直接打开，改完存回原处，云盘里多一个历史版本</string>
     <string name="br_local_head" formatted="false">本机文件照常用</string>
     <string name="br_local_sub" formatted="false">不连接也能在「本机」打开、编辑、保存</string>
+    <string name="copy_beside_title" formatted="false">原文件没动，另存了一份</string>
+    <string name="copy_beside_msg">飞书没让这个文件原地更新。「%1$s」原样留着，你的改动存成了旁边的「%2$s」，之后保存都写进这份副本。</string>
+    <string name="how_to_cloud_note" formatted="false">飞书云盘文件不能原地更新时：原文件不动，改动另存为同一文件夹里的「名字 (空间办公 副本)」，并弹窗告诉你</string>
 </resources>

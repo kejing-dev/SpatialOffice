@@ -585,7 +585,13 @@ class Accounts(private val app: Application, private val graph: Graph) {
      * checks that nobody changed the cloud copy since it was opened (PRD §9.3); if someone did, throws
      * [CloudConflictException] and writes nothing, and the app asks: overwrite / save a copy / cancel.
      */
+    /** Feishu copies this app uploaded this session (fallback above); the only files it may replace. */
+    private val ownCopies = java.util.Collections.synchronizedSet(HashSet<String>())
+    /** Set when the last [write] saved a copy beside the original (original name to copy name); Graph shows it. */
+    @Volatile var lastCopyBeside: Pair<String, String>? = null
+
     fun write(ref: FileRef.Cloud, bytes: ByteArray, force: Boolean = false): FileRef.Cloud {
+        lastCopyBeside = null
         val p = Provider.of(ref.provider) ?: error("unknown service")
         if (ref.readOnlyCloud) throw IOException(graph.str(R.string.cloud_readonly_save))
         cacheFile(ref).writeBytes(bytes)
@@ -609,16 +615,23 @@ class Accounts(private val app: Application, private val graph: Graph) {
             p == Provider.FEISHU -> {
                 // upload_all with the file's own token: a new version of the same file, history kept (same as the
                 // Feishu CLI's `drive +upload --file-token`). Tenants that do not take the field yet answer with an
-                // error: only then fall back to the v0.2.0 way (upload beside, remove the old one; history breaks).
+                // error: only then fall back. v0.2.3 (user 2026-11-17 "save a copy besides"): the original stays as
+                // it is, the edited file goes beside it as "<name> (空间办公 副本)" and the editor continues on the
+                // copy; the app tells the user (Graph.write). v0.2.0–v0.2.2 deleted the original here.
                 val inPlace = runCatching {
                     call(p, CloudApi.upload(p, ref.item()), FeishuDrive.inPlaceMultipart(ref.name, ref.folder, ref.id, bytes))
                 }
                 inPlace.exceptionOrNull()?.let { e ->
                     if (e is CloudAuthException || e !is IOException || !FeishuDrive.inPlaceUnsupported(e.message ?: "")) throw e
-                    Log.w(TAG, "CLOUD feishu in-place upload not available on this tenant (${e.message}); new file + delete old")
-                    val token = CloudApi.parseFeishuUpload(String(call(p, CloudApi.create(p, ref.name, ref.folder, bytes.size), CloudApi.feishuMultipart(ref.name, ref.folder, bytes)), Charsets.UTF_8))
-                    runCatching { call(p, CloudApi.feishuDelete(ref.item())) }
-                    if (token.isNotEmpty()) out = ref.copy(id = token)
+                    val fb = FeishuDrive.fallback(ref.name, ref.id, graph.settings.value.zh, ownCopies)
+                    Log.w(TAG, "CLOUD feishu in-place upload not available on this tenant (${e.message}); original kept, copy ${fb.uploadName} replaceOwn=${fb.replaceOwnCopy}")
+                    val token = CloudApi.parseFeishuUpload(String(call(p, CloudApi.create(p, fb.uploadName, ref.folder, bytes.size), CloudApi.feishuMultipart(fb.uploadName, ref.folder, bytes)), Charsets.UTF_8))
+                    if (token.isEmpty()) throw IOException("copy upload gave no file token")
+                    ownCopies.add(token)
+                    // only a copy this app made itself is ever removed, never the file the user opened
+                    fb.replaceOwnCopy?.let { old -> runCatching { call(p, CloudApi.feishuDelete(ref.copy(id = old).item())) }; ownCopies.remove(old) }
+                    out = ref.copy(id = token, name = fb.uploadName)
+                    if (fb.replaceOwnCopy == null) lastCopyBeside = ref.name to fb.uploadName
                 }
             }
             else -> call(p, CloudApi.upload(p, ref.item()), bytes)

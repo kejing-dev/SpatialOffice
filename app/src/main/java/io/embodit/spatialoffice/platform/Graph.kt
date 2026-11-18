@@ -64,6 +64,8 @@ sealed class Overlay {
     data class Connected(val provider: io.embodit.spatialoffice.core.cloud.Provider, override val win: Win = Win.HOME) : Overlay()
     /** The cloud copy changed since it was opened: overwrite / save a copy / cancel (PRD §9.3). */
     data class Conflict(override val win: Win) : Overlay()
+    /** Feishu would not take a new version of [original]: it is untouched, the edits were saved as [copy] beside it (v0.2.3). */
+    data class CopyBeside(override val win: Win, val original: String, val copy: String) : Overlay()
 }
 
 data class Toast(val id: Long, val win: Win, val text: String, val action: String? = null, val onAction: (() -> Unit)? = null)
@@ -114,7 +116,7 @@ class Graph(val app: Application) {
     // chart volume
     var chartIndex by mutableStateOf(0)
     var chartScatter by mutableStateOf(false)
-    var chartYaw by mutableStateOf(0f)
+    var chartYaw by mutableStateOf(io.embodit.spatialoffice.ui.chart.CHART_DEFAULT_YAW)
 
     /** What to do with the picture chosen in the picture picker (document or current slide). */
     var onImage: ((ByteArray, String, Int, Int) -> Unit)? = null
@@ -303,6 +305,8 @@ class Graph(val app: Application) {
                     if (ref is FileRef.Cloud) {
                         val now = accounts.write(ref, s.serialize(), force)
                         if (now != ref) withContext(Dispatchers.Main) { s.ref = now }
+                        // Feishu refused the in-place version: the original is untouched, the edits went to a copy beside it
+                        accounts.lastCopyBeside?.let { (orig, copy) -> withContext(Dispatchers.Main) { overlay = Overlay.CopyBeside(win, orig, copy) } }
                     } else storage.write(ref, s.serialize())
                     backupFile
                 }
@@ -317,7 +321,7 @@ class Graph(val app: Application) {
                     s.saved(); filesVersion++
                     recents.touch(s.ref, storage.display(s.ref))
                     Log.i(TAG, "SAVE ${s.ref.name} backup=${b?.name}")
-                    say(win, if (b != null) str(R.string.saved_first, storage.display(s.ref)) else str(R.string.saved_to, storage.display(s.ref)))
+                    if (overlay !is Overlay.CopyBeside) say(win, if (b != null) str(R.string.saved_first, storage.display(s.ref)) else str(R.string.saved_to, storage.display(s.ref)))
                     after?.invoke()
                 }
         }

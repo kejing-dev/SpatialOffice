@@ -148,6 +148,19 @@ object FeishuDrive {
     fun inPlaceUnsupported(message: String): Boolean =
         listOf("(1061002)", "(1061001)", "(99992402)", "file_token").any { message.contains(it) }
 
+    /**
+     * What to do when the in-place upload is refused ([inPlaceUnsupported]); v0.2.3, user 2026-11-17 "save a copy
+     * besides". The original is never deleted or changed: the edited file is uploaded as a new file
+     * [uploadName] in the same folder and the editor goes on with that copy. Only when the file being saved is itself
+     * a copy this app uploaded earlier in this session ([ownCopies]) is that earlier copy replaced ([replaceOwnCopy]),
+     * so repeated saves do not pile up copies; nothing else is ever removed.
+     */
+    data class Fallback(val uploadName: String, val replaceOwnCopy: String?)
+
+    fun fallback(name: String, fileToken: String, zh: Boolean, ownCopies: Set<String>): Fallback =
+        if (fileToken.isNotEmpty() && fileToken in ownCopies) Fallback(name, fileToken)
+        else Fallback(io.embodit.spatialoffice.core.files.Naming.appCopyName(name, zh), null)
+
     /** Items in the inbox that were not there before ([seen] = ids already announced). */
     fun newArrivals(items: List<CloudItem>, seen: Set<String>): List<CloudItem> = items.filter { !it.folder && it.id !in seen }
 }

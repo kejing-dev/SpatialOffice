@@ -478,4 +478,7 @@
     <string name="br_after_other" formatted="false">Your drive’s folders and files. Tap a file to open it; saving puts it back in place and the drive keeps a version</string>
     <string name="br_local_head" formatted="false">Local files work as usual</string>
     <string name="br_local_sub" formatted="false">Without any account you can open, edit and save under Device</string>
+    <string name="copy_beside_title" formatted="false">Original untouched; saved a copy</string>
+    <string name="copy_beside_msg">Feishu would not update this file in place. “%1$s” is left as it was; your changes were saved as “%2$s” beside it, and later saves go to that copy.</string>
+    <string name="how_to_cloud_note" formatted="false">If Feishu won’t update a Drive file in place, the original stays as it is and your edits go to “name (Spatial Office copy)” beside it; a dialog tells you</string>
 </resources>

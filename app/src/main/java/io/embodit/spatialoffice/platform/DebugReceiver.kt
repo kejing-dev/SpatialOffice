@@ -132,6 +132,8 @@ object DebugReceiver {
             "scan-preview" -> io.embodit.spatialoffice.core.cloud.Provider.of(arg)?.let { g.accounts.previewScan(it) }
             "connected-preview" -> io.embodit.spatialoffice.core.cloud.Provider.of(arg)?.let { g.overlay = Overlay.Connected(it) }
             "conflict" -> g.overlay = Overlay.Conflict(win(arg))
+            // the notice shown after a Feishu in-place save was refused and a copy went beside the file (screenshot only)
+            "copybeside" -> g.session(win(arg))?.let { s -> g.overlay = Overlay.CopyBeside(win(arg), s.ref.name, io.embodit.spatialoffice.core.files.Naming.appCopyName(s.ref.name, g.settings.value.zh)) }
             "conflict-answer" -> { val (w, c) = arg.split(" ", limit = 2); g.resolveConflict(win(w), c) }
             "inbox" -> g.scope.launch { runCatching { g.accounts.checkInbox() } }
             "dump" -> {}

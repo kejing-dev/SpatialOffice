@@ -214,6 +214,8 @@ private fun HowToSheet(graph: Graph) {
                     HowToLine(R.drawable.ic_keyboard_fill, tr(r[2]))
                     HowToLine(R.drawable.ic_hand, tr(r[3]))
                     HowToLine(R.drawable.ic_controller, tr(r[4]))
+                    // v0.2.3: what happens when Feishu will not take a new version of a Drive file (user: "save a copy besides")
+                    if (r[1] == R.string.how_to_cloud) HowToLine(R.drawable.ic_info_circle, tr(R.string.how_to_cloud_note))
                 }
             }
         }
@@ -224,7 +226,7 @@ private fun HowToSheet(graph: Graph) {
 private fun HowToLine(icon: Int, text: String) {
     Row(Modifier.fillMaxWidth().padding(start = 32.dp), verticalAlignment = Alignment.Top) {
         Icon(painter = painterResource(icon), contentDescription = null, modifier = Modifier.padding(top = 2.dp).size(18.dp), tint = PicoTheme.colorScheme.labelSecondary)
-        Txt(text, "howto/line", Modifier.weight(1f).padding(start = 10.dp), style = PicoTheme.typography.bodyMedium, maxLines = 3)
+        Txt(text, "howto/line", Modifier.weight(1f).padding(start = 10.dp), style = PicoTheme.typography.bodyMedium, maxLines = 4)
     }
 }
 

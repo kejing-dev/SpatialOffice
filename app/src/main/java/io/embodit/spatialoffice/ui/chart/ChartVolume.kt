@@ -29,6 +29,13 @@ import io.embodit.spatialoffice.ui.tr
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.text.TextStyle
+import com.pico.spatial.ui.platform.LengthUnit
+import com.pico.spatial.ui.platform.LocalPhysicalLengthConverter
+import io.embodit.spatialoffice.core.layout.ChartPanels
 import com.pico.spatial.core.ecs.CollisionComponent
 import com.pico.spatial.core.ecs.Entity
 import com.pico.spatial.core.ecs.InteractableComponent
@@ -69,6 +76,13 @@ private const val LABEL = "chart-label"
 private const val TIP = "chart-tip"
 /** Tip of the chart towards the user (degrees about x): the volume is above the eye, 25°–35° up. */
 private const val TILT = 40f
+/** v0.2.3: the chart opens turned this much (QA #3: seen straight on, the front row hid the other series). */
+const val CHART_DEFAULT_YAW = -35f
+/** Panel text sizes (≥ [ChartPanels.MIN_SP]) and button size, in the panels' own dp (fixed physical size, q3-1). */
+private val SMALL = TextStyle(fontSize = ChartPanels.MIN_SP.sp, lineHeight = (ChartPanels.MIN_SP + 5).sp)
+private val TITLE = TextStyle(fontSize = 18.sp, lineHeight = 22.sp)
+private val VALUE = TextStyle(fontSize = 18.sp, lineHeight = 24.sp)
+private val BUTTON = ChartPanels.BUTTON_DP.dp
 
 /** One mark of the chart and the cell it shows. */
 data class Mark(val series: Int, val index: Int, val value: Double, val row: Int, val col: Int)
@@ -106,19 +120,21 @@ internal class ChartScene {
     }
 
     fun setRegion(halfX: Float, halfY: Float) {
-        // the chart is modelled 0.64 m wide (base plate), 0.30 m high and 0.36 m deep; it takes the middle half of
-        // the volume's width, the label panel stands on its left and the tip + controls on its right. v0.2.2: the
-        // volume sits over the sheet window, so the chart is tipped [TILT]° towards the user (its top faces the eye
-        // below it); tipped, it needs about 0.42 m of height per unit scale
-        val s = minOf(halfX * 2f * 0.5f / 0.64f, halfY * 2f / 0.42f).coerceIn(0.2f, 3f)
+        // the chart is modelled 0.64 m wide (base plate), 0.30 m high and 0.36 m deep. v0.2.3: it takes the span
+        // between the two fixed-size panels (ChartPanels.chartSpan); v0.2.2: the volume sits over the sheet window,
+        // so the chart is tipped [TILT]° towards the user (its top faces the eye below it); tipped, it needs about
+        // 0.42 m of height per unit scale
+        val (spanW, spanX) = ChartPanels.chartSpan(halfX * 2.0)
+        val s = minOf(spanW.toFloat() / 0.64f, halfY * 2f / 0.48f).coerceIn(0.2f, 3f)
         if (abs(s - scale) < 1e-3f) return
         scale = s
         fit.components[TransformComponent::class.java]?.apply {
+            setPosition(Vector3(spanX.toFloat(), 0f, 0f))
             setScaleVector(Vector3(s, s, s))
             val h = Math.toRadians(TILT.toDouble()).toFloat() / 2f
             setQuaternion(Quat(sin(h), 0f, 0f, cos(h)))
         }
-        Log.i(TAG, "CHART region half=%.3fx%.3f scale=%.2f tilt=%.0f".format(halfX, halfY, s, TILT))
+        Log.i(TAG, "CHART region half=%.3fx%.3f scale=%.2f tilt=%.0f span=%.2f@%.3f".format(halfX, halfY, s, TILT, spanW, spanX))
     }
 
     fun setYaw(deg: Float) {
@@ -210,13 +226,16 @@ internal class ChartScene {
     }
 }
 
-/** V1 spatial chart (Volume, 0.90 × 0.26 × 0.32 m, over the sheet window): the sheet's standard chart shown in 3D, linked with the grid. */
+/** V1 spatial chart (Volume, 1.76 × 0.26 × 0.32 m since v0.2.3, over the sheet window): the sheet's standard chart shown in 3D, linked with the grid. */
 @Composable
 fun ChartVolume() {
     WindowFrame(Win.CHART) { graph ->
         val s = graph.sheet
         val context = LocalContext.current
         val scene = remember { ChartScene() }
+        // metres per dp of this volume's attachment panels; the panels are scaled to ChartPanels.M_PER_DP (q3-1)
+        val baseMPerDp = LocalPhysicalLengthConverter.current.dpToLength(1.dp, LengthUnit.Meters)
+        var panelsPlaced by remember { mutableStateOf(-1f) }
         var viewSize by remember { mutableStateOf(IntSize.Zero) }
         var ready by remember { mutableStateOf(false) }
         val chart = remember(s, s?.version, graph.chartIndex) { runCatching { s?.book?.charts()?.getOrNull(graph.chartIndex) }.getOrNull() }
@@ -236,20 +255,34 @@ fun ChartVolume() {
                 },
             attachments = {
                 AttachmentPanel(LABEL) { PanelTheme(graph) { ChartLabel(graph, s, chart) } }
-                AttachmentPanel(TIP) { PanelTheme(graph) { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { ChartTip(graph, s, chart); ChartControls(graph) } } }
+                AttachmentPanel(TIP) { PanelTheme(graph) { ChartControls(graph, s, chart) } }
             },
             initial = { content, attachments ->
                 content.addEntity(scene.root)
                 // the two panels stand left and right of the chart, inside the volume, a little towards the user
-                attachments.entity(LABEL)?.let { p -> p.components[TransformComponent::class.java]?.setPosition(Vector3(-0.335f, 0f, 0.06f)); scene.root.addChild(p) }
-                attachments.entity(TIP)?.let { p -> p.components[TransformComponent::class.java]?.setPosition(Vector3(0.335f, 0f, 0.06f)); scene.root.addChild(p) }
+                attachments.entity(LABEL)?.let { p -> scene.root.addChild(p) }
+                attachments.entity(TIP)?.let { p -> scene.root.addChild(p) }
                 ready = true
                 Log.i(TAG, "CHART volume initial done")
             },
-            update = { content, _ ->
+            update = { content, attachments ->
                 if (viewSize != IntSize.Zero) {
                     val corner = content.convertPosition(Vector3.ZERO, ViewCoordinateSpace.Local, content.localSpatialCoordinateSpace)
                     scene.setRegion(abs(corner.x), abs(corner.y))
+                    val halfX = abs(corner.x); val halfY = abs(corner.y)
+                    if (abs(panelsPlaced - halfX) > 1e-3f && baseMPerDp > 0f) {
+                        panelsPlaced = halfX
+                        // fixed physical size: the panel's dp become ChartPanels.M_PER_DP metres whatever the volume does
+                        val k = (ChartPanels.M_PER_DP / baseMPerDp).toFloat()
+                        val h = Math.toRadians(ChartPanels.TILT_DEG).toFloat() / 2f
+                        for ((key, left) in listOf(LABEL to true, TIP to false)) attachments.entity(key)?.components?.get(TransformComponent::class.java)?.apply {
+                            setPosition(Vector3(ChartPanels.panelX(left, halfX * 2.0).toFloat(), ChartPanels.panelY(halfY * 2.0).toFloat(), ChartPanels.PANEL_Z.toFloat()))
+                            setScaleVector(Vector3(k, k, k))
+                            setQuaternion(Quat(sin(h), 0f, 0f, cos(h)))
+                        }
+                        Log.i(TAG, "CHART panels base=%.5f m/dp target=%.5f scale=%.2f halfX=%.3f leftX=%.3f rightX=%.3f tilt=%.0f".format(
+                            baseMPerDp, ChartPanels.M_PER_DP, k, halfX, ChartPanels.panelX(true, halfX * 2.0), ChartPanels.panelX(false, halfX * 2.0), ChartPanels.TILT_DEG))
+                    }
                 }
             },
         )
@@ -257,22 +290,25 @@ fun ChartVolume() {
 }
 
 /**
- * Columns / points, turn, reset, close. They used to be a system Toolbar under the volume; with the volume under the
- * sheet window that ornament would fall below the view (q2-2), so they live in the right-hand panel.
+ * Selected value, columns / points, turn, reset, close (right panel). v0.2.3 (q3-1): one panel of a fixed physical
+ * size, [ChartPanels.RIGHT_W_DP] × at most [ChartPanels.MAX_H_DP] dp, text ≥ [ChartPanels.MIN_SP] sp, round buttons
+ * [ChartPanels.BUTTON_DP] dp; the "click a bar" hint moved to the sheet window's footer.
  */
 @Composable
-private fun ChartControls(graph: Graph) {
+private fun ChartControls(graph: Graph, s: SheetSession?, chart: ChartInfo?) {
     Column(
-        Modifier.width(250.dp).clip(RoundedCornerShape(20.dp)).background(Color(0xF2F2F4F7)).padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        Modifier.width(ChartPanels.RIGHT_W_DP.dp).height(ChartPanels.MAX_H_DP.dp).clip(RoundedCornerShape(20.dp)).background(Color(0xF2F2F4F7))
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .onSizeChanged { Log.i(TAG, "CHART panel right ${it.width}x${it.height}px") },
+        verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // gate:allow tabs-segment chart type option (columns / points) of the same chart, not page switching
-        Segments(listOf(false to tr(R.string.chart_columns), true to tr(R.string.chart_scatter)), graph.chartScatter, "chart/type", itemWidth = 104.dp) { graph.chartScatter = it }
+        Segments(listOf(false to tr(R.string.chart_columns), true to tr(R.string.chart_scatter)), graph.chartScatter, "chart/type", itemWidth = 108.dp, labelStyle = SMALL.copy(fontSize = 16.sp)) { graph.chartScatter = it }
         ToolRow {
-            ToolIcon(R.drawable.ic_arrow_left, tr(R.string.chart_turn_left), onClick = { graph.chartYaw -= 30f })
-            ToolIcon(R.drawable.ic_arrow_right, tr(R.string.chart_turn_right), onClick = { graph.chartYaw += 30f })
-            ToolIcon(R.drawable.ic_rotate, tr(R.string.chart_reset), onClick = { graph.chartYaw = 0f })
-            ToolIcon(R.drawable.ic_cross, tr(R.string.chart_close), onClick = { graph.windows.close(Win.CHART) })
+            ToolIcon(R.drawable.ic_arrow_left, tr(R.string.chart_turn_left), onClick = { graph.chartYaw -= 30f }, size = BUTTON)
+            ToolIcon(R.drawable.ic_arrow_right, tr(R.string.chart_turn_right), onClick = { graph.chartYaw += 30f }, size = BUTTON)
+            ToolIcon(R.drawable.ic_rotate, tr(R.string.chart_reset), onClick = { graph.chartYaw = CHART_DEFAULT_YAW }, size = BUTTON)
+            ToolIcon(R.drawable.ic_cross, tr(R.string.chart_close), onClick = { graph.windows.close(Win.CHART) }, size = BUTTON)
         }
     }
 }
@@ -285,26 +321,38 @@ private fun PanelTheme(graph: Graph, content: @Composable () -> Unit) {
     androidx.compose.runtime.CompositionLocalProvider(LocalContext provides localized, io.embodit.spatialoffice.ui.LocalRes provides localized.resources) { PicoTheme { content() } }
 }
 
-/** Title, source range and legend. Dark pill so it reads on any room behind the volume. */
+/** Title, source range and legend (left panel, fixed physical size, q3-1). Dark pill so it reads on any room behind the volume. */
 @Composable
 private fun ChartLabel(graph: Graph, s: SheetSession?, chart: ChartInfo?) {
     s?.version
-    Column(Modifier.width(250.dp).clip(RoundedCornerShape(20.dp)).background(Color(0xE61B1D22)).padding(horizontal = 18.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (s == null || chart == null) { Txt(tr(R.string.chart_closed_file), "chart/none", color = Color.White, maxLines = 2); return@Column }
-        Txt(chart.title.ifEmpty { tr(R.string.chart_window) }, "chart/title", style = PicoTheme.typography.titleMedium, color = Color.White, weight = FontWeight.Bold, maxLines = 2)
-        Txt(tr(R.string.chart_src, s.book.sheetNames.getOrElse(chart.sheet) { "" } + (chart.range?.let { "!$it" } ?: "")), "chart/src", style = PicoTheme.typography.bodySmall, color = Color(0xFFD5D9E0), maxLines = 2)
-        chart.series.take(6).forEachIndexed { i, se ->
+    Column(
+        Modifier.width(ChartPanels.LEFT_W_DP.dp).height(ChartPanels.MAX_H_DP.dp).clip(RoundedCornerShape(20.dp)).background(Color(0xE61B1D22))
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .onSizeChanged { Log.i(TAG, "CHART panel left ${it.width}x${it.height}px") },
+        verticalArrangement = Arrangement.spacedBy(0.dp, Alignment.CenterVertically),
+    ) {
+        if (s == null || chart == null) { Txt(tr(R.string.chart_closed_file), "chart/none", style = SMALL, color = Color.White, maxLines = 2); return@Column }
+        Txt(chart.title.ifEmpty { tr(R.string.chart_window) }, "chart/title", style = TITLE, color = Color.White, weight = FontWeight.Bold)
+        Txt(s.book.sheetNames.getOrElse(chart.sheet) { "" } + (chart.range?.let { "!$it" } ?: ""), "chart/src", style = SMALL, color = Color(0xFFD5D9E0))
+        // legend: three per row (up to six series in two rows)
+        chart.series.take(6).chunked(3).forEachIndexed { row, items ->
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(12.dp).clip(RoundedCornerShape(3.dp)).background(Ink.Series[i % Ink.Series.size]))
-                Txt(se.name.ifEmpty { "${i + 1}" }, "chart/legend", Modifier.padding(start = 8.dp), style = PicoTheme.typography.bodySmall, color = Color.White)
+                items.forEachIndexed { j, se ->
+                    val i = row * 3 + j
+                    Row(Modifier.width(88.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(14.dp).clip(RoundedCornerShape(3.dp)).background(Ink.Series[i % Ink.Series.size]))
+                        Txt(se.name.ifEmpty { "${i + 1}" }, "chart/legend", Modifier.padding(start = 6.dp), style = SMALL, color = Color.White)
+                    }
+                }
             }
         }
+        ChartTip(s, chart)
     }
 }
 
-/** The selected mark's name and value, and how to pick another. */
+/** The selected mark's name and value, one line. */
 @Composable
-private fun ChartTip(graph: Graph, s: SheetSession?, chart: ChartInfo?) {
+private fun ChartTip(s: SheetSession?, chart: ChartInfo?) {
     s?.version
     if (s == null || chart == null) return
     var name = ""; var value = ""
@@ -312,16 +360,15 @@ private fun ChartTip(graph: Graph, s: SheetSession?, chart: ChartInfo?) {
         se.values.indices.forEach { i ->
             val cell = refCell(se.valuesRef, i)
             if (cell != null && cell.first == s.row && cell.second == s.col) {
-                name = listOf(se.name, se.categories.getOrNull(i).orEmpty()).filter { it.isNotEmpty() }.joinToString(" · ")
+                name = listOf(se.categories.getOrNull(i).orEmpty(), se.name).filter { it.isNotEmpty() }.joinToString(" · ")
                 value = s.book.cell(chart.sheet, cell.first, cell.second).display
             }
         }
     }
-    Column(Modifier.width(250.dp).clip(RoundedCornerShape(20.dp)).background(Color(0xE61B1D22)).padding(horizontal = 18.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
         if (name.isNotEmpty()) {
-            Txt(name, "chart/tip-name", style = PicoTheme.typography.bodyMedium, color = Color(0xFFD5D9E0), maxLines = 2)
-            Txt(value, "chart/tip-value", style = PicoTheme.typography.headlineSmall, color = Color.White, weight = FontWeight.Bold)
+            Txt(name, "chart/tip-name", Modifier.weight(1f, fill = false), style = SMALL, color = Color(0xFFD5D9E0))
+            Txt(value, "chart/tip-value", Modifier.padding(start = 10.dp), style = VALUE, color = Color.White, weight = FontWeight.Bold)
         }
-        Txt(tr(if (graph.chartScatter) R.string.tip_dot else R.string.tip_bar), "chart/tip-hint", style = PicoTheme.typography.bodySmall, color = Color(0xFFD5D9E0), maxLines = 2)
     }
 }

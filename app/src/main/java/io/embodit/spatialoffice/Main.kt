@@ -48,14 +48,19 @@ internal fun chartPlacement(containers: List<ContainerProxy>): Placement {
     val sheet = containers.firstOrNull { it.id == Containers.SHEET }
     val mode = ChartPlace.mode
     android.util.Log.i("SpatialOffice", "PLACE ${Containers.CHART} mode=$mode anchor=${sheet?.id} among " + containers.joinToString { "${it.id}/${it.state}" })
-    if (sheet == null) return Placement.none()
+    // v0.2.3 (q3-2): WindowCtl opens the chart only once the sheet is up, so the sheet is here; should it not be,
+    // the chart still goes on top of a window (never Placement.none(), which is in front of the user, over the grid)
+    val anchorId = io.embodit.spatialoffice.core.layout.ChartOpenGate.anchor(containers.map { it.id }, Containers.SHEET, listOf(Containers.DOC, Containers.SLIDES, Containers.HOME))
+    val anchor = sheet ?: containers.firstOrNull { it.id == anchorId }
+    if (sheet == null) android.util.Log.w("SpatialOffice", "PLACE ${Containers.CHART}: no sheet window, above $anchorId instead")
+    if (anchor == null) return Placement.none()
     val (side, gap) = mode.split(':').let { it[0] to (it.getOrNull(1)?.toFloatOrNull() ?: 0f) }
     return when (side) {
-        "top" -> Placement.top(sheet, gap.dp)
-        "left" -> Placement.left(sheet, gap.dp)
-        "right" -> Placement.right(sheet, gap.dp)
+        "top" -> Placement.top(anchor, gap.dp)
+        "left" -> Placement.left(anchor, gap.dp)
+        "right" -> Placement.right(anchor, gap.dp)
         "none" -> Placement.none()
-        else -> Placement.bottom(sheet, gap.dp)
+        else -> Placement.bottom(anchor, gap.dp)
     }
 }
 

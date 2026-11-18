@@ -73,7 +73,7 @@ object WindowFit {
     const val SHEET_W_DP = 1280.0
     const val SHEET_H_DP = 800.0
     /** The chart volume (Main.kt): metres. */
-    const val CHART_W = 0.90
+    const val CHART_W = 1.76
     const val CHART_H = 0.26
     const val CHART_D = 0.32
 

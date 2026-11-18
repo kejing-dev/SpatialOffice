@@ -225,12 +225,12 @@ fun ToolButton(text: String, tag: String, onClick: () -> Unit, enabled: Boolean 
 
 /** Icon-only toolbar button, 48 dp, with an accessibility name. */
 @Composable
-fun ToolIcon(icon: Int, label: String, onClick: () -> Unit, enabled: Boolean = true) {
+fun ToolIcon(icon: Int, label: String, onClick: () -> Unit, enabled: Boolean = true, size: Dp = 48.dp) {
     IconButton(
         onClick = onClick, enabled = enabled,
-        modifier = Modifier.size(48.dp).semantics { contentDescription = label },
+        modifier = Modifier.size(size).semantics { contentDescription = label },
     ) {
-        Icon(painter = painterResource(icon), contentDescription = null, modifier = Modifier.size(22.dp))
+        Icon(painter = painterResource(icon), contentDescription = null, modifier = Modifier.size(size * 22 / 48))
     }
 }
 
@@ -258,7 +258,7 @@ fun ToolDivider() {
 
 /** Options of one setting, inside a labelled row (never used to change pages). 52 dp high. */
 @Composable
-fun <T> Segments(options: List<Pair<T, String>>, selected: T, tag: String, modifier: Modifier = Modifier, itemWidth: Dp = 120.dp, onSelect: (T) -> Unit) {
+fun <T> Segments(options: List<Pair<T, String>>, selected: T, tag: String, modifier: Modifier = Modifier, itemWidth: Dp = 120.dp, labelStyle: TextStyle? = null, onSelect: (T) -> Unit) {
     // an explicit width: left alone, the control takes all the width its row offers (or none inside a scroller)
     SegmentControl(modifier = modifier.width(itemWidth * options.size + 12.dp).height(52.dp)) {
         options.forEach { (value, label) ->
@@ -266,7 +266,7 @@ fun <T> Segments(options: List<Pair<T, String>>, selected: T, tag: String, modif
                 selected = value == selected,
                 onClick = { onSelect(value) },
                 modifier = Modifier.width(itemWidth).fillMaxHeight(),
-                title = { Txt(label, "$tag/segment", style = PicoTheme.typography.labelLarge) },
+                title = { Txt(label, "$tag/segment", style = labelStyle ?: PicoTheme.typography.labelLarge) },
             )
         }
     }

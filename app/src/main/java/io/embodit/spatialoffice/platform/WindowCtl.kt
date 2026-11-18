@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.compose.runtime.mutableStateMapOf
 import com.pico.spatial.ui.platform.containers.SpatialNavigator
 import com.pico.spatial.ui.platform.containers.StageStyle
+import io.embodit.spatialoffice.core.layout.ChartOpenGate
 import io.embodit.spatialoffice.core.layout.LevelGate
 import kotlinx.coroutines.launch
 
@@ -51,8 +52,19 @@ class WindowCtl(private val graph: Graph) {
 
     private fun nav(): SpatialNavigator? = navigators[Win.HOME] ?: navigators.values.lastOrNull()
 
+    /** When each window last reported ON_RESUME since it was created (cleared on ON_DESTROY), for [chartGate]. */
+    private val resumedAt = HashMap<Win, Long>()
+    /** When open() last asked the system for each window (a window being opened is not [isOpen] yet). */
+    private val askedAt = HashMap<Win, Long>()
+    /** When the Full Space Stage last went away (the chart waits for the Shared Space windows to settle). */
+    private var stageDestroyedAt: Long? = null
+
     fun onLifecycle(win: Win, event: String) {
         state[win] = event
+        when (event) {
+            "ON_RESUME" -> resumedAt[win] = SystemClock.elapsedRealtime()
+            "ON_DESTROY" -> { resumedAt.remove(win); askedAt.remove(win); if (win == Win.STAGE) stageDestroyedAt = SystemClock.elapsedRealtime() }
+        }
         Log.i(TAG, "WINDOW ${win.name} $event")
         if (event == "ON_DESTROY" && !exiting) graph.windowClosed(win)
     }
@@ -62,8 +74,49 @@ class WindowCtl(private val graph: Graph) {
         if (graph.stageMode != null) return // windows stay closed while the Stage is up
         val n = nav() ?: run { Log.i(TAG, "WINDOW open ${win.name}: waiting for a navigator"); wanted.add(win); return }
         if (isOpen(win)) { runCatching { n.restoreWindowContainer(Containers.id(win), Containers.TAG_MAIN) }; return }
+        if (win == Win.CHART) { openChartWhenSheetIsUp(); return }
+        openNow(win, n)
+    }
+
+    private fun openNow(win: Win, n: SpatialNavigator) {
+        askedAt[win] = SystemClock.elapsedRealtime()
         Log.i(TAG, "WINDOW open ${win.name}")
         runCatching { n.openWindowContainer(Containers.id(win), Containers.TAG_MAIN, null) }.onFailure { Log.e(TAG, "WINDOW open failed", it) }
+    }
+
+    /**
+     * v0.2.3 (QA #3 q3-2): the chart volume is placed on top of the sheet window, and the system lists the sheet
+     * among the placement containers only once it is up. After a rehearsal v0.2.2 opened the chart 90 ms after the
+     * sheet and it landed in front of the user, over the grid. Every path (menu, debug command, reopen after the
+     * Stage) now waits here: [ChartOpenGate] opens the chart when the sheet has been resumed for 800 ms (and the Stage
+     * has been gone 2.5 s), opens the
+     * sheet first if it is closed, and drops the chart if the sheet never comes up.
+     */
+    private val chartGate = ChartOpenGate()
+    private val chartTick = object : Runnable {
+        override fun run() {
+            if (exiting || graph.stageMode != null) { Log.i(TAG, "CHART gate cancelled"); chartGate.step(Long.MAX_VALUE / 2, false, false, null); return }
+            val now = SystemClock.elapsedRealtime()
+            val sheetOpen = isOpen(Win.SHEET) || (askedAt[Win.SHEET]?.let { now - it < 3000 } ?: false)
+            val stageGone = if (state[Win.STAGE] == "ON_DESTROY") stageDestroyedAt else null
+            when (val act = chartGate.step(now, graph.sheet != null, sheetOpen, resumedAt[Win.SHEET].takeIf { isOpen(Win.SHEET) }, stageGone)) {
+                ChartOpenGate.Act.WAIT -> main.postDelayed(this, 100)
+                ChartOpenGate.Act.OPEN_SHEET -> { Log.i(TAG, "CHART gate: sheet window not open, opening it first"); open(Win.SHEET); main.postDelayed(this, 100) }
+                ChartOpenGate.Act.OPEN_CHART -> {
+                    Log.i(TAG, "CHART gate open: sheet resumed ${now - (resumedAt[Win.SHEET] ?: now)} ms ago")
+                    if (!isOpen(Win.CHART)) nav()?.let { openNow(Win.CHART, it) }
+                }
+                ChartOpenGate.Act.DROP -> Log.w(TAG, "CHART gate drop: no sheet window (file=${graph.sheet != null}); the chart is not opened in front of the user")
+            }
+        }
+    }
+
+    private fun openChartWhenSheetIsUp() {
+        if (chartGate.waiting) { Log.i(TAG, "CHART gate already waiting"); return }
+        Log.i(TAG, "CHART gate ask sheet=${state[Win.SHEET]} resumedAt=${resumedAt[Win.SHEET]}")
+        chartGate.ask(SystemClock.elapsedRealtime())
+        main.removeCallbacks(chartTick)
+        main.post(chartTick)
     }
 
     /**
