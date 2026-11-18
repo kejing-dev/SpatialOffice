@@ -42,11 +42,7 @@
     <string name="browse_grant_head" formatted="false">只看得到这个应用自己建的文件</string>
     <string name="browse_grant_sub" formatted="false">允许「所有文件访问」后，这里会列出 Download 和 Documents 里别的应用放进来的文件。也可以点「打开文件…」单独选一个。</string>
     <string name="browse_grant_btn" formatted="false">去允许</string>
-    <string name="br_off_head">这一版还没有接入%1$s</string>
-    <string name="br_off_sub" formatted="false">等应用身份登记好之后再开放。本机文件不受影响。</string>
     <string name="account_sub" formatted="false">可选。不连接也能打开、编辑、保存本机文件</string>
-    <string name="acct_off" formatted="false">这一版还没有接入。之后可以：浏览和直接打开云端文件，改完保存回去</string>
-    <string name="acct_soon" formatted="false">还没开放</string>
     <string name="scope_head" formatted="false">连接后应用能做什么</string>
     <string name="scope_sub" formatted="false">浏览你的文件夹，打开你点的文件，把改动保存回原处。授权在对方的官方页面上完成，密码不经过这个应用；登录凭证加密存在这台设备上，退出就删除。</string>
     <string name="set_language" formatted="false">语言 Language</string>
@@ -224,7 +220,7 @@
     <string name="slide_n">第 %1$d 页</string>
     <string name="slide_title_ph" formatted="false">点这里写标题</string>
     <string name="slide_body_ph" formatted="false">点这里写内容</string>
-    <string name="slide_other" formatted="false">这里还不能显示的对象（只读，文件里原样不动）</string>
+    <string name="slide_other" formatted="false">这里还不能显示内容的对象（能挪位置、改大小，内容原样不动）</string>
     <string name="last_slide" formatted="false">至少留一页</string>
     <string name="arr_row" formatted="false">并排</string>
     <string name="arr_arc" formatted="false">环绕</string>
@@ -300,10 +296,8 @@
     <string name="acct_expired" formatted="false">登录已过期。改动留在这台设备上，重新登录后保存上去</string>
     <string name="acct_expired_note" formatted="false">登录已过期，改动没有丢，重新登录后再保存</string>
     <string name="acct_failed">没连上：%1$s</string>
-    <string name="acct_need_reg">需要开发者先登记应用（在 local.properties 填 %1$s，见 README）</string>
-    <string name="acct_need_reg_toast">%1$s：需要开发者先登记应用，在 local.properties 填 %2$s 后重新打包</string>
     <string name="acct_no_browser" formatted="false">这台设备上没有能打开登录页的浏览器</string>
-    <string name="acct_off_now" formatted="false">没有连接。点 [连接] 在浏览器里登录，密码不经过这个应用</string>
+    <string name="acct_off_now" formatted="false">没有连接。点 [连接] 会打开浏览器登录，密码不经过这个应用</string>
     <string name="acct_on">已连接：%1$s</string>
     <string name="acct_relogin" formatted="false">重新登录</string>
     <string name="acct_revoked" formatted="false">授权被取消了，凭证已删除。改动留在这台设备上</string>
@@ -315,8 +309,6 @@
     <string name="align_justify" formatted="false">两端对齐</string>
     <string name="align_left" formatted="false">左对齐</string>
     <string name="align_right" formatted="false">右对齐</string>
-    <string name="br_reg_head" formatted="false">这个位置还不能用</string>
-    <string name="br_reg_sub">开发者要先到对方的开发者后台登记应用，把应用 ID 填进 local.properties 的 %1$s，再重新打包。README「连接账号」写了每家去哪登记、回调地址填什么。</string>
     <string name="chart_bar" formatted="false">柱状图</string>
     <string name="chart_line" formatted="false">折线图</string>
     <string name="chart_n_of">%1$d / %2$d</string>
@@ -426,9 +418,9 @@
     <string name="how_to_slides_hand" formatted="false">捏住缩略图停一下再拖，松手就放下</string>
     <string name="how_to_slides_ctrl" formatted="false">扳机按住缩略图停一下再拖，松开就放下</string>
     <string name="how_to_cloud" formatted="false">连接云盘</string>
-    <string name="how_to_cloud_keys" formatted="false">主页「账号与云盘」点 [连接]，在浏览器里登录同意；「浏览」上面切到那个云盘</string>
-    <string name="how_to_cloud_hand" formatted="false">捏 [连接]，在浏览器页面里同意；回来在「浏览」里捏云盘里的文件</string>
-    <string name="how_to_cloud_ctrl" formatted="false">扳机点 [连接]，在浏览器页面里同意；回来在「浏览」里点云盘里的文件</string>
+    <string name="how_to_cloud_keys" formatted="false">主页「账号与云盘」点 [连接]，浏览器打开登录页，同意后自动回来；「浏览」上面切到那个云盘</string>
+    <string name="how_to_cloud_hand" formatted="false">捏 [连接]，在弹出的浏览器页面里同意；回来在「浏览」里捏云盘里的文件</string>
+    <string name="how_to_cloud_ctrl" formatted="false">扳机点 [连接]，在弹出的浏览器页面里同意；回来在「浏览」里点云盘里的文件</string>
     <string name="theme_item">主题：%1$s</string>
     <string name="style_h2_short" formatted="false">标题 2</string>
     <string name="style_bullet_short" formatted="false">项目符号</string>
@@ -436,7 +428,6 @@
     <string name="group_quick_new" formatted="false">新建一个</string>
     <string name="new_open_head" formatted="false">已经有文件了？</string>
     <string name="new_open_sub" formatted="false">直接打开 .docx / .xlsx / .pptx，改完存回同一个文件</string>
-    <string name="acct_need_reg_tapped">刚点了 [连接]：要开发者先登记应用（在 local.properties 填 %1$s），登记前连不上</string>
     <string name="scan_failed">拿不到二维码：%1$s</string>
     <string name="feishu_app_folder" formatted="false">空间办公</string>
     <string name="feishu_inbox_folder" formatted="false">收件夹</string>
@@ -444,10 +435,8 @@
     <string name="open" formatted="false">打开</string>
     <string name="inbox_sub" formatted="false">电脑上放进来的文档在这里</string>
     <string name="connect_title">连接%1$s</string>
-    <string name="connect_need_reg">需要开发者先登记应用：在 local.properties 填 %1$s 后重新打包。登记前两种方式都用不了</string>
-    <string name="way_scan" formatted="false">用手机或电脑扫码（推荐）</string>
+    <string name="way_scan" formatted="false">用手机或电脑扫码</string>
     <string name="way_scan_sub" formatted="false">头显上只显示二维码和代码，在另一台设备上同意</string>
-    <string name="way_scan_none">%1$s 不支持扫码，请用浏览器登录</string>
     <string name="way_browser" formatted="false">在头显的浏览器里登录</string>
     <string name="way_browser_sub" formatted="false">打开对方的官方登录页，同意后自动回到这里</string>
     <string name="connect_no_password" formatted="false">这里不会让你输入密码</string>
@@ -481,4 +470,29 @@
     <string name="copy_beside_title" formatted="false">原文件没动，另存了一份</string>
     <string name="copy_beside_msg">飞书没让这个文件原地更新。「%1$s」原样留着，你的改动存成了旁边的「%2$s」，之后保存都写进这份副本。</string>
     <string name="how_to_cloud_note" formatted="false">飞书云盘文件不能原地更新时：原文件不动，改动另存为同一文件夹里的「名字 (空间办公 副本)」，并弹窗告诉你</string>
+    <string name="too_many_open">这类文件已经开了 %1$d 个，先关掉一个再开</string>
+    <string name="already_open">%1$s 已经开着，就是这扇窗口</string>
+    <string name="how_to_object" formatted="false">挪动、缩放插入的东西</string>
+    <string name="how_to_object_keys" formatted="false">点一下选中，按住拖动就挪位置；拖四个角上的圆点改大小。文档里的图片和表格点一下再拖角</string>
+    <string name="how_to_object_hand" formatted="false">看着它捏住拖动；改大小就捏住角上的圆点拖</string>
+    <string name="how_to_object_ctrl" formatted="false">射线指着它按住扳机拖动；改大小就按住角上的圆点拖</string>
+    <string name="how_to_multi" formatted="false">同时开几个文件</string>
+    <string name="how_to_multi_keys" formatted="false">在「最近」「浏览」里接着点别的文件：每个文件一扇窗，互不顶掉。新窗口开在正前方，先开的在它后面；标题栏 [窗口 n] 里点文件名切过去，点 [主页] 回主页</string>
+    <string name="how_to_multi_hand" formatted="false">捏标题栏的 [窗口 n] 再捏文件名；想并排看就选 [并排摆开]，或捏住窗口下面的小圆点把它挪开</string>
+    <string name="how_to_multi_ctrl" formatted="false">扳机点标题栏的 [窗口 n] 再点文件名；想并排看就选 [并排摆开]，或按住窗口下面的小圆点把它挪开</string>
+    <string name="slide_table" formatted="false">表格</string>
+    <string name="obj_move" formatted="false">拖动移动</string>
+    <string name="obj_resize" formatted="false">拖动改大小</string>
+    <string name="obj_hint" formatted="false">已选中：拖动挪位置，拖角上的圆点改大小</string>
+    <string name="slide_cell_ph" formatted="false">点这里输入</string>
+    <string name="win_menu">窗口 %1$d</string>
+    <string name="win_home" formatted="false">主页</string>
+    <string name="win_side_by_side" formatted="false">并排摆开</string>
+    <string name="others_behind">另外 %1$d 个文件在后面，标题栏 [窗口] 里切换</string>
+    <string name="open_now" formatted="false">已打开</string>
+    <string name="acct_how_head" formatted="false">点 [连接] 会打开浏览器</string>
+    <string name="acct_how_sub" formatted="false">在对方的官方登录页里登录、同意，然后自动回到这里。这里不会让你输入密码</string>
+    <string name="browse_sub_local" formatted="false">这台设备上的文件。打开后保存写回原来的位置</string>
+    <string name="about_sub_local">版本 %1$s · 兼容 .docx / .xlsx / .pptx（开放标准）· 本机文件全部离线可用</string>
+    <string name="set_legal_local" formatted="false">提到的文件格式名称，只用来说明兼容。本应用和这些名称的权利人没有隶属或背书关系。</string>
 </resources>

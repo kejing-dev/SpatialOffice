@@ -11,6 +11,8 @@ import java.util.concurrent.ConcurrentHashMap
  * Container instance ids (v0.2.4, QA #4 q4-2). The placement list the system hands to a WindowContainer keeps
  * windows that were already destroyed, under the same name. Each window reports its own instance id here when its
  * content is created and when it is destroyed, and the chart placement anchors only to the live instance.
+ * v0.2.5: the name is the window's key ([Containers.key]: container id plus the file's tag), since several editor
+ * windows share one container id.
  *
  * The SDK has the id on both sides but keeps the getters `internal` (`Activity.retrieveSpatialContainer()`, `SpatialContainer.containerId`,
  * `ContainerProxy.containerId`), so they are read by reflection; -1 when that fails (then the old name-only rule).

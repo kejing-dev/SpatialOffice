@@ -49,9 +49,9 @@ import io.embodit.spatialoffice.platform.Win
 
 /** Cloud dialogs of the home window (PRD §9.2 ②, ③a, ⑤) and of the editors (§9.3 conflict). */
 @Composable
-fun CloudOverlays(graph: Graph, win: Win) {
+fun CloudOverlays(graph: Graph, win: Win, tag: String? = null) {
     val o = graph.overlay ?: return
-    if (o.win != win) return
+    if (o.win != win || (o.tag != null && tag != null && o.tag != tag)) return
     when (o) {
         is Overlay.Connect -> ConnectDialog(graph, o.provider)
         is Overlay.Scan -> ScanDialog(graph, o.provider)
@@ -79,38 +79,25 @@ private fun WayRow(icon: Int, title: String, sub: String, tag: String, enabled: 
     }
 }
 
-/** ② Choose a way. Unregistered services show the same choice greyed out, with what the developer must register. */
+/** Another way to sign in, reached from the scan dialog: the code again, or the service's page in the browser. */
 @Composable
 private fun ConnectDialog(graph: Graph, p: Provider) {
     val a = graph.accounts
     val name = tr(Accounts.nameRes(p))
-    val registered = a.registration(p).registered
     val scan = DeviceAuth.supported(p)
     AlertDialog(
         onDismissRequest = { graph.overlay = null },
         title = { Txt(tr(R.string.connect_title, name), "connect/title", style = PicoTheme.typography.headlineSmall, weight = FontWeight.Bold, maxLines = 2) },
         content = {
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (!registered) {
-                    Row(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(PicoTheme.colorScheme.fillSecondary).padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(painter = painterResource(R.drawable.ic_info_circle), contentDescription = null, modifier = Modifier.size(22.dp))
-                        Txt(tr(R.string.connect_need_reg, a.configKey(p)), "connect/need-reg", Modifier.padding(start = 12.dp), style = PicoTheme.typography.bodyLarge, maxLines = 4)
-                    }
-                }
-                WayRow(
-                    R.drawable.ic_qr, tr(R.string.way_scan), if (scan) tr(R.string.way_scan_sub) else tr(R.string.way_scan_none, name),
-                    "connect/scan", enabled = registered && scan,
-                ) { a.connectByScan(p) }
-                WayRow(R.drawable.ic_globe, tr(R.string.way_browser), tr(R.string.way_browser_sub), "connect/browser", enabled = registered) { a.connectInBrowser(p) }
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                WayRow(R.drawable.ic_globe, tr(R.string.way_browser), tr(R.string.way_browser_sub), "connect/browser", enabled = true) { a.connectInBrowser(p) }
+                if (scan) WayRow(R.drawable.ic_qr, tr(R.string.way_scan), tr(R.string.way_scan_sub), "connect/scan", enabled = true) { a.connectByScan(p) }
                 Txt(tr(R.string.connect_no_password), "connect/no-password", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
             }
         },
         buttons = {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                SecondaryButton(tr(if (registered) R.string.cancel else R.string.got_it), "connect/close", onClick = { graph.overlay = null })
+                SecondaryButton(tr(R.string.cancel), "connect/close", onClick = { graph.overlay = null })
             }
         },
     )

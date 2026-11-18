@@ -1,5 +1,14 @@
 # Changelog · 更新记录
 
+## v0.2.5 · 2026-11-18
+
+- 演示里插入的文本框、图片、形状、表格：点一下选中，按住拖动挪位置，拖四个角上的圆点改大小；演示里可以插入表格并逐格输入；文档里的图片和表格也能拖角改大小
+- 同时开几个文件：每个文件一扇窗，开第二个文档 / 表格 / 演示不再顶掉第一个；再点已经开着的文件，它的窗口回到面前；标题栏 [窗口 n] 切换、回主页、并排摆开
+- 连接账号：点 [连接] 直接弹出系统浏览器登录；打包时没放应用 ID 的服务在应用里不再出现，配置说明只留在 README
+- Text boxes, pictures, shapes and tables on a slide can be dragged and resized by their corners; slides get tables; document pictures and tables resize too
+- Several files at once: one window per file, nothing is replaced; opening an open file brings its window forward; Windows n in the title bar switches, goes Home or sets them side by side
+- Connect opens the system browser; services without a client id at build time are no longer shown, and the setup notes live in the README only
+
 ## v0.2.4 · 2026-11-17
 
 - 3D 图表在后台准备、分批放进场景，打开时不再卡住或弹「没有响应」；图表始终挂在当前表格窗口上方，预演、铺开回来也不压住表格

@@ -300,7 +300,7 @@ internal object ChartResources {
 
     /** Starts making the resources of the sheet's current chart (both types) in the background. */
     fun prewarm(graph: Graph) {
-        val s = graph.sheet ?: return
+        val s = graph.chartSheet ?: return
         val chart = runCatching { s.book.charts().getOrNull(graph.chartIndex) }.getOrNull() ?: return
         val row = s.row; val col = s.col
         graph.scope.launch(Dispatchers.Default) {
@@ -356,7 +356,7 @@ internal class MainWatch(private val label: String) : Choreographer.FrameCallbac
 @Composable
 fun ChartVolume() {
     WindowFrame(Win.CHART) { graph ->
-        val s = graph.sheet
+        val s = graph.chartSheet
         val context = LocalContext.current
         val scene = remember { ChartScene().also { it.openedAt = graph.windows.chartAskedAt.takeIf { a -> a > 0 } ?: SystemClock.uptimeMillis() } }
         // q4-1: watch the main thread from the volume's first frame until 3 s after the chart is built
@@ -379,7 +379,7 @@ fun ChartVolume() {
                     detectSpatialTapGesture(context = context, targetedToEntity = TargetEntity.any()) { v ->
                         val m = scene.markOf(v.targetEntity)
                         Log.i(TAG, "CHART tap mark=$m")
-                        if (m != null && s != null && m.row >= 0) { s.select(m.row, m.col); graph.windows.open(Win.SHEET) }
+                        if (m != null && s != null && m.row >= 0) { s.select(m.row, m.col); graph.windows.front(graph.refOf(s)) }
                     }
                 },
             attachments = {
@@ -437,7 +437,7 @@ private fun ChartControls(graph: Graph, s: SheetSession?, chart: ChartInfo?) {
             ToolIcon(R.drawable.ic_arrow_left, tr(R.string.chart_turn_left), onClick = { graph.chartYaw -= 30f }, size = BUTTON)
             ToolIcon(R.drawable.ic_arrow_right, tr(R.string.chart_turn_right), onClick = { graph.chartYaw += 30f }, size = BUTTON)
             ToolIcon(R.drawable.ic_rotate, tr(R.string.chart_reset), onClick = { graph.chartYaw = CHART_DEFAULT_YAW }, size = BUTTON)
-            ToolIcon(R.drawable.ic_cross, tr(R.string.chart_close), onClick = { graph.windows.close(Win.CHART) }, size = BUTTON)
+            ToolIcon(R.drawable.ic_cross, tr(R.string.chart_close), onClick = { graph.windows.close(io.embodit.spatialoffice.platform.WinRef(Win.CHART)) }, size = BUTTON)
         }
     }
 }

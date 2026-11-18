@@ -106,6 +106,35 @@ object WindowFit {
     /** What QA #2 saw: the volume Placement.none() in front, on top of the sheet. */
     fun chartInFront(): Box = Box(0.0, -EYE_DROP, -DISTANCE, 0.76, 0.60, 0.48)
 
+    // ---- v0.2.5: several windows of one kind (headset 2026-11-17: "word 文档也不能多开") ----
+
+    /** The brief's scale for the same checks ("按约 1.5 mm/dp 算"); [M_PER_DP] is what the emulator measured. */
+    const val M_PER_DP_BRIEF = 0.0015
+
+    /**
+     * Where the system can put a second window (emulator trials 2026-11-18, build/v0.2.5/placement-trials.md):
+     *  - `Placement.none()`: the same spot in front. The window that was there is taken off stage (hidden) until
+     *    the new one is moved or closed. All of the new window is in view: [frontWindow].
+     *  - `Placement.right / left(anchor, gap ≥ 0)`: beside the anchor on the circle around the user, turned to face
+     *    them: [besideYaw]. For every editor size that is mostly outside ±39°.
+     *  - a negative gap (overlapping, staggered windows): the window is not shown at all (`isSighted=false`).
+     * So a new window opens in front, and the windows are switched with the title bar's [Windows] menu, which can
+     * also set them out side by side when the user asks for that.
+     */
+    enum class Second { FRONT, BESIDE }
+
+    /** Yaw range (degrees, to the side the window is on) of a [wDp] wide window placed beside a [anchorWDp] wide one in front. */
+    fun besideYaw(anchorWDp: Double, wDp: Double, gapDp: Double, mPerDp: Double = M_PER_DP): Pair<Double, Double> {
+        // on the circle of radius DISTANCE, widths are arcs: the anchor's half arc, the gap, then the window's own arc
+        fun deg(dp: Double) = Math.toDegrees(dp * mPerDp / DISTANCE)
+        val near = deg(anchorWDp / 2 + gapDp)
+        return near to near + deg(wDp)
+    }
+
+    /** What the app does with a second window of a kind: in front, because beside is out of the default view. */
+    fun secondWindow(anchorWDp: Double, wDp: Double, gapDp: Double = 24.0): Second =
+        if (besideYaw(anchorWDp, wDp, gapDp, M_PER_DP_BRIEF).second <= HALF_FOV) Second.BESIDE else Second.FRONT
+
     /** Screen rectangle (yaw / pitch degrees) of a box's 8 projected corners. */
     data class Rect(val left: Double, val right: Double, val bottom: Double, val top: Double) {
         fun overlaps(o: Rect): Boolean = left < o.right && o.left < right && bottom < o.top && o.bottom < top

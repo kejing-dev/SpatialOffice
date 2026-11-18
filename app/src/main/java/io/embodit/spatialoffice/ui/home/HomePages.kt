@@ -47,12 +47,16 @@ import io.embodit.spatialoffice.ui.Txt
 
 @Composable
 internal fun BrowsePage(graph: Graph) {
-    PageHeader(tr(R.string.nav_browse), tr(R.string.browse_sub), "browse")
+    // cloud drives are mentioned only where this build offers one (v0.2.5)
+    PageHeader(tr(R.string.nav_browse), tr(if (graph.accounts.shown.isEmpty()) R.string.browse_sub_local else R.string.browse_sub), "browse")
     PageBody {
-        val locs = listOf(R.string.loc_device, R.string.loc_feishu, R.string.loc_gdrive, R.string.loc_onedrive, R.string.loc_dropbox)
-        // where to look, inside this one page (the page itself is chosen in the side navigation)
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Segments(locs.mapIndexed { i, id -> i to tr(id) }, graph.browseLoc, "browse/loc", itemWidth = 136.dp) { graph.browseLoc = it; graph.browseDir = null }
+        // where to look, inside this one page (the page itself is chosen in the side navigation). v0.2.5: besides the
+        // device, only the cloud drives this build can connect to; with none there is nothing to choose and no row
+        val shown = graph.accounts.shown
+        val locs = listOf(0 to R.string.loc_device) + shown.map { (it.ordinal + 1) to io.embodit.spatialoffice.platform.Accounts.nameRes(it) }
+        if (graph.browseLoc != 0 && locs.none { it.first == graph.browseLoc }) graph.browseLoc = 0
+        if (shown.isNotEmpty()) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Segments(locs.map { (i, id) -> i to tr(id) }, graph.browseLoc, "browse/loc", itemWidth = 136.dp) { graph.browseLoc = it; graph.browseDir = null }
         }
         if (graph.browseLoc != 0) {
             CloudBrowsePage(graph, io.embodit.spatialoffice.core.cloud.Provider.values()[graph.browseLoc - 1])
@@ -151,10 +155,11 @@ internal fun SettingsPage(graph: Graph) {
                 SecondaryButton(tr(R.string.shortcuts), "settings/keys", icon = R.drawable.ic_keyboard_fill, onClick = { graph.overlay = Overlay.Shortcuts(Win.HOME) })
             }
         }
-        SettingRow(tr(R.string.about), tr(R.string.about_sub, BuildConfig.VERSION_NAME), "settings/about") {
+        val cloud = graph.accounts.shown.isNotEmpty()
+        SettingRow(tr(R.string.about), tr(if (cloud) R.string.about_sub else R.string.about_sub_local, BuildConfig.VERSION_NAME), "settings/about") {
             SecondaryButton(tr(R.string.exit_app), "settings/exit", icon = R.drawable.ic_power, onClick = { graph.requestExit() })
         }
-        Txt(tr(R.string.set_legal), "settings/legal", style = PicoTheme.typography.bodySmall, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
+        Txt(tr(if (cloud) R.string.set_legal else R.string.set_legal_local), "settings/legal", style = PicoTheme.typography.bodySmall, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
     }
 }
 
@@ -195,9 +200,12 @@ private fun HowToSheet(graph: Graph) {
         listOf(R.drawable.ic_check_circle, R.string.how_to_save, R.string.how_to_save_keys, R.string.how_to_save_hand, R.string.how_to_save_ctrl),
         listOf(R.drawable.ic_spread, R.string.how_to_spread, R.string.how_to_spread_keys, R.string.how_to_spread_hand, R.string.how_to_spread_ctrl),
         listOf(R.drawable.ic_chart_3d, R.string.how_to_chart, R.string.how_to_chart_keys, R.string.how_to_chart_hand, R.string.how_to_chart_ctrl),
+        // v0.2.5: move / resize what was inserted; several files side by side
+        listOf(R.drawable.ic_move, R.string.how_to_object, R.string.how_to_object_keys, R.string.how_to_object_hand, R.string.how_to_object_ctrl),
+        listOf(R.drawable.ic_stack, R.string.how_to_multi, R.string.how_to_multi_keys, R.string.how_to_multi_hand, R.string.how_to_multi_ctrl),
         listOf(R.drawable.ic_cloud, R.string.how_to_cloud, R.string.how_to_cloud_keys, R.string.how_to_cloud_hand, R.string.how_to_cloud_ctrl),
         listOf(R.drawable.ic_expand, R.string.how_to_move, R.string.how_to_move_keys, R.string.how_to_move_hand, R.string.how_to_move_ctrl),
-    )
+    ).filter { it[1] != R.string.how_to_cloud || graph.accounts.shown.isNotEmpty() } // cloud drives only where this build offers one
     Sheet(
         onDismissRequest = { graph.overlay = null },
         leadingAction = { io.embodit.spatialoffice.ui.SheetClose { graph.overlay = null } },
@@ -239,8 +247,6 @@ private fun CloudBrowsePage(graph: Graph, p: io.embodit.spatialoffice.core.cloud
     if (!a.connected(p)) {
         Spacer(Modifier.height(12.dp))
         io.embodit.spatialoffice.ui.home.AccountRow(graph, p)
-        if (a.state(p) == io.embodit.spatialoffice.platform.AcctState.UNREGISTERED)
-            InfoRow(R.drawable.ic_info_circle, tr(R.string.br_reg_head), tr(R.string.br_reg_sub, a.configKey(p)), "browse/reg")
         // what this place will hold once connected, what the app may do there, and that local files do not wait (q1-6)
         InfoRow(R.drawable.ic_folder, tr(R.string.br_after_head), tr(if (p == io.embodit.spatialoffice.core.cloud.Provider.FEISHU) R.string.br_after_feishu else R.string.br_after_other), "browse/after")
         InfoRow(R.drawable.ic_lock, tr(R.string.scope_head), tr(R.string.scope_sub), "browse/scope")

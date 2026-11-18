@@ -71,7 +71,8 @@ fun HomeWindow() {
                     NavItem(graph, HomePage.RECENT, R.drawable.ic_history, R.string.nav_recent)
                     NavItem(graph, HomePage.BROWSE, R.drawable.ic_folder, R.string.nav_browse)
                     NavItem(graph, HomePage.NEW, R.drawable.ic_plus, R.string.nav_new)
-                    NavItem(graph, HomePage.ACCOUNT, R.drawable.ic_cloud, R.string.nav_account)
+                    // v0.2.5: only when this build can connect to a service at all (a client id was put in)
+                    if (graph.accounts.shown.isNotEmpty()) NavItem(graph, HomePage.ACCOUNT, R.drawable.ic_cloud, R.string.nav_account)
                     NavItem(graph, HomePage.SETTINGS, R.drawable.ic_pico_settings_fill, R.string.nav_settings)
                 }
             }
@@ -80,7 +81,7 @@ fun HomeWindow() {
                     HomePage.RECENT -> RecentPage(graph)
                     HomePage.BROWSE -> BrowsePage(graph)
                     HomePage.NEW -> NewPage(graph)
-                    HomePage.ACCOUNT -> AccountPage(graph)
+                    HomePage.ACCOUNT -> if (graph.accounts.shown.isNotEmpty()) AccountPage(graph) else RecentPage(graph)
                     HomePage.SETTINGS -> SettingsPage(graph)
                 }
             }
@@ -196,6 +197,9 @@ private fun RecentPage(graph: Graph) {
     }
     PageBody {
         val all = graph.recents.items
+        // v0.2.5: files that are open right now say so; clicking one brings its window to the front
+        val openKeys = graph.sessions.map { it.ref.key }.toSet()
+        val openMark = " · " + tr(R.string.open_now)
         val items = all.filter { it.cloud == null }
         val cloudItems = all.filter { it.cloud != null }
         GroupLabel(tr(R.string.group_device), "recent")
@@ -203,19 +207,22 @@ private fun RecentPage(graph: Graph) {
             InfoRow(R.drawable.ic_info_circle, tr(R.string.recent_empty), tr(R.string.first_hint), "recent/empty")
         } else {
             items.take(6).forEach { r ->
-                FileRow(r.name, kindLabel(r.kind) + " · " + r.display.substringBeforeLast('/', "").ifEmpty { r.display } + " · " + timeLabel(r.time), r.kind, tag = "recent/row") { graph.open(r.ref()) }
+                FileRow(r.name, kindLabel(r.kind) + " · " + r.display.substringBeforeLast('/', "").ifEmpty { r.display } + " · " + timeLabel(r.time) + (if (r.ref().key in openKeys) openMark else ""), r.kind, tag = "recent/row") { graph.open(r.ref()) }
             }
         }
         // few files (or none): the three new-file cards right here, so the page is a start page and not a mostly empty one (q1-6)
         if (items.size <= 3) {
             GroupLabel(tr(R.string.group_quick_new), "recent")
-            QuickNewRow(graph, cover = 96.dp)
+            // without the cloud group under it (this build offers no drive) the cards are taller, so the page is not half empty
+            QuickNewRow(graph, cover = if (graph.accounts.shown.isEmpty()) 148.dp else 96.dp)
         }
         if (!graph.settings.value.hintSeen && items.isNotEmpty()) LaunchedEffect(Unit) { graph.settings.update { it.copy(hintSeen = true) } }
-        GroupLabel(tr(R.string.group_cloud), "recent")
+        // cloud files only where a drive can be connected in this build; otherwise the page does not mention them
+        val offered = graph.accounts.shown.isNotEmpty()
+        if (offered || cloudItems.isNotEmpty()) GroupLabel(tr(R.string.group_cloud), "recent")
         if (cloudItems.isNotEmpty()) cloudItems.take(4).forEach { r ->
             FileRow(r.name, kindLabel(r.kind) + " · " + r.display.substringBefore(" › ") + " · " + timeLabel(r.time), r.kind, tag = "recent/cloud-row") { graph.open(r.ref()) }
-        } else InfoRow(R.drawable.ic_cloud, tr(if (graph.accounts.anyConnected) R.string.cloud_recent_none else R.string.cloud_none), null, "recent/cloud")
+        } else if (offered) InfoRow(R.drawable.ic_cloud, tr(if (graph.accounts.anyConnected) R.string.cloud_recent_none else R.string.cloud_none), null, "recent/cloud")
         Spacer(Modifier.height(4.dp))
         InfoRow(R.drawable.ic_info_circle, tr(R.string.entry_head), tr(R.string.entry_sub), "recent/entry")
     }
@@ -279,9 +286,14 @@ private fun NewCard(cover: Int, label: String, ext: String, tag: String, coverHe
 private fun AccountPage(graph: Graph) {
     PageHeader(tr(R.string.nav_account), tr(R.string.account_sub), "account")
     PageBody {
-        io.embodit.spatialoffice.core.cloud.Provider.values().forEach { p -> AccountRow(graph, p) }
+        val shown = graph.accounts.shown
+        shown.forEach { p -> AccountRow(graph, p) }
         Spacer(Modifier.height(4.dp))
+        // what [Connect] does and what comes of it (also keeps a page with one or two services from being half empty)
+        InfoRow(R.drawable.ic_globe, tr(R.string.acct_how_head), tr(R.string.acct_how_sub), "account/how")
+        InfoRow(R.drawable.ic_folder, tr(R.string.br_after_head), tr(if (shown.singleOrNull() == io.embodit.spatialoffice.core.cloud.Provider.FEISHU) R.string.br_after_feishu else R.string.br_after_other), "account/after")
         InfoRow(R.drawable.ic_lock, tr(R.string.scope_head), tr(R.string.scope_sub), "account/scope")
+        InfoRow(R.drawable.ic_check_circle, tr(R.string.br_local_head), tr(R.string.br_local_sub), "account/local")
     }
 }
 
@@ -292,7 +304,8 @@ internal fun AccountRow(graph: Graph, p: io.embodit.spatialoffice.core.cloud.Pro
     val info = a.info[p] ?: return
     val name = tr(io.embodit.spatialoffice.platform.Accounts.nameRes(p))
     val state = when (info.state) {
-        io.embodit.spatialoffice.platform.AcctState.UNREGISTERED -> tr(R.string.acct_need_reg, a.configKey(p))
+        // a service without a client id is never listed (Accounts.shown)
+        io.embodit.spatialoffice.platform.AcctState.UNREGISTERED -> return
         io.embodit.spatialoffice.platform.AcctState.OFF -> info.note ?: tr(R.string.acct_off_now)
         io.embodit.spatialoffice.platform.AcctState.WAITING -> tr(R.string.acct_waiting)
         io.embodit.spatialoffice.platform.AcctState.ON -> tr(R.string.acct_on, info.name.ifEmpty { name })
@@ -309,7 +322,7 @@ internal fun AccountRow(graph: Graph, p: io.embodit.spatialoffice.core.cloud.Pro
         },
         trailingContent = {
             when (info.state) {
-                io.embodit.spatialoffice.platform.AcctState.UNREGISTERED -> SecondaryButton(tr(R.string.acct_connect), "account/${p.id}/connect", onClick = { a.connect(p) })
+                io.embodit.spatialoffice.platform.AcctState.UNREGISTERED -> {}
                 io.embodit.spatialoffice.platform.AcctState.OFF -> io.embodit.spatialoffice.ui.PrimaryButton(tr(R.string.acct_connect), "account/${p.id}/connect", onClick = { a.connect(p) })
                 io.embodit.spatialoffice.platform.AcctState.WAITING -> SecondaryButton(tr(R.string.cancel), "account/${p.id}/cancel", onClick = { a.cancel(p) })
                 io.embodit.spatialoffice.platform.AcctState.ON -> SecondaryButton(tr(R.string.acct_signout), "account/${p.id}/signout", onClick = { graph.overlay = io.embodit.spatialoffice.platform.Overlay.SignOut(p) })
@@ -318,16 +331,4 @@ internal fun AccountRow(graph: Graph, p: io.embodit.spatialoffice.core.cloud.Pro
         },
         modifier = Modifier.fillMaxWidth().heightIn(min = 92.dp),
     )
-    // the last [Connect] tap, answered in place (a snackbar alone could be missed), q1 item 6
-    val tap = a.lastTap
-    if (tap == p) {
-        Row(
-            Modifier.fillMaxWidth().padding(start = 76.dp, end = 16.dp, bottom = 6.dp).clip(RoundedCornerShape(12.dp))
-                .background(PicoTheme.colorScheme.fillSecondary).padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(painter = painterResource(R.drawable.ic_info_circle), contentDescription = null, modifier = Modifier.size(20.dp))
-            Txt(tr(R.string.acct_need_reg_tapped, a.configKey(p)), "account/${p.id}/tapped", Modifier.weight(1f).padding(start = 10.dp), style = PicoTheme.typography.bodyMedium, maxLines = 3)
-        }
-    }
 }

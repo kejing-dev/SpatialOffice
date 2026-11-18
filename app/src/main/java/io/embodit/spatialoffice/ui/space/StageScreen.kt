@@ -154,7 +154,7 @@ fun stageKeys(graph: Graph, e: KeyEvent): Boolean {
 }
 
 private fun rehearsalStep(graph: Graph, delta: Int) {
-    val d = graph.deck ?: return
+    val d = graph.stageSession as? DeckSession ?: return
     d.current = (d.current + delta).coerceIn(0, d.deck.slides.size - 1)
 }
 
@@ -162,7 +162,7 @@ private fun rehearsalStep(graph: Graph, delta: Int) {
 @Composable
 private fun PiecePanel(graph: Graph, index: Int?) {
     index ?: return
-    val s = graph.session(graph.stageKind) ?: return
+    val s = graph.stageSession ?: return
     s.version
     val focused = index == graph.focus
     val (w, h) = StagePanels.pieceDp(graph.stageKind)
@@ -176,16 +176,16 @@ private fun PiecePanel(graph: Graph, index: Int?) {
             is DocSession -> {
                 val focus = remember(s) { DocFocus() }
                 val section = s.sections().getOrNull(index) ?: emptyList()
-                Paper(s, if (focused) focus else null, Modifier.fillMaxSize().onPreviewKeyEvent { e -> focused && commonKeys(graph, Win.DOC, e) }, blocks = section)
+                Paper(s, if (focused) focus else null, Modifier.fillMaxSize().onPreviewKeyEvent { e -> focused && commonKeys(graph, s, e) }, blocks = section)
             }
             is SheetSession -> {
                 val edit = remember(s) { CellEdit() }
-                Column(Modifier.fillMaxSize().padding(12.dp).onPreviewKeyEvent { e -> focused && (commonKeys(graph, Win.SHEET, e) || sheetKeys(graph, s, edit, e)) }) {
+                Column(Modifier.fillMaxSize().padding(12.dp).onPreviewKeyEvent { e -> focused && (commonKeys(graph, s, e) || sheetKeys(graph, s, edit, e)) }) {
                     if (focused) { FormulaBar(s, edit, Modifier.fillMaxWidth()); Box(Modifier.height(8.dp)) }
                     SheetGrid(s, if (focused) edit else null, index * SheetSession.COLS_PER_PIECE, SheetSession.COLS_PER_PIECE, Modifier.fillMaxWidth().weight(1f))
                 }
             }
-            is DeckSession -> Box(Modifier.fillMaxSize().onPreviewKeyEvent { e -> focused && commonKeys(graph, Win.SLIDES, e) }, contentAlignment = Alignment.Center) {
+            is DeckSession -> Box(Modifier.fillMaxSize().onPreviewKeyEvent { e -> focused && commonKeys(graph, s, e) }, contentAlignment = Alignment.Center) {
                 SlideCanvas(s, index, w.dp, editable = focused)
             }
             else -> {}
@@ -203,7 +203,7 @@ private fun Glass(width: Int, height: Int, content: @Composable () -> Unit) {
 /** Layout bar under the focused piece: arrangement, previous / next piece, bring back to front, collapse. */
 @Composable
 private fun LayoutBar(graph: Graph) {
-    val count = graph.session(graph.stageKind)?.pieceCount ?: 0
+    val count = graph.stageSession?.pieceCount ?: 0
     Glass(1000, 112) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Segments(
@@ -230,7 +230,7 @@ private fun elapsedLabel(startMs: Long): String {
 
 @Composable
 private fun RehearsalBar(graph: Graph) {
-    val d = graph.deck ?: return
+    val d = graph.stageSession as? DeckSession ?: return
     d.version
     Glass(820, 112) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -247,14 +247,14 @@ private fun RehearsalBar(graph: Graph) {
 
 @Composable
 private fun RehearsalScreen(graph: Graph) {
-    val d = graph.deck ?: return
+    val d = graph.stageSession as? DeckSession ?: return
     d.version
     SlideCanvas(d, d.current, 960.dp, editable = false)
 }
 
 @Composable
 private fun RehearsalNotes(graph: Graph) {
-    val d = graph.deck ?: return
+    val d = graph.stageSession as? DeckSession ?: return
     d.version
     val notes = d.deck.slides.getOrNull(d.current)?.notes.orEmpty()
     Box(Modifier.size(568.dp, 704.dp).clip(RoundedCornerShape(28.dp)).backgroundMaterial(enable = true, style = Material.Regular)) {
@@ -268,7 +268,7 @@ private fun RehearsalNotes(graph: Graph) {
 
 @Composable
 private fun RehearsalNext(graph: Graph) {
-    val d = graph.deck ?: return
+    val d = graph.stageSession as? DeckSession ?: return
     d.version
     val last = d.current >= d.deck.slides.size - 1
     Box(Modifier.size(568.dp, 704.dp).clip(RoundedCornerShape(28.dp)).backgroundMaterial(enable = true, style = Material.Regular)) {

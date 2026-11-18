@@ -39,11 +39,7 @@ browse_empty	这个文件夹里没有能打开的文件	No files that can be ope
 browse_grant_head	只看得到这个应用自己建的文件	Only files this app created are visible
 browse_grant_sub	允许「所有文件访问」后，这里会列出 Download 和 Documents 里别的应用放进来的文件。也可以点「打开文件…」单独选一个。	Allow “All files access” to list files that other apps put in Download and Documents. Or use “Open file…” to pick a single file.
 browse_grant_btn	去允许	Allow
-br_off_head	这一版还没有接入%1$s	%1$s is not available in this version
-br_off_sub	等应用身份登记好之后再开放。本机文件不受影响。	It opens once the app identity is registered. Local files are not affected.
 account_sub	可选。不连接也能打开、编辑、保存本机文件	Optional. Local files open, edit and save without any account
-acct_off	这一版还没有接入。之后可以：浏览和直接打开云端文件，改完保存回去	Not available in this version. Later: browse and open cloud files directly and save changes back
-acct_soon	还没开放	Not yet
 scope_head	连接后应用能做什么	What the app can do once connected
 scope_sub	浏览你的文件夹，打开你点的文件，把改动保存回原处。授权在对方的官方页面上完成，密码不经过这个应用；登录凭证加密存在这台设备上，退出就删除。	Browse your folders, open the files you pick and save changes back in place. Approval happens on the provider’s own page; your password never passes through this app. The token is encrypted on this device and deleted on sign-out.
 set_language	语言 Language	语言 Language
@@ -221,7 +217,7 @@ slide_down	下移一页	Move slide down
 slide_n	第 %1$d 页	Slide %1$d
 slide_title_ph	点这里写标题	Click to add a title
 slide_body_ph	点这里写内容	Click to add text
-slide_other	这里还不能显示的对象（只读，文件里原样不动）	An object that cannot be shown here yet (read-only, untouched in the file)
+slide_other	这里还不能显示内容的对象（能挪位置、改大小，内容原样不动）	An object whose content cannot be shown here yet (it can be moved and resized; its content is untouched)
 last_slide	至少留一页	Keep at least one slide
 arr_row	并排	Row
 arr_arc	环绕	Arc
@@ -297,10 +293,8 @@ acct_connected_toast	已连接%1$s：%2$s	Connected to %1$s: %2$s
 acct_expired	登录已过期。改动留在这台设备上，重新登录后保存上去	Sign-in expired. Changes stay on this device and are saved once you sign in again
 acct_expired_note	登录已过期，改动没有丢，重新登录后再保存	Sign-in expired. Nothing is lost; sign in again, then save
 acct_failed	没连上：%1$s	Could not connect: %1$s
-acct_need_reg	需要开发者先登记应用（在 local.properties 填 %1$s，见 README）	The developer has to register the app first (set %1$s in local.properties, see README)
-acct_need_reg_toast	%1$s：需要开发者先登记应用，在 local.properties 填 %2$s 后重新打包	%1$s: the developer has to register the app first. Set %2$s in local.properties and rebuild
 acct_no_browser	这台设备上没有能打开登录页的浏览器	No browser on this device can open the sign-in page
-acct_off_now	没有连接。点 [连接] 在浏览器里登录，密码不经过这个应用	Not connected. Click Connect to sign in in the browser; your password never passes through this app
+acct_off_now	没有连接。点 [连接] 会打开浏览器登录，密码不经过这个应用	Not connected. Connect opens the browser to sign in; your password never passes through this app
 acct_on	已连接：%1$s	Connected: %1$s
 acct_relogin	重新登录	Sign in again
 acct_revoked	授权被取消了，凭证已删除。改动留在这台设备上	Access was revoked and the token deleted. Changes stay on this device
@@ -312,8 +306,6 @@ align_center	居中	Centre
 align_justify	两端对齐	Justify
 align_left	左对齐	Align left
 align_right	右对齐	Align right
-br_reg_head	这个位置还不能用	This place is not available yet
-br_reg_sub	开发者要先到对方的开发者后台登记应用，把应用 ID 填进 local.properties 的 %1$s，再重新打包。README「连接账号」写了每家去哪登记、回调地址填什么。	The developer first registers the app in the provider’s developer console, puts the ID in %1$s in local.properties and rebuilds. README “Connecting accounts” lists where to register and which callback address to enter.
 chart_bar	柱状图	Column chart
 chart_line	折线图	Line chart
 chart_n_of	%1$d / %2$d	%1$d / %2$d
@@ -423,9 +415,9 @@ how_to_slides_keys	按住左边缩略图拖到新位置；或 [页面] › [上�
 how_to_slides_hand	捏住缩略图停一下再拖，松手就放下	Pinch and hold a thumbnail, then drag; let go to drop it
 how_to_slides_ctrl	扳机按住缩略图停一下再拖，松开就放下	Hold the trigger on a thumbnail, then drag; release to drop it
 how_to_cloud	连接云盘	Connect a cloud drive
-how_to_cloud_keys	主页「账号与云盘」点 [连接]，在浏览器里登录同意；「浏览」上面切到那个云盘	Home › Accounts & drives › Connect, approve in the browser; then switch Browse to that drive
-how_to_cloud_hand	捏 [连接]，在浏览器页面里同意；回来在「浏览」里捏云盘里的文件	Pinch Connect and approve on the browser page; back here, pinch a file under Browse
-how_to_cloud_ctrl	扳机点 [连接]，在浏览器页面里同意；回来在「浏览」里点云盘里的文件	Trigger on Connect and approve on the browser page; back here, trigger on a file under Browse
+how_to_cloud_keys	主页「账号与云盘」点 [连接]，浏览器打开登录页，同意后自动回来；「浏览」上面切到那个云盘	Home › Accounts & drives › Connect: the browser opens the sign-in page and comes back once you approve; then switch Browse to that drive
+how_to_cloud_hand	捏 [连接]，在弹出的浏览器页面里同意；回来在「浏览」里捏云盘里的文件	Pinch Connect and approve on the browser page that opens; back here, pinch a file under Browse
+how_to_cloud_ctrl	扳机点 [连接]，在弹出的浏览器页面里同意；回来在「浏览」里点云盘里的文件	Trigger on Connect and approve on the browser page that opens; back here, trigger on a file under Browse
 theme_item	主题：%1$s	Theme: %1$s
 # v0.2.1
 style_h2_short	标题 2	Heading 2
@@ -434,7 +426,6 @@ style_numbered_short	编号	Numbered
 group_quick_new	新建一个	Start a new file
 new_open_head	已经有文件了？	Already have a file?
 new_open_sub	直接打开 .docx / .xlsx / .pptx，改完存回同一个文件	Open a .docx / .xlsx / .pptx and save back to the same file
-acct_need_reg_tapped	刚点了 [连接]：要开发者先登记应用（在 local.properties 填 %1$s），登记前连不上	You pressed Connect: the developer has to register the app first (fill %1$s in local.properties). Until then it cannot connect
 scan_failed	拿不到二维码：%1$s	Could not get a code: %1$s
 feishu_app_folder	空间办公	Spatial Office
 feishu_inbox_folder	收件夹	Inbox
@@ -442,10 +433,8 @@ inbox_arrived	电脑发来「%1$s」	Sent from your computer: %1$s
 open	打开	Open
 inbox_sub	电脑上放进来的文档在这里	Documents you put here from your computer
 connect_title	连接%1$s	Connect %1$s
-connect_need_reg	需要开发者先登记应用：在 local.properties 填 %1$s 后重新打包。登记前两种方式都用不了	The developer has to register the app first: fill %1$s in local.properties and rebuild. Until then neither way works
-way_scan	用手机或电脑扫码（推荐）	Scan with your phone or computer (recommended)
+way_scan	用手机或电脑扫码	Scan with your phone or computer
 way_scan_sub	头显上只显示二维码和代码，在另一台设备上同意	The headset only shows a code; you agree on the other device
-way_scan_none	%1$s 不支持扫码，请用浏览器登录	%1$s has no scan sign-in; use the browser
 way_browser	在头显的浏览器里登录	Sign in in the headset browser
 way_browser_sub	打开对方的官方登录页，同意后自动回到这里	Opens the service’s own sign-in page, then comes back here
 connect_no_password	这里不会让你输入密码	You never type a password here
@@ -479,3 +468,28 @@ br_local_sub	不连接也能在「本机」打开、编辑、保存	Without any 
 copy_beside_title	原文件没动，另存了一份	Original untouched; saved a copy
 copy_beside_msg	飞书没让这个文件原地更新。「%1$s」原样留着，你的改动存成了旁边的「%2$s」，之后保存都写进这份副本。	Feishu would not update this file in place. “%1$s” is left as it was; your changes were saved as “%2$s” beside it, and later saves go to that copy.
 how_to_cloud_note	飞书云盘文件不能原地更新时：原文件不动，改动另存为同一文件夹里的「名字 (空间办公 副本)」，并弹窗告诉你	If Feishu won’t update a Drive file in place, the original stays as it is and your edits go to “name (Spatial Office copy)” beside it; a dialog tells you
+too_many_open	这类文件已经开了 %1$d 个，先关掉一个再开	%1$d files of this kind are open already. Close one first
+already_open	%1$s 已经开着，就是这扇窗口	%1$s is already open: this window
+how_to_object	挪动、缩放插入的东西	Move and resize inserted objects
+how_to_object_keys	点一下选中，按住拖动就挪位置；拖四个角上的圆点改大小。文档里的图片和表格点一下再拖角	Click to pick, hold and drag to move; drag a corner dot to resize. In a document, click a picture or table, then drag a corner
+how_to_object_hand	看着它捏住拖动；改大小就捏住角上的圆点拖	Look at it, pinch and drag; to resize, pinch a corner dot and drag
+how_to_object_ctrl	射线指着它按住扳机拖动；改大小就按住角上的圆点拖	Point the ray at it, hold the trigger and drag; to resize, hold a corner dot and drag
+how_to_multi	同时开几个文件	Several files at once
+how_to_multi_keys	在「最近」「浏览」里接着点别的文件：每个文件一扇窗，互不顶掉。新窗口开在正前方，先开的在它后面；标题栏 [窗口 n] 里点文件名切过去，点 [主页] 回主页	Click more files under Recent or Browse: each opens in its own window and nothing is replaced. New windows open in front; switch under Windows n in the title bar, or go Home there
+how_to_multi_hand	捏标题栏的 [窗口 n] 再捏文件名；想并排看就选 [并排摆开]，或捏住窗口下面的小圆点把它挪开	Pinch Windows n in the title bar, then a file; for side by side choose Side by side, or pinch the small dot under a window and move it aside
+how_to_multi_ctrl	扳机点标题栏的 [窗口 n] 再点文件名；想并排看就选 [并排摆开]，或按住窗口下面的小圆点把它挪开	Trigger on Windows n in the title bar, then on a file; for side by side choose Side by side, or hold the small dot under a window and move it aside
+slide_table	表格	Table
+obj_move	拖动移动	Drag to move
+obj_resize	拖动改大小	Drag to resize
+obj_hint	已选中：拖动挪位置，拖角上的圆点改大小	Picked: drag to move, drag a corner dot to resize
+slide_cell_ph	点这里输入	Type here
+win_menu	窗口 %1$d	Windows %1$d
+win_home	主页	Home
+win_side_by_side	并排摆开	Side by side
+others_behind	另外 %1$d 个文件在后面，标题栏 [窗口] 里切换	%1$d more open behind; switch under Windows in the title bar
+open_now	已打开	Open now
+acct_how_head	点 [连接] 会打开浏览器	Connect opens the browser
+acct_how_sub	在对方的官方登录页里登录、同意，然后自动回到这里。这里不会让你输入密码	Sign in and approve on the service’s own page; it then comes back here. You never type a password in this app
+browse_sub_local	这台设备上的文件。打开后保存写回原来的位置	Files on this device. Saving writes back to where the file came from
+about_sub_local	版本 %1$s · 兼容 .docx / .xlsx / .pptx（开放标准）· 本机文件全部离线可用	Version %1$s · compatible with .docx / .xlsx / .pptx (open standard) · local files work fully offline
+set_legal_local	提到的文件格式名称，只用来说明兼容。本应用和这些名称的权利人没有隶属或背书关系。	File format names are used only to describe compatibility. This app is not affiliated with or endorsed by their owners.

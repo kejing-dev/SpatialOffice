@@ -15,6 +15,7 @@ export JAVA_HOME=~/.pico/primer-cli/jdk/jdk-21.0.13+9/Contents/Home
 python3 -I tools/gen_strings.py # after editing tools/strings.tsv (zh + en string resources)
 tools/.venv/bin/python tools/verify/verify_docx_pptx.py   # independent check of saved files (python-docx / python-pptx)
 tools/.venv/bin/python tools/verify/verify_xlsx.py        # same with openpyxl
+tools/.venv/bin/python tools/verify/verify_v025.py        # v0.2.5: moved / resized objects, slide tables, resized doc pictures and tables
 ```
 
 ## Layout
@@ -26,7 +27,7 @@ tools/.venv/bin/python tools/verify/verify_xlsx.py        # same with openpyxl
 | `app/…/ui/` | `home/` (recent, browse, new, accounts, settings), `doc/`, `sheet/`, `slides/` editors, `chart/` 3D chart volume, `space/` Stage (spread layout, rehearsal), `Overlays.kt` (save sheets, dialogs). |
 | `tools/` | `strings.tsv` + `gen_strings.py`, `svg2vd.py`, test-fixture generators and verifiers. |
 
-Containers (`Main.kt`): home window (default, 1120 × 660 dp), one Planar window per editor, a Volumetric window for the
+Containers (`Main.kt`): home window (default, 1120 × 660 dp), one Planar window per open file (v0.2.5; one container id per kind, the file's tag tells them apart), a Volumetric window for the
 chart (1.76 × 0.26 × 0.32 m since v0.2.3, `chartPlacement()` = `Placement.top(sheet)` since v0.2.2: in front it covered the grid,
 below / beside it left the view, `build/v0.2.2/placement-trials.md` in the factory), one Mixed Stage.
 v0.2.3: the chart's two panels have a fixed physical size (`core/layout/ChartPanels`: 0.0019 m per dp, text ≥ 15 sp,
@@ -53,6 +54,50 @@ log `CONTAINER …`), `chartPlacement()` picks with `core/layout/LiveAnchor` (lo
 SpatialOfficeSheet#<id> liveSheet=#<id> dead=[…] among …#<id>(destroyed)`). The SDK getters are internal, read by
 reflection. Tests: `ChartPlanTest`, `LiveAnchorTest` (3 rehearsals + 3 spreads replayed against a list that keeps
 destroyed entries; the v0.2.3 first-by-name rule picks a destroyed sheet in all 6).
+
+v0.2.5 (headset feedback 2026-11-17, three items):
+
+**1. Move / resize what was inserted.** On the editing canvas every slide object (text box, picture, shape, table,
+and objects whose content is not drawn) is picked with a click, moved by a press-and-drag on it and resized by the
+dots on its four corners; a round tab above it moves it too (what is left to hold while its text is being typed).
+`ui/ObjectDrag.kt`: one `dragTotal` modifier for all of it — Compose `detectDragGestures` inside the Planar window
+(`gate:allow compose-drag`), every event's `dragAmount` summed by `core/layout/DragTotal` into the travel since the
+press (profile D53), which goes to `DeckSession.beginBoxDrag / moveBoxBy / resizeBoxBy / endBoxDrag`
+(`core/layout/BoxDrag`: opposite corner fixed, pictures keep their proportions, half of the object stays on the
+slide). While the pointer is down the object is drawn from `dragBox`; the file is written once on release (one undo
+step). Text is read until clicked (`TapEdit`), so a drag on a text box is the object's, not a text selection.
+Hand, controller ray and gaze + pinch all arrive in the window as that one pointer. `PptxDeck.setShapeBox` now also
+moves graphic frames (a table's columns and rows scale with it) and groups (child space kept); slides have
+Insert ▸ Table (`addTable`, `setTableCell`). Documents: a clicked picture shows corner dots (proportions kept, at
+most the text width, `DocxDocument.setImageSize`); a table with the caret in it shows two on its free side
+(20–100 % of the text width, `setTableWidth` → `w:tblW pct`). Log lines: `OBJDRAG start / end … events=… total=…`,
+and `DRAGAT <target> x,y` = where each drag target is in window pixels (for `adb shell input swipe`, never logged
+during a drag). Debug: `objdrag`, `slide-table`, `slide-cell`, `doc-pick`, `doc-resize`.
+
+**2. Several files of one kind.** One window per open file: same container id, the file's tag (`f1`, `f2`, …) as
+the container tag and in the bundle (`Containers.ARG_TAG`); `WinRef(win, tag)` names a window everywhere.
+`core/layout/OpenFiles` decides (new window / already open → front / five of a kind is the limit); `Graph.sessions`
+holds them, `Graph.doc / sheet / deck` are the ones whose window was used last (`activate`: any press or key in an
+editor window, or its taking the focus). Each window is given its own session (`ui/Editor.kt EditorWindow`);
+overlays and toasts carry the tag of the window they belong to. Opening an open file → `Graph.front`.
+**Placement** (`build/v0.2.5/placement-trials.md` in the factory): the system offers "in front" or "beside an anchor
+with a gap ≥ 0"; a negative gap (staggered, overlapping) leaves the window unshown, and a window opened on the spot
+of another takes that one off stage. So every window opens in front (`editorPlacement`, inside ±39°), and the title
+bar's **Windows n** menu (`WindowsMenu`) switches: Home, each open file, and Side by side (`WindowCtl.arrange`:
+the others are reopened right / left of this one). A hidden window is "fronted" by closing and reopening it
+(`restoreWindowContainer` answers false for it). After the Stage, windows come back in an order that leaves the
+file that was spread out on top, or the chart's sheet when the chart was up. The 3D chart belongs to one sheet
+(`Graph.chartTag`) and is put away when another sheet comes to the front. Debug: `front <tag>`, `activate <tag>`,
+`close-tag <tag>`, `front-home`, `arrange [tag]`, `win-place front|gap:<dp>`, `front-mode auto|restore|reopen`;
+`DUMP … open=[f1:DOC:name:ON_RESUME,…] chartOf=…`, `windows=DOC/f1=ON_RESUME,…`.
+
+**3. Accounts.** A service is offered only when its client id was put in at build time (`Accounts.shown` =
+`core/cloud/CloudCatalog`): otherwise no Accounts row, no Browse location, no How-to line, and with none at all no
+Accounts page. [Connect] goes straight to the system browser (`core/cloud/BrowserSignIn` → `Accounts.launchBrowser`,
+ACTION_VIEW + BROWSABLE; log `CLOUD … browser intent`); only without a browser does a service with scan sign-in
+fall back to the code dialog. No user-facing string mentions registration or build files (gate dev-jargon-ui).
+Debug builds: `cloud-id <service> <client id>` sets a client id for this run to walk the path (`cloud-id <service>`
+clears it).
 
 ## The save rule
 
@@ -101,7 +146,7 @@ Each command calls the same function as the control it stands for; the app logs 
 | `row-ins`, `row-del`, `col-ins`, `col-del` | — | Rows & columns ▸ … at the selection |
 | `chart-add`, `chartview` | `bar` `line` `pie` / index | make a chart from the data around the selection / show the flat chart sheet |
 | `browse` | `0`–`4` | Browse page at Device / Feishu / Google Drive / OneDrive / Dropbox |
-| `connect` | `feishu` `gdrive` `onedrive` `dropbox` | same as [Connect] (opens the system browser when the app is registered) |
+| `connect` | `feishu` `gdrive` `onedrive` `dropbox` | same as [Connect]: the system browser on the service's sign-in page (nothing when the build has no client id for it) |
 | `saveas-cloud` | `doc` `sheet` `slides` | Save as ▸ a copy to the first connected drive |
 | `browse-dir` | absolute folder path | Browse page inside that folder |
 | `scan` | `feishu` `onedrive` | scan-to-sign-in for real (needs a registration) |
@@ -110,14 +155,20 @@ Each command calls the same function as the control it stands for; the app logs 
 | `conflict` | `doc` `sheet` `slides` | the "changed in the cloud" dialog of that window (what a cloud save shows on a version mismatch) |
 | `conflict-answer` | `<win> overwrite|copy|cancel` | answer it (same function as the buttons) |
 | `inbox` | — | check the Feishu inbox now |
-| `dump` | — | log state only (v0.2.1 adds `tableCaret`, `cols`) |
+| `dump` | — | log state only (v0.2.1 adds `tableCaret`, `cols`; v0.2.5 `open=[…]`, `chartOf`, `objBox`) |
+| `objdrag` | `move|top_left|top_right|bottom_left|bottom_right <n>x<dxEmu>,<dyEmu>` | n pointer steps on the picked slide object through the session calls the gesture makes |
+| `slide-table`, `slide-cell` | `rows,cols` / `r,c=text` | insert a table on the slide (picked) / set a cell of the picked table |
+| `doc-pick`, `doc-resize` | `<n>` / `<corner> <dx,dy>` | pick the n-th picture or table of the document / resize it (picture: EMU, table: percent in dx) |
+| `front`, `activate`, `close-tag` | window tag (`f1` …) | open-again behaviour / make it the active one of its kind / its title-bar close |
+| `front-home`, `arrange` | — / tag | Windows ▸ Home / Windows ▸ Side by side around that window |
+| `win-place`, `front-mode` | `front` `gap:<dp>` / `auto` `restore` `reopen` | placement trials (emulator only) |
+| `cloud-id` | `<service> [client id]` | debug-only client id for this run (shows the service, [Connect] opens the browser) |
 | `mainwatch` | seconds (default 10) | log the longest main-thread frame gap over that time (`MAINWATCH baseline …`), the emulator's own load for comparing with `MAINWATCH chart-open` |
 
 v0.2.0 screenshot states (both languages): doc toolbar menus (Paragraph, Insert, More), find & replace, word count,
 insert table, picture picker, a doc with numbered list + centred heading + strikethrough + picture + table; slides with
 New slide ▾, two-column and blank slides, a picked shape, a picture, dark theme; sheet with fill colours, frozen top row,
-a filter, Data / Rows & columns / Chart menus, flat line and pie charts; Accounts page (unregistered rows) and
-Browse › Feishu.
+a filter, Data / Rows & columns / Chart menus, flat line and pie charts; Accounts page and Browse › Feishu (v0.2.5: only with a client id; `cloud-id feishu <id>` in debug builds).
 
 Screenshot states: home (5 pages × 2 languages), new-doc / new-sheet / new-slides, doc, sheet, slides, compat,
 save-first, save-as, unsaved, shortcuts, how-to, exit-confirm, chart columns / scatter, spread row / arc / layers
@@ -126,8 +177,9 @@ for each kind, rehearsal.
 ## Cloud accounts
 
 `platform/Accounts.kt` (sign-in, tokens in EncryptedSharedPreferences, file calls) on top of the pure
-`core/cloud/` (requests, PKCE, answer parsing, Feishu online doc / sheet diffs). Each service needs an app
-registration in `local.properties`; see README "连接账号". Unregistered services say so and send nothing.
+`core/cloud/` (requests, PKCE, answer parsing, Feishu online doc / sheet diffs). A service is offered
+only when its client id was put in at build time (`-Pcloud.<service>.…` or `local.properties`; README "连接账号");
+the others do not appear in the app at all.
 
 ## Not in this version
 

@@ -153,7 +153,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
     fun insertTableAfter(id: Int, rows: Int, cols: Int): Int {
         require(rows in 1..200 && cols in 1..30) { "table size $rows × $cols" }
         val newXml = DocxTemplates.table(rows, cols, 9000)
-        val nid = insertRaw(id, newXml) { nid -> TableBlock(nid, List(rows) { List(cols) { "" } }) }
+        val nid = insertRaw(id, newXml) { nid -> TableBlock(nid, List(rows) { List(cols) { "" } }, 100) }
         // Word needs a paragraph between a table and whatever follows it only at the end of the body; add one when the table is last
         val idx = indexOf(nid)
         if (idx == entries.lastIndex) insertParagraphAfter(nid, emptyList(), ParaStyle.BODY)
@@ -195,6 +195,72 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
         touched()
         e.block = parseTable(id, Xml.elemAt(xml, e.start)!!)
         changedIds.add(id)
+    }
+
+    /**
+     * Resizes a picture (v0.2.5): the inline extent and the picture's own `a:ext`, nothing else of the drawing.
+     * [widthEmu] is kept within the text width by the caller.
+     */
+    fun setImageSize(id: Int, widthEmu: Long, heightEmu: Long) {
+        val idx = indexOf(id)
+        val e = entries[idx]
+        val img = e.block as? ImageBlock ?: throw IllegalStateException("block $id is not a picture")
+        val w = widthEmu.coerceAtLeast(9525L); val h = heightEmu.coerceAtLeast(9525L)
+        if (w == img.widthEmu && h == img.heightEmu) return
+        val p = Xml.elemAt(xml, e.start) ?: throw IllegalStateException("picture $id is not readable")
+        val d = Xml.find(xml, p, "w:drawing") ?: throw IllegalStateException("picture $id has no drawing")
+        val edits = ArrayList<Triple<Int, Int, String>>()
+        fun resized(el: Xml.Elem) {
+            var open = xml.substring(el.start, el.openEnd)
+            open = Regex("\\bcx=\"\\d+\"").replace(open, "cx=\"$w\"")
+            open = Regex("\\bcy=\"\\d+\"").replace(open, "cy=\"$h\"")
+            edits.add(Triple(el.start, el.openEnd, open))
+        }
+        Xml.find(xml, d, "wp:extent")?.let { resized(it) }
+        Xml.find(xml, d, "pic:spPr")?.let { sp -> Xml.find(xml, sp, "a:ext")?.let { resized(it) } }
+        if (edits.isEmpty()) throw IllegalStateException("picture $id has no size to change")
+        val seg = Xml.splice(xml.substring(e.start, e.end), edits.map { Triple(it.first - e.start, it.second - e.start, it.third) })
+        replaceEntry(idx, seg)
+        e.block = img.copy(widthEmu = w, heightEmu = h)
+        changedIds.add(id)
+    }
+
+    /** Sets a table's width as a share of the text width ([pct] 10–100), as `w:tblW w:type="pct"`; cells keep their proportions. */
+    fun setTableWidth(id: Int, pct: Int) {
+        val idx = indexOf(id)
+        val e = entries[idx]
+        val tb = e.block as? TableBlock ?: throw IllegalStateException("block $id is not a table")
+        val want = pct.coerceIn(10, 100)
+        if (want == tb.widthPct) return
+        val tbl = Xml.elemAt(xml, e.start) ?: throw IllegalStateException("table $id is not readable")
+        val tblW = "<w:tblW w:w=\"${want * 50}\" w:type=\"pct\"/>"
+        val pr = Xml.child(xml, tbl, "w:tblPr")
+        val seg = when {
+            pr == null -> xml.substring(e.start, tbl.openEnd) + "<w:tblPr>$tblW</w:tblPr>" + xml.substring(tbl.openEnd, e.end)
+            else -> {
+                val old = Xml.child(xml, pr, "w:tblW")
+                val newPr = when {
+                    old != null -> xml.substring(pr.start, old.start) + tblW + xml.substring(old.end, pr.end)
+                    pr.selfClosing -> "<w:tblPr>$tblW</w:tblPr>"
+                    else -> XmlEx.insertChild(XmlEx.src(xml, pr), tblW, "w:tblW", TBL_PR_ORDER)
+                }
+                xml.substring(e.start, pr.start) + newPr + xml.substring(pr.end, e.end)
+            }
+        }
+        replaceEntry(idx, seg)
+        e.block = parseTable(id, Xml.elemAt(xml, e.start)!!)
+        changedIds.add(id)
+    }
+
+    /** Width of a table as a share of the text width: `pct` as written, `dxa` against a 6.5 in text column, else 100. */
+    private fun tableWidthPct(tbl: Xml.Elem): Int {
+        val w = Xml.child(xml, tbl, "w:tblPr")?.let { Xml.child(xml, it, "w:tblW") } ?: return 100
+        val v = Xml.attr(xml, w, "w:w")?.removeSuffix("%")?.toDoubleOrNull() ?: return 100
+        return when (Xml.attr(xml, w, "w:type")) {
+            "pct" -> (if (Xml.attr(xml, w, "w:w")?.endsWith("%") == true) v else v / 50.0).toInt().coerceIn(10, 100)
+            "dxa" -> Math.round(v * 100.0 / TEXT_WIDTH_TWIPS).toInt().coerceIn(10, 100)
+            else -> 100
+        }
     }
 
     private fun insertRaw(id: Int, newXml: String, block: (Int) -> DocBlock): Int {
@@ -536,7 +602,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
             }
             rows.add(row)
         }
-        return TableBlock(id, rows)
+        return TableBlock(id, rows, tableWidthPct(tbl))
     }
 
     // ------------------------------------------------------------------------------------------------ writing
@@ -712,6 +778,15 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
 
         /** A new, empty document: one empty body paragraph, title / heading styles, A4 page. */
         fun blank(): DocxDocument = DocxDocument(DocxTemplates.blankPackage(), null)
+
+        /** Text width the app's own tables are made for (A4 with 2.54 cm margins ≈ 9026 twips); `dxa` table widths are read against it. */
+        const val TEXT_WIDTH_TWIPS = 9000
+        /** Text width for pictures: 6 in. */
+        const val TEXT_WIDTH_EMU = 5_486_400L
+        private val TBL_PR_ORDER = listOf(
+            "w:tblStyle", "w:tblpPr", "w:tblOverlap", "w:bidiVisual", "w:tblStyleRowBandSize", "w:tblStyleColBandSize", "w:tblW", "w:jc",
+            "w:tblCellSpacing", "w:tblInd", "w:tblBorders", "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription",
+        )
 
         private val TRACKED = Regex("<w:(?:ins|del|moveFrom|moveTo|pPrChange|rPrChange|sectPrChange|tblPrChange|numberingChange)[\\s/>]")
         private val TRACKED_MARK = Regex("<w:(?:ins|del|moveFrom|moveTo)[\\s>]")

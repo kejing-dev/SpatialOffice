@@ -308,26 +308,128 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         slideChanged(part)
     }
 
-    /** Moves / resizes a shape. A placeholder that inherited its box gets one of its own. */
+    /**
+     * Moves / resizes a top-level shape: text box, placeholder, drawn shape, picture, connector, group (its children
+     * keep their own coordinates and scale with it) or graphic frame (table, chart). A placeholder that inherited its
+     * box gets one of its own.
+     */
     fun setShapeBox(slide: Int, shapeId: Int, x: Long, y: Long, w: Long, h: Long) {
         val part = slidePart(slide)
         val sx = pkg.text(part)!!
         val e = topShapes(sx).firstOrNull { shapeId(sx, it) == shapeId } ?: throw IllegalArgumentException("slide $slide has no shape $shapeId")
-        if (e.name != "p:sp" && e.name != "p:pic") throw IllegalStateException("shape $shapeId cannot be moved here")
-        val spPr = Xml.child(sx, e, "p:spPr") ?: throw IllegalStateException("shape $shapeId has no shape properties")
-        val box = PptxTemplates.xfrm(x, y, w.coerceAtLeast(1), h.coerceAtLeast(1))
+        val cw = w.coerceAtLeast(1); val ch = h.coerceAtLeast(1)
+        if (e.name == "p:graphicFrame") { setFrameBox(part, sx, e, x, y, cw, ch); return }
+        val prName = when (e.name) { "p:sp", "p:pic", "p:cxnSp" -> "p:spPr"; "p:grpSp" -> "p:grpSpPr"; else -> throw IllegalStateException("shape $shapeId cannot be moved here") }
+        val spPr = Xml.child(sx, e, prName) ?: throw IllegalStateException("shape $shapeId has no shape properties")
+        val box = PptxTemplates.xfrm(x, y, cw, ch)
         val xf = Xml.child(sx, spPr, "a:xfrm")
         val out = when {
             xf != null -> {
-                // keep rotation / flip attributes on the existing element
+                // keep rotation / flip attributes on the element, and a group's child coordinate space (chOff / chExt)
                 val open = sx.substring(xf.start, xf.openEnd).let { if (it.endsWith("/>")) it.dropLast(2) + ">" else it }
-                sx.substring(0, xf.start) + open + box.removePrefix("<a:xfrm>") + sx.substring(xf.end)
+                val rest = Xml.children(sx, xf).filter { it.name != "a:off" && it.name != "a:ext" }.joinToString("") { XmlEx.src(sx, it) }
+                sx.substring(0, xf.start) + open + box.removePrefix("<a:xfrm>").removeSuffix("</a:xfrm>") + rest + "</a:xfrm>" + sx.substring(xf.end)
             }
+            e.name == "p:grpSp" -> throw IllegalStateException("group $shapeId has no box of its own")
             spPr.selfClosing -> sx.substring(0, spPr.start) + "<p:spPr>$box</p:spPr>" + sx.substring(spPr.end)
             else -> sx.substring(0, spPr.openEnd) + box + sx.substring(spPr.openEnd)
         }
         pkg.putText(part, out)
         slideChanged(part)
+    }
+
+    /**
+     * Moves / resizes a graphic frame (table, chart, diagram): its `p:xfrm`. A table also has its own column widths
+     * and row heights, which other software lays it out by, so they are scaled with the frame.
+     */
+    private fun setFrameBox(part: String, sx: String, e: Xml.Elem, x: Long, y: Long, w: Long, h: Long) {
+        val edits = ArrayList<Triple<Int, Int, String>>()
+        val xf = Xml.child(sx, e, "p:xfrm")
+        val old = boxOf(sx, e)
+        val box = "<a:off x=\"$x\" y=\"$y\"/><a:ext cx=\"$w\" cy=\"$h\"/>"
+        if (xf != null) {
+            val open = sx.substring(xf.start, xf.openEnd).let { if (it.endsWith("/>")) it.dropLast(2) + ">" else it }
+            edits.add(Triple(xf.start, xf.end, "$open$box</p:xfrm>"))
+        } else {
+            val after = Xml.child(sx, e, "p:nvGraphicFramePr")?.end ?: e.openEnd
+            edits.add(Triple(after, after, "<p:xfrm>$box</p:xfrm>"))
+        }
+        val tbl = Xml.find(sx, e, "a:tbl")
+        if (tbl != null && old != null && old[2] > 0 && old[3] > 0 && (old[2] != w || old[3] != h)) {
+            val fw = w.toDouble() / old[2]; val fh = h.toDouble() / old[3]
+            fun scaled(el: Xml.Elem, attr: String, f: Double) {
+                val v = Xml.attr(sx, el, attr)?.toLongOrNull() ?: return
+                val open = sx.substring(el.start, el.openEnd)
+                val m = Regex("\\b" + attr + "=\"\\d+\"").find(open) ?: return
+                edits.add(Triple(el.start + m.range.first, el.start + m.range.last + 1, attr + "=\"" + Math.round(v * f).coerceAtLeast(1) + "\""))
+            }
+            Xml.child(sx, tbl, "a:tblGrid")?.let { g -> for (c in Xml.children(sx, g, "a:gridCol")) scaled(c, "w", fw) }
+            for (tr in Xml.children(sx, tbl, "a:tr")) scaled(tr, "h", fh)
+        }
+        pkg.putText(part, Xml.splice(sx, edits))
+        slideChanged(part)
+    }
+
+    /** Adds an empty table of [rows] × [cols] cells on top of the slide's shapes; returns its shape id. */
+    fun addTable(slide: Int, rows: Int, cols: Int, x: Long, y: Long, w: Long, h: Long): Int {
+        require(rows in 1..40 && cols in 1..20) { "table size $rows × $cols" }
+        val part = slidePart(slide)
+        val sx = pkg.text(part)!!
+        val root = Xml.root(sx) ?: throw IllegalStateException("slide $slide is not readable")
+        val tree = Xml.find(sx, root, "p:spTree") ?: throw IllegalStateException("slide $slide has no shape tree")
+        val id = maxShapeId(sx) + 1
+        val ns = if (Xml.attr(sx, root, "xmlns:a") == PptxTemplates.NS_A) "" else " xmlns:a=\"${PptxTemplates.NS_A}\""
+        pkg.putText(part, insertIntoTree(sx, tree, PptxTemplates.table(id, rows, cols, x, y, w, h, ns)))
+        slideChanged(part)
+        return id
+    }
+
+    /**
+     * Sets the text of one cell of a plain table (one paragraph per line). The cell keeps its properties, its body
+     * properties and the run formatting of its first paragraph.
+     */
+    fun setTableCell(slide: Int, shapeId: Int, row: Int, col: Int, text: String) {
+        val part = slidePart(slide)
+        val sx = pkg.text(part)!!
+        val e = topShapes(sx).firstOrNull { shapeId(sx, it) == shapeId } ?: throw IllegalArgumentException("slide $slide has no shape $shapeId")
+        if (tableOf(sx, e)?.second != true) throw IllegalStateException("shape $shapeId is not a plain table")
+        val tbl = Xml.find(sx, e, "a:tbl")!!
+        val tc = Xml.children(sx, tbl, "a:tr").getOrNull(row)?.let { Xml.children(sx, it, "a:tc").getOrNull(col) } ?: throw IndexOutOfBoundsException("cell $row,$col")
+        val body = Xml.child(sx, tc, "a:txBody")
+        val kids = body?.let { Xml.children(sx, it) } ?: emptyList()
+        val bodyPr = kids.firstOrNull { it.name == "a:bodyPr" }?.let { XmlEx.src(sx, it) } ?: "<a:bodyPr/>"
+        val lst = kids.firstOrNull { it.name == "a:lstStyle" }?.let { XmlEx.src(sx, it) } ?: "<a:lstStyle/>"
+        val firstP = kids.firstOrNull { it.name == "a:p" }
+        val pPr = firstP?.let { Xml.child(sx, it, "a:pPr") }?.let { XmlEx.src(sx, it) } ?: ""
+        val rPrSrc = firstP?.let { p -> Xml.children(sx, p, "a:r").firstOrNull()?.let { Xml.child(sx, it, "a:rPr") } ?: Xml.child(sx, p, "a:endParaRPr") }
+        val attrs = rPrSrc?.let { sx.substring(it.start + 1 + it.name.length, it.openEnd).trimEnd('>', '/') } ?: " lang=\"en-US\" sz=\"1600\""
+        val inner = rPrSrc?.takeIf { !it.selfClosing }?.let { sx.substring(it.openEnd, it.closeStart) } ?: ""
+        val paras = text.replace("\r\n", "\n").replace('\r', '\n').split('\n').joinToString("") { line ->
+            if (line.isEmpty()) "<a:p>$pPr<a:endParaRPr$attrs>$inner</a:endParaRPr></a:p>"
+            else "<a:p>$pPr<a:r><a:rPr$attrs>$inner</a:rPr><a:t>${Xml.escape(cleanText(line))}</a:t></a:r></a:p>"
+        }
+        val newBody = "<a:txBody>$bodyPr$lst$paras</a:txBody>"
+        val out = if (body != null) sx.substring(0, body.start) + newBody + sx.substring(body.end)
+        else sx.substring(0, tc.openEnd) + newBody + sx.substring(tc.openEnd)
+        pkg.putText(part, out)
+        slideChanged(part)
+    }
+
+    /** Rows of cell text of the table in graphic frame [e], and whether it is plain (no merged cells, text only). */
+    private fun tableOf(sx: String, e: Xml.Elem): Pair<List<List<String>>, Boolean>? {
+        if (e.name != "p:graphicFrame") return null
+        val tbl = Xml.find(sx, e, "a:tbl") ?: return null
+        var plain = true
+        val rows = Xml.children(sx, tbl, "a:tr").map { tr ->
+            Xml.children(sx, tr, "a:tc").map { tc ->
+                val open = sx.substring(tc.start, tc.openEnd)
+                if (open.contains("gridSpan=") || open.contains("rowSpan=") || open.contains("hMerge=") || open.contains("vMerge=") || tc.selfClosing) plain = false
+                val body = Xml.child(sx, tc, "a:txBody")
+                body?.let { b -> Xml.children(sx, b, "a:p").joinToString("\n") { paraText(sx, it) } } ?: ""
+            }
+        }
+        if (rows.isEmpty() || rows.any { it.size != rows[0].size }) plain = false
+        return rows to plain
     }
 
     /** Theme colours of the first slide master: dk1, lt1, dk2, lt2, accent1–6, hlink, folHlink → 0xRRGGBB. */
@@ -373,7 +475,11 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         val fonts = LinkedHashMap<String, Int>()
         for (part in slideParts()) {
             val sx = pkg.text(part) ?: continue
-            for (e in topShapes(sx)) otherCode(sx, e)?.let { readOnly[it] = (readOnly[it] ?: 0) + 1 }
+            for (e in topShapes(sx)) otherCode(sx, e)?.let { code ->
+                // v0.2.5: a plain table is edited cell by cell, moved and resized; only merged / nested ones stay read-only
+                if (code == "table" && tableOf(sx, e)?.second == true) return@let
+                readOnly[code] = (readOnly[code] ?: 0) + 1
+            }
             if (sx.contains("<a:fld ")) readOnly["field"] = (readOnly["field"] ?: 0) + Regex("<a:fld[\\s>]").findAll(sx).count()
             if (sx.contains("<p:transition")) approx["transition"] = (approx["transition"] ?: 0) + 1
             if (sx.contains("<p:timing")) approx["animation"] = (approx["animation"] ?: 0) + 1
@@ -824,6 +930,8 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
             "p:graphicFrame" -> kind = if (otherCode(sx, e) == "chart") ShapeKind.CHART else ShapeKind.OTHER
             else -> kind = ShapeKind.OTHER
         }
+        val table = tableOf(sx, e)
+        if (table != null) return Shape(id, kind, b[0], b[1], b[2], b[3], emptyList(), null, false, null, 0, null, false, null, null, table.first, table.second)
 
         if (txBody == null) {
             val isText = kind == ShapeKind.TITLE || kind == ShapeKind.BODY || kind == ShapeKind.TEXT

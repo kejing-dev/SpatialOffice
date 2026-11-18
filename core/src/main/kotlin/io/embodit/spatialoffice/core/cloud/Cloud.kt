@@ -10,8 +10,9 @@ import java.util.Base64
  * The four cloud services of PRD §9. Everything here is pure: request URLs and bodies, and the parsing of the
  * services' JSON answers. The app does the HTTP, the browser hand-off and the encrypted token storage.
  *
- * Each service needs an app registration the user makes themselves (README, "Connecting accounts"); until its
- * client id is filled in, the service shows "the developer has to register the app first" and nothing is sent.
+ * Each service needs an app registration (README, "Connecting accounts") whose client id is put in when the app is
+ * built. A service without one is not offered anywhere in the app ([CloudCatalog.shown], v0.2.5); one that has it
+ * shows [Connect], which opens the service's own sign-in page in the system browser ([BrowserSignIn]).
  */
 enum class Provider(val id: String, val authUrl: String, val tokenUrl: String, val scopes: String) {
     FEISHU(
@@ -40,6 +41,39 @@ enum class Provider(val id: String, val authUrl: String, val tokenUrl: String, v
 /** What the developer registered: client id (and, where the service requires it, a secret) and the callback address. */
 data class AppRegistration(val clientId: String, val clientSecret: String, val redirectUri: String) {
     val registered: Boolean get() = clientId.isNotBlank() && !clientId.startsWith("REPLACE")
+}
+
+/**
+ * Which services the app offers (v0.2.5, headset 2026-11-17: the Accounts page said "the developer has to register
+ * the app first (set cloud.feishu.appId in local.properties…)", which means nothing to a user). A service appears in
+ * Accounts, Browse and How-to only when a client id was put in at build time; the others are not mentioned at all.
+ */
+object CloudCatalog {
+    fun shown(registrations: Map<Provider, AppRegistration>): List<Provider> = Provider.values().filter { registrations[it]?.registered == true }
+}
+
+/**
+ * [Connect] (v0.2.5): straight to the service's own sign-in page in the system browser — authorisation code + PKCE,
+ * the answer comes back through the registered callback address. [launch] hands the address to the system (the app:
+ * an ACTION_VIEW intent) and says whether a browser took it. Pure, so the rule "no client id → nothing is sent,
+ * client id → the browser is asked for exactly this address" is unit-tested.
+ */
+class BrowserSignIn(private val launch: (url: String) -> Boolean) {
+    sealed class Result {
+        /** The browser has the sign-in page; [request] waits for the callback. */
+        data class Started(val request: AuthRequest, val url: String) : Result()
+        /** No client id: nothing was built or sent. */
+        object NotOffered : Result()
+        /** Nothing on the device could open the page. */
+        data class NoBrowser(val url: String) : Result()
+    }
+
+    fun start(provider: Provider, reg: AppRegistration): Result {
+        if (!reg.registered) return Result.NotOffered
+        val req = AuthRequest.create(provider, reg)
+        val url = req.browserUrl()
+        return if (launch(url)) Result.Started(req, url) else Result.NoBrowser(url)
+    }
 }
 
 /** One OAuth 2 authorisation-code request with PKCE (RFC 7636): what goes to the browser and what comes back. */

@@ -16,9 +16,10 @@
 
 ## 能做什么
 
-- **文档**：标题 / 正文 / 列表、对齐、删除线、图片、表格、查找替换、字数统计
+- **文档**：标题 / 正文 / 列表、对齐、删除线、图片、表格（都能拖角改大小）、查找替换、字数统计
 - **表格**：45 个常用函数、数字和日期格式、填充色、排序筛选、冻结首行、插入 / 删除行列、柱状 / 折线 / 饼图
-- **演示**：新建页（标题 / 正文 / 两栏 / 空白）、文本框、形状、图片、主题配色、拖动排序
+- **演示**：新建页（标题 / 正文 / 两栏 / 空白）、文本框、形状、图片、表格、主题配色、拖动排序；插入的东西点一下选中，按住拖动挪位置，拖四个角上的圆点改大小
+- **同时开几个文件**：每个文件一扇窗，开第二个不会顶掉第一个；标题栏 [窗口 n] 里切换、回主页、并排摆开
 - **3D 图表**：选中表格里的数据，[图表] › [3D 图表]，图表悬在表格窗口上方，改一个数柱子跟着变，可切柱状 / 散点、左右转
 - **铺开 / 预演**：把一份演示的每一页并排、环绕或分层摆开；预演有大屏、讲稿和计时
 - **保存**：第一次保存先备份原件（「名字（原件）」）；另存为副本 / PDF / CSV / TXT / 每页 PNG
@@ -27,28 +28,33 @@
 ## 安装
 
 ```
-adb install -r SpatialOffice-v0.2.4.apk
+adb install -r SpatialOffice-v0.2.5.apk
 pico-cli app launch io.embodit.spatialoffice
 ```
 
 Release 里的 APK 是 `assembleRelease` 出的**未签名**包（给 Vibe Lab 平台托管签名用），本机直接装需要先自己签名，或用 `./gradlew :app:assembleDebug` 出 debug 包。构建、目录结构、调试广播见 [AGENTS.md](AGENTS.md)。
 
-## 已知问题（v0.2.4）
+## 已知问题（v0.2.5）
 
-- 真实云账号（飞书 / Google Drive / OneDrive / Dropbox）的登录、浏览、保存都**没有验证**：四家都要开发者先登记 OAuth 应用（见下），只有单元测试核过请求和应答格式
-- 铺开收起后，演示窗口最后回来，会挡在表格窗口前面
-- 3D 图表在高负载的模拟器上打开要 1–3 秒（v0.2.4 起不再卡住或弹「没有响应」）
-- 「系统窗口列表里还留着已销毁的旧窗口」时图表跳过它、挂到当前表格上：这条路只有单元测试覆盖，模拟器上没触发过
+- 这一版的安装包里**没有放任何云盘的应用 ID**，所以应用里不出现「账号与云盘」和云盘位置；放了 ID 再打包才有（见下「连接账号」）。真实云账号的登录、浏览、保存都**没有验证**，只有单元测试核过请求和应答格式
+- 同时开几个文件时，新窗口开在正前方，先开的窗口被系统收到它后面（看不见）。系统没有「错开叠放」这种摆法：重叠着摆窗口不显示，并排摆又大半在视野外。用标题栏 [窗口 n] 切换；想同时看就点里面的 [并排摆开]，或捏住窗口下面的小圆点挪开
+- 3D 图表属于打开它的那张表格；把另一张表格叫到前面时图表会收起
+- 挪动、缩放插入的东西在模拟器上用真实指针拖过；手势、手柄射线、眼手三种输入在头显上还没有逐项验过
+- 3D 图表在高负载的模拟器上打开要几秒（v0.2.4 起不再卡住或弹「没有响应」）
+- 「系统窗口列表里还留着已销毁的旧窗口」时图表跳过它、挂到当前表格上：图表这条路仍只有单元测试覆盖（v0.2.5 并排摆开文档时，同一条规则在模拟器上跳过了一个已销毁的旧文档窗口）
 - 中文输入法要先点一下表格单元格，候选才能上屏
 - 演示视频没有声音，是模拟器调试指令驱动的，非真实手势录像
 
 ## 连接账号（飞书、Google Drive、OneDrive、Dropbox）
 
-账号是可选的：一个都不连，本机文件全部能用。点 [连接] 先选方式：**用手机或电脑扫码**（推荐；飞书和 OneDrive 有，设备授权码 RFC 8628，头显上只显示二维码和一组代码）或**在头显的浏览器里登录**（各家自己的登录页，授权码 + PKCE）。Google Drive 的扫码方式只给 `drive.file` 这种窄权限、浏览不了整个云盘，Dropbox 没有扫码方式，这两家只走浏览器。应用里没有密码输入框；登录凭证用 EncryptedSharedPreferences 加密存在头显上，退出登录就删除。
+账号是可选的：一个都不连，本机文件全部能用。
 
-每一家都要**你自己先在它的开发者后台登记一个应用**，把拿到的 ID 填进工程根目录的 `local.properties`（这个文件不进 git），重新打包。没填的那一家，应用里会写「需要开发者先登记应用」，点 [连接] 弹出选方式的对话框（两种方式都灰着，写明要填哪个键），这一行下面也留一句提示，不会发出任何请求。
+**应用里只出现放了应用 ID 的那几家。** 打包时没放 ID 的服务，在「账号与云盘」「浏览」「怎么操作」里都不出现，也不会发出任何请求；四家都没放，「账号与云盘」这一页和「最近」里的云端分组都不显示。放了 ID 的服务显示 [连接]：**点一下直接弹出系统浏览器**，打开那一家自己的登录页（授权码 + PKCE），登录同意后浏览器自动跳回应用，全程不在应用里输密码。设备上没有浏览器时，飞书和 OneDrive 会改用扫码（设备授权码 RFC 8628：头显上只显示二维码和一组代码，在手机或电脑上同意）。
 
-飞书扫码要在开放平台的应用里开「设备授权」（Device Flow）；OneDrive 扫码要在 Azure 应用注册 → 身份验证里打开「允许公共客户端流」。
+**怎么放 ID（给打包的人看）**：先到那一家的开发者后台登记一个应用（下表），然后二选一：
+
+- 打包命令带上：`./gradlew :app:assembleDebug -Pcloud.feishu.appId=cli_xxx -Pcloud.feishu.appSecret=yyy`
+- 或写进工程根目录的 `local.properties`（这个文件不进 git）：`cloud.feishu.appId=cli_xxx`
 
 | 服务 | 去哪登记 | 应用类型 / 要开的权限 | 回调地址（登记时填，和下面的键一致） | 填进 local.properties |
 |---|---|---|---|---|
@@ -86,7 +92,7 @@ Release 里的 APK 是 `assembleRelease` 出的**未签名**包（给 Vibe Lab �
 
 Open, edit and save standard .docx, .xlsx and .pptx files right in a PICO headset (plus .md / .txt / .csv; PDF, images and web pages read-only). Documents, spreadsheets and slides each get a native window, made for a Bluetooth keyboard and mouse. Saving writes the same standard format back and touches only what you changed; everything else stays byte-for-byte. Charts in a spreadsheet can stand up as a 3D chart, and a deck can be spread out around you or rehearsed. Current version **v0.2.4**.
 
-Screenshots: PICO emulator, v0.2.4, driven by debug commands, **not a real hand-gesture recording**. The demo video is also debug-driven and has no sound.
+Screenshots: PICO emulator, v0.2.4 / v0.2.5, driven by debug commands, **not a real hand-gesture recording**. The demo video is also debug-driven and has no sound.
 
 ## What it does
 
@@ -107,15 +113,20 @@ pico-cli app launch io.embodit.spatialoffice
 
 The APK on the Release is the **unsigned** `assembleRelease` build (for platform-managed signing). To sideload it, sign it yourself first, or build a debug APK with `./gradlew :app:assembleDebug`. Build notes and the debug broadcast are in [AGENTS.md](AGENTS.md).
 
+## Several files at once, moving what you insert (v0.2.5)
+
+Every open file has its own window; opening a second document, sheet or deck never replaces the first. A new window opens in front and the system puts the earlier ones behind it, so the title bar has **Windows n**: switch to another file, go Home, or set the windows out **Side by side**. Text boxes, pictures, shapes and tables on a slide are picked with a click, moved by dragging and resized by the dots on their corners; pictures and tables in a document resize the same way.
+
 ## Cloud drives
 
-Feishu, Google Drive, OneDrive and Dropbox are optional; every local file works without an account. Each service needs **you, the developer, to register an OAuth app** in its console and put the IDs in `local.properties` (not in git), then rebuild. Unregistered services say so in the app and send no request. Details (redirect URIs, scopes, keys) are in the Chinese table above.
+Feishu, Google Drive, OneDrive and Dropbox are optional; every local file works without an account. **A service appears in the app only when its client id was put in at build time** (`-Pcloud.feishu.appId=…` on the gradle command line, or the same key in `local.properties`, which is not in git). Without one the service is not mentioned anywhere and no request is sent; this release ships with none. With one, **Connect opens the system browser** on the service's own sign-in page (authorisation code + PKCE) and comes back through the registered callback. Where to register, redirect URIs, scopes and keys are in the Chinese table above.
 
-## Known issues (v0.2.4)
+## Known issues (v0.2.5)
 
-- Sign-in, browsing and saving with real cloud accounts are **not verified**: no service is registered yet; only unit tests check the request and response formats
-- After collapsing a spread, the slides window comes back last and sits in front of the sheet
-- On a loaded emulator the 3D chart takes 1–3 s to open (since v0.2.4 it no longer freezes or shows "not responding")
-- Skipping a destroyed window still listed by the system is covered by a unit test only
+- This release contains no cloud client ids, so Accounts & drives does not appear; sign-in, browsing and saving with real cloud accounts are **not verified** (unit tests check the request and response formats only)
+- With several files open, a new window opens in front and the system hides the one underneath. The system has no staggered placement (an overlapping window is not shown; a window beside another is mostly out of view). Switch under Windows n in the title bar, or choose Side by side there
+- The 3D chart belongs to the sheet it was opened from; it is put away when another sheet comes to the front
+- Moving and resizing was checked with a real pointer drag on the emulator; hand, controller ray and gaze + pinch have not been checked one by one on the headset
+- On a loaded emulator the 3D chart takes a few seconds to open (since v0.2.4 it no longer freezes or shows "not responding")
 - With the Chinese IME, tap a sheet cell once before typing
 - The demo video has no sound and is driven by debug commands, not real hand gestures

@@ -3,6 +3,7 @@ package io.embodit.spatialoffice.ui
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -20,6 +21,8 @@ import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -70,7 +73,7 @@ fun EditorTitleBar(graph: Graph, win: Win, s: Session, extra: (@Composable () ->
     TitleBar(
         modifier = Modifier.fillMaxWidth(),
         leadingActions = {
-            IconButton(onClick = { graph.requestClose(win) }, modifier = Modifier.size(48.dp).semantics { contentDescription = "close-file" }) {
+            IconButton(onClick = { graph.requestClose(s) }, modifier = Modifier.size(48.dp).semantics { contentDescription = "close-file" }) {
                 Icon(painter = painterResource(R.drawable.ic_cross), contentDescription = tr(R.string.close_file), modifier = Modifier.size(20.dp))
             }
         },
@@ -84,9 +87,10 @@ fun EditorTitleBar(graph: Graph, win: Win, s: Session, extra: (@Composable () ->
         trailingActions = {
             ToolRow {
                 if (notes.isNotEmpty()) ToolButton(tr(R.string.compat_btn, notes.approx() + notes.held()), "editor/compat", icon = R.drawable.ic_info_circle, onClick = {
-                    graph.overlay = if (graph.overlay is Overlay.Compat) null else Overlay.Compat(win)
+                    if (graph.overlay is Overlay.Compat) graph.overlay = null else graph.show(s, Overlay.Compat(win))
                 })
                 extra?.invoke()
+                WindowsMenu(graph, s)
                 Box {
                     ToolIcon(R.drawable.ic_ellipsis, tr(R.string.more), onClick = { menu = !menu })
                     if (menu) {
@@ -94,9 +98,9 @@ fun EditorTitleBar(graph: Graph, win: Win, s: Session, extra: (@Composable () ->
                             onDismissRequest = { menu = false },
                             positionProvider = rememberMenuPositionProvider(horizontalPlacement = HorizontalPlacement.alignEnd(), verticalPlacement = VerticalPlacement.below(offset = 8.dp)),
                         ) {
-                            MenuItem(title = { Txt(tr(R.string.menu_layout_file), "editor/menu") }, onClick = { menu = false; graph.layoutWithFile(win) })
-                            MenuItem(title = { Txt(tr(R.string.menu_open_backup), "editor/menu") }, onClick = { menu = false; graph.openBackup(win) })
-                            MenuItem(title = { Txt(tr(R.string.menu_shortcuts), "editor/menu") }, onClick = { menu = false; graph.overlay = Overlay.Shortcuts(win) })
+                            MenuItem(title = { Txt(tr(R.string.menu_layout_file), "editor/menu") }, onClick = { menu = false; graph.layoutWithFile(s) })
+                            MenuItem(title = { Txt(tr(R.string.menu_open_backup), "editor/menu") }, onClick = { menu = false; graph.openBackup(s) })
+                            MenuItem(title = { Txt(tr(R.string.menu_shortcuts), "editor/menu") }, onClick = { menu = false; graph.show(s, Overlay.Shortcuts(win)) })
                         }
                     }
                 }
@@ -109,18 +113,17 @@ fun EditorTitleBar(graph: Graph, win: Win, s: Session, extra: (@Composable () ->
 @Composable
 fun FileTools(graph: Graph, win: Win, s: Session, spreadLabel: Int = R.string.spread) {
     ToolRow {
-        ToolButton(tr(spreadLabel), "tools/spread", icon = R.drawable.ic_spread, onClick = { graph.spread(s.kind) })
-        ToolButton(tr(R.string.save_as), "tools/saveas", icon = R.drawable.ic_folder_arrow_right, onClick = { graph.overlay = Overlay.SaveAs(win) })
-        if (!s.readOnly) ToolButton(tr(R.string.save), "tools/save", primary = true, onClick = { graph.save(win) })
+        ToolButton(tr(spreadLabel), "tools/spread", icon = R.drawable.ic_spread, onClick = { graph.spread(s) })
+        ToolButton(tr(R.string.save_as), "tools/saveas", icon = R.drawable.ic_folder_arrow_right, onClick = { graph.show(s, Overlay.SaveAs(win)) })
+        if (!s.readOnly) ToolButton(tr(R.string.save), "tools/save", primary = true, onClick = { graph.save(s) })
     }
 }
 
 /** Shortcuts every editor shares. Returns true when the event was used. */
-fun commonKeys(graph: Graph, win: Win, e: KeyEvent): Boolean {
+fun commonKeys(graph: Graph, s: Session, e: KeyEvent): Boolean {
     if (e.type != KeyEventType.KeyDown || !e.isCtrlPressed || e.isAltPressed) return false
-    val s = graph.session(win) ?: return false
     when (e.key) {
-        Key.S -> graph.save(win)
+        Key.S -> graph.save(s)
         Key.Z -> s.undo()
         Key.Y -> s.redo()
         else -> return false
@@ -141,4 +144,49 @@ fun NoFile(graph: Graph, win: Win) {
     Row(Modifier.fillMaxWidth().padding(32.dp), verticalAlignment = Alignment.CenterVertically) {
         Txt(tr(R.string.recent_empty), "editor/empty", style = PicoTheme.typography.bodyLarge, maxLines = 3)
     }
+}
+
+/**
+ * Root of an editor window (v0.2.5): the window shows the open file with [tag], not "the" document / sheet / deck, so
+ * several windows of one kind can be up. Any press or key in the window, and the window taking the system focus,
+ * makes its file the active one of its kind (what window-less commands and the Stage act on).
+ */
+@Composable
+fun EditorWindow(win: Win, tag: String?, content: @Composable (Graph, Session) -> Unit) {
+    WindowFrame(win, tag) { graph ->
+        val s = graph.sessionByTag(tag)
+        if (s == null) { NoFile(graph, win); return@WindowFrame }
+        val focused = com.pico.spatial.ui.platform.LocalSpatialContainerStateManager.current.isFocused.value
+        androidx.compose.runtime.LaunchedEffect(focused, s) { if (focused) graph.activate(s) }
+        Box(
+            Modifier.fillMaxSize()
+                .pointerInput(s) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                            if (e.type == androidx.compose.ui.input.pointer.PointerEventType.Press) graph.activate(s)
+                        }
+                    }
+                }
+                .onPreviewKeyEvent { graph.activate(s); false },
+        ) { content(graph, s) }
+    }
+}
+
+/**
+ * Title bar › [Windows n] (v0.2.5): every open file has a window of its own and a new one opens in front, over the
+ * others (the system has no staggered placement and hides the window underneath). This menu is how to get from one
+ * to another: the home window, each open file (✓ = this one, • = unsaved changes), and [Side by side], which sets
+ * the windows out to the right and left of this one.
+ */
+@Composable
+fun WindowsMenu(graph: Graph, s: Session) {
+    val open = graph.sessions
+    val entries = ArrayList<MenuEntry>()
+    entries.add(MenuEntry(tr(R.string.win_home), "windows/home") { graph.windows.frontHome() })
+    open.sortedBy { it.tag.drop(1).toIntOrNull() ?: 0 }.forEach { o ->
+        entries.add(MenuEntry((if (o.dirty) "• " else "") + o.ref.name, "windows/file", checked = o === s) { if (o !== s) graph.front(o, quiet = true) })
+    }
+    if (open.size > 1) entries.add(MenuEntry(tr(R.string.win_side_by_side), "windows/arrange") { graph.windows.arrange(graph.refOf(s)) })
+    ToolMenu(tr(R.string.win_menu, open.size), "editor/windows", entries, icon = R.drawable.ic_stack, above = false)
 }

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.ui.graphics.graphicsLayer
@@ -67,7 +68,18 @@ import com.pico.spatial.ui.design.windows.Toolbar
 import com.pico.spatial.ui.design.windows.popup.HorizontalPlacement
 import com.pico.spatial.ui.design.windows.popup.VerticalPlacement
 import io.embodit.spatialoffice.R
+import io.embodit.spatialoffice.core.layout.BoxDrag
+import io.embodit.spatialoffice.core.layout.Corner
+import io.embodit.spatialoffice.core.layout.UnitBox
 import io.embodit.spatialoffice.core.pptx.Shape
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import io.embodit.spatialoffice.ui.CornerDot
+import io.embodit.spatialoffice.ui.MoveTab
+import io.embodit.spatialoffice.ui.cornerHit
+import io.embodit.spatialoffice.ui.dragTotal
+import io.embodit.spatialoffice.ui.probe
 import io.embodit.spatialoffice.core.pptx.ShapeKind
 import io.embodit.spatialoffice.core.pptx.SlideLayoutKind
 import io.embodit.spatialoffice.platform.DeckSession
@@ -90,13 +102,12 @@ import io.embodit.spatialoffice.ui.commonKeys
 
 /** W3 presentation (Planar 1360 × 860 dp): thumbnails, the slide edited in place, speaker notes, toolbar. */
 @Composable
-fun SlidesWindow() {
-    WindowFrame(Win.SLIDES) { graph ->
-        val s = graph.deck
-        if (s == null) { NoFile(graph, Win.SLIDES); return@WindowFrame }
-        Column(Modifier.fillMaxSize().onPreviewKeyEvent { e -> commonKeys(graph, Win.SLIDES, e) || slideKeys(s, e) }) {
+fun SlidesWindow(tag: String? = null) {
+    io.embodit.spatialoffice.ui.EditorWindow(Win.SLIDES, tag) { graph, session ->
+        val s = session as? DeckSession ?: return@EditorWindow
+        Column(Modifier.fillMaxSize().onPreviewKeyEvent { e -> commonKeys(graph, s, e) || slideKeys(s, e) }) {
             EditorTitleBar(graph, Win.SLIDES, s) {
-                ToolButton(tr(R.string.rehearse), "slides/rehearse", icon = R.drawable.ic_play, onClick = { graph.rehearse() })
+                ToolButton(tr(R.string.rehearse), "slides/rehearse", icon = R.drawable.ic_play, onClick = { graph.rehearse(s) })
             }
             Row(Modifier.fillMaxWidth().weight(1f).padding(start = 32.dp, end = 32.dp, bottom = 52.dp)) {
                 Thumbnails(s, Modifier.width(208.dp).fillMaxHeight())
@@ -106,7 +117,11 @@ fun SlidesWindow() {
                     val w = 960.dp
                     SlideCanvas(s, s.current, w, editable = true, modifier = Modifier.align(Alignment.CenterHorizontally))
                     Box(Modifier.height(12.dp))
-                    Txt(tr(R.string.notes), "slides/notes-label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
+                    Row(Modifier.width(w), verticalAlignment = Alignment.CenterVertically) {
+                        Txt(tr(R.string.notes), "slides/notes-label", Modifier.weight(1f), style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
+                        // what the corner dots and the round tab of the picked object are for
+                        if (s.selected >= 0 && !s.readOnly) Txt(tr(R.string.obj_hint), "slides/obj-hint", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
+                    }
                     Box(Modifier.height(6.dp))
                     val slide = s.deck.slides.getOrNull(s.current)
                     var notes by remember(s.current, s.deck) { mutableStateOf(slide?.notes ?: "") }
@@ -197,7 +212,9 @@ fun geomShape(geom: String?, width: Dp): androidx.compose.ui.graphics.Shape = wh
 
 /**
  * One slide drawn at [width]: background, pictures, text boxes at their real positions and proportional sizes.
- * With [editable], text boxes are edited in place; objects this version cannot draw show as a light frame.
+ * With [editable]: every object can be picked, dragged to another place and resized by its corner dots (v0.2.5);
+ * text is edited in place after a click. Objects whose content this version cannot draw show as a light frame and
+ * move and resize like the rest.
  */
 @Composable
 fun SlideCanvas(s: DeckSession, index: Int, width: Dp, editable: Boolean, modifier: Modifier = Modifier) {
@@ -207,32 +224,114 @@ fun SlideCanvas(s: DeckSession, index: Int, width: Dp, editable: Boolean, modifi
     val height = width * (deck.heightEmu.toFloat() / deck.widthEmu)
     val perEmu = width.value / deck.widthEmu           // dp per EMU
     val perPt = perEmu * 12700f                        // dp per point
-    Box(modifier.size(width, height).clip(RoundedCornerShape((width.value / 120f).dp)).background(slide.backgroundRgb?.let { Color(0xFF000000 or it.toLong()) } ?: Ink.Paper)) {
-        for (sh in slide.shapes) {
-            val w = (sh.w * perEmu).coerceAtLeast(1f).dp
-            var box = Modifier.offset((sh.x * perEmu).dp, (sh.y * perEmu).dp).size(w, (sh.h * perEmu).coerceAtLeast(1f).dp)
-            sh.fillRgb?.takeIf { sh.kind != ShapeKind.PICTURE }?.let { rgb -> box = box.background(Color(0xFF000000 or rgb.toLong()), geomShape(sh.geom, w)) }
-            if (editable && s.selected == sh.id) box = box.border(3.dp, Ink.Select, RoundedCornerShape(4.dp))
-            when (sh.kind) {
-                ShapeKind.PICTURE -> sh.imagePart?.let { s.image(it) }?.let { bmp ->
-                    Image(
-                        bitmap = bmp.asImageBitmap(), contentDescription = null, contentScale = ContentScale.FillBounds,
-                        modifier = if (editable) box.clickable { s.selected = sh.id }.semantics { contentDescription = "slide-picture-${sh.id}" } else box,
-                    )
-                }
-                ShapeKind.TITLE, ShapeKind.BODY, ShapeKind.TEXT -> ShapeText(s, index, sh, box, perPt, editable && sh.editable)
-                else -> Box(box.border((width.value / 600f).coerceAtLeast(0.5f).dp, Ink.Line, RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
-                    if (editable) Text(tr(R.string.slide_other), style = TextStyle(fontSize = 13.sp, color = Ink.Hint, textAlign = TextAlign.Center), modifier = Modifier.padding(6.dp))
+    val pxPerEmu = with(androidx.compose.ui.platform.LocalDensity.current) { width.toPx() } / deck.widthEmu
+    val canDrag = editable && !s.readOnly
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    // the outer box is not clipped: the picked object's frame, corner dots and move tab may reach past the slide's edge
+    Box(modifier.size(width, height)) {
+        Box(
+            Modifier.fillMaxSize().clip(RoundedCornerShape((width.value / 120f).dp)).background(slide.backgroundRgb?.let { Color(0xFF000000 or it.toLong()) } ?: Ink.Paper)
+                // a click on the empty slide lets go of the picked object
+                .then(if (editable) Modifier.pointerInput(index) { detectTapGestures(onTap = { s.selected = -1; focusManager.clearFocus() }) } else Modifier),
+        ) {
+            for (sh in slide.shapes) {
+                val b = if (editable) s.boxOf(sh) else UnitBox(sh.x, sh.y, sh.w, sh.h)
+                val w = (b.w * perEmu).coerceAtLeast(1f).dp
+                var box = Modifier.offset((b.x * perEmu).dp, (b.y * perEmu).dp).size(w, (b.h * perEmu).coerceAtLeast(1f).dp)
+                sh.fillRgb?.takeIf { sh.kind != ShapeKind.PICTURE }?.let { rgb -> box = box.background(Color(0xFF000000 or rgb.toLong()), geomShape(sh.geom, w)) }
+                // press and drag anywhere on the object moves it; a click picks it
+                val move = if (canDrag) Modifier.objectDrag(s, sh.id, pxPerEmu, null) else Modifier
+                val pick = if (editable) Modifier.clickable(interactionSource = remember(sh.id) { MutableInteractionSource() }, indication = null) { s.selected = sh.id; focusManager.clearFocus() } else Modifier
+                when {
+                    sh.kind == ShapeKind.PICTURE -> sh.imagePart?.let { s.image(it) }?.let { bmp ->
+                        Image(
+                            bitmap = bmp.asImageBitmap(), contentDescription = null, contentScale = ContentScale.FillBounds,
+                            modifier = if (editable) box.then(move).then(pick).semantics { contentDescription = "slide-picture-${sh.id}" } else box,
+                        )
+                    }
+                    sh.table != null -> SlideTable(s, index, sh, box.then(move).then(pick), perPt, editable && sh.cellsEditable && !s.readOnly)
+                    sh.kind == ShapeKind.TITLE || sh.kind == ShapeKind.BODY || sh.kind == ShapeKind.TEXT -> ShapeText(s, index, sh, box, move, perPt, editable, editable && sh.editable && !s.readOnly)
+                    else -> Box(
+                        box.then(move).then(pick).border((width.value / 600f).coerceAtLeast(0.5f).dp, Ink.Line, RoundedCornerShape(4.dp)).semantics { contentDescription = "slide-object-${sh.id}" },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (editable) Text(tr(R.string.slide_other), style = TextStyle(fontSize = 13.sp, color = Ink.Hint, textAlign = TextAlign.Center), modifier = Modifier.padding(6.dp))
+                    }
                 }
             }
         }
+        val sel = if (editable) slide.shapes.firstOrNull { it.id == s.selected } else null
+        if (sel != null) PickedFrame(s, sel, perEmu, pxPerEmu, height, canDrag)
     }
+}
+
+/** Drag of object [id]: its body / move tab ([corner] null) or one of its corners. Travel since the press, in EMU. */
+private fun Modifier.objectDrag(s: DeckSession, id: Int, pxPerEmu: Float, corner: Corner?): Modifier = dragTotal(
+    key = Triple(id, corner, pxPerEmu), name = "slide shape $id ${corner ?: "move"}",
+    onStart = { s.beginBoxDrag(id) },
+    onTotal = { x, y ->
+        val dx = BoxDrag.units(x, pxPerEmu); val dy = BoxDrag.units(y, pxPerEmu)
+        if (corner == null) s.moveBoxBy(dx, dy) else s.resizeBoxBy(corner, dx, dy)
+    },
+    onEnd = { s.endBoxDrag() },
+    onCancel = { s.cancelBoxDrag() },
+)
+
+/** The picked object's frame: blue outline, a dot on each corner to resize by, and the round tab to move it by. */
+@Composable
+private fun PickedFrame(s: DeckSession, sh: Shape, perEmu: Float, pxPerEmu: Float, slideH: Dp, canDrag: Boolean) {
+    val b = s.boxOf(sh)
+    val x = (b.x * perEmu).dp; val y = (b.y * perEmu).dp
+    val w = (b.w * perEmu).coerceAtLeast(1f).dp; val h = (b.h * perEmu).coerceAtLeast(1f).dp
+    Box(Modifier.offset(x, y).size(w, h).probe("slide-${sh.id}-body").border(3.dp, Ink.Select, RoundedCornerShape(4.dp)))
+    if (!canDrag) return
+    val hit = cornerHit(w, h)
+    val label = tr(R.string.obj_resize)
+    for (c in Corner.values()) {
+        CornerDot(c, if (c.left) x else x + w, if (c.top) y else y + h, hit, label, Modifier.objectDrag(s, sh.id, pxPerEmu, c), "slide-${sh.id}")
+    }
+    // above the object; below it when there is no room above
+    val tabY = if (y >= 40.dp) y - 34.dp else minOf(y + h + 34.dp, slideH + 30.dp)
+    MoveTab(x + w / 2, tabY, tr(R.string.obj_move), Modifier.objectDrag(s, sh.id, pxPerEmu, null), "slide-${sh.id}")
 }
 
 private fun shapeString(sh: Shape): String = sh.paras.joinToString("\n") { it.text }
 
+/**
+ * Text that is read until it is clicked, then typed into (v0.2.5). While it is only read, a press-and-drag on it
+ * belongs to [whole] (moving the object it is part of); a text field would keep the drag for its own selection.
+ */
 @Composable
-private fun ShapeText(s: DeckSession, slide: Int, sh: Shape, box: Modifier, perPt: Float, editable: Boolean) {
+private fun TapEdit(
+    key: Any, model: String, style: TextStyle, name: String, whole: Modifier, inner: Modifier, align: Alignment,
+    hint: String?, editable: Boolean, onPick: () -> Unit, onChange: (String) -> Unit,
+) {
+    var editing by remember(key) { mutableStateOf(false) }
+    var text by remember(key) { mutableStateOf(model) }
+    var hadFocus by remember(key) { mutableStateOf(false) }
+    if (!editing && text != model) text = model
+    val requester = remember(key) { FocusRequester() }
+    val outer = if (editing || !editable) whole
+    else whole.clickable(interactionSource = remember(key) { MutableInteractionSource() }, indication = null) { onPick(); hadFocus = false; editing = true }.semantics { contentDescription = name }
+    Box(outer.then(inner).border(1.dp, if (editing) Ink.Select else Color(0x22000000), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp), contentAlignment = align) {
+        if (text.isEmpty() && hint != null) Text(hint, style = style.copy(color = Ink.Hint), modifier = Modifier.fillMaxWidth())
+        if (editing) {
+            BasicTextField(
+                value = text,
+                onValueChange = { text = it; onChange(it) },
+                textStyle = style,
+                cursorBrush = SolidColor(Ink.Select),
+                modifier = Modifier.fillMaxWidth().focusRequester(requester)
+                    .onFocusChanged { if (it.isFocused) { hadFocus = true; onPick() } else if (hadFocus) editing = false }
+                    .semantics { contentDescription = name },
+            )
+            LaunchedEffect(key) { repeat(5) { if (runCatching { requester.requestFocus() }.isSuccess) return@LaunchedEffect; kotlinx.coroutines.delay(60) } }
+        } else Text(text, style = style, modifier = Modifier.fillMaxWidth())
+    }
+}
+
+@Composable
+private fun ShapeText(s: DeckSession, slide: Int, sh: Shape, box: Modifier, move: Modifier, perPt: Float, canPick: Boolean, editable: Boolean) {
     val size = ((sh.fontPt ?: if (sh.kind == ShapeKind.TITLE) 40f else 20f) * perPt)
     val style = TextStyle(
         fontSize = size.sp, lineHeight = (size * 1.25f).sp,
@@ -242,27 +341,40 @@ private fun ShapeText(s: DeckSession, slide: Int, sh: Shape, box: Modifier, perP
     )
     val align = if (sh.kind == ShapeKind.TITLE) Alignment.CenterStart else Alignment.TopStart
     if (!editable) {
-        Box(box, contentAlignment = align) {
+        // thumbnails, and text this version does not edit: still picked and moved like any object on the editing canvas
+        val pick = if (canPick) move.clickable(interactionSource = remember(sh.id) { MutableInteractionSource() }, indication = null) { s.selected = sh.id } else Modifier
+        Box(box.then(pick), contentAlignment = align) {
             Text(sh.paras.joinToString("\n") { (if (it.bullet) "  ".repeat(it.level) + "• " else "") + it.text }, style = style, modifier = Modifier.fillMaxWidth())
         }
         return
     }
-    val model = shapeString(sh)
-    var text by remember(slide, sh.id) { mutableStateOf(model) }
-    var focused by remember(slide, sh.id) { mutableStateOf(false) }
-    if (!focused && text != model) text = model
-    Box(box.border(1.dp, if (focused) Ink.Select else Color(0x22000000), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp), contentAlignment = align) {
-        if (text.isEmpty() && sh.fillRgb == null) Text(
-            tr(if (sh.kind == ShapeKind.TITLE) R.string.slide_title_ph else R.string.slide_body_ph),
-            style = style.copy(color = Ink.Hint), modifier = Modifier.fillMaxWidth(),
-        )
-        BasicTextField(
-            value = text,
-            onValueChange = { text = it; s.setText(slide, sh.id, it) },
-            textStyle = style,
-            cursorBrush = SolidColor(Ink.Select),
-            modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused; if (it.isFocused) s.selected = sh.id }.semantics { contentDescription = "slide-text-${sh.id}" },
-        )
+    TapEdit(
+        key = slide to sh.id, model = shapeString(sh), style = style, name = "slide-text-${sh.id}", whole = box.then(move), inner = Modifier, align = align,
+        hint = if (sh.fillRgb == null) tr(if (sh.kind == ShapeKind.TITLE) R.string.slide_title_ph else R.string.slide_body_ph) else null,
+        editable = true, onPick = { s.selected = sh.id }, onChange = { s.setText(slide, sh.id, it) },
+    )
+}
+
+/** A table on the slide: its cells as a grid over the frame. On the editing canvas a click types into a cell; a drag moves the table. */
+@Composable
+private fun SlideTable(s: DeckSession, slide: Int, sh: Shape, box: Modifier, perPt: Float, editable: Boolean) {
+    val rows = sh.table ?: return
+    val size = 16f * perPt
+    Column(box.background(Ink.Paper).border(1.dp, Ink.Line).semantics { contentDescription = "slide-table-${sh.id}" }) {
+        rows.forEachIndexed { r, row ->
+            Row(Modifier.fillMaxWidth().weight(1f).background(if (r == 0) Ink.Header else Ink.Paper)) {
+                row.forEachIndexed { c, cell ->
+                    val style = TextStyle(fontSize = size.sp, lineHeight = (size * 1.2f).sp, color = Ink.Text, fontWeight = if (r == 0) FontWeight.SemiBold else null)
+                    val cellBox = Modifier.weight(1f).fillMaxHeight().border(0.5.dp, Ink.Line)
+                    if (!editable) Box(cellBox.padding(horizontal = 4.dp), contentAlignment = Alignment.CenterStart) { Text(cell, style = style, modifier = Modifier.fillMaxWidth()) }
+                    else TapEdit(
+                        key = Triple(slide, sh.id, r * 100 + c), model = cell, style = style, name = "slide-table-${sh.id}-cell-$r-$c",
+                        whole = cellBox, inner = Modifier, align = Alignment.CenterStart, hint = null, editable = true,
+                        onPick = { s.selected = sh.id }, onChange = { s.setTableCell(slide, sh.id, r, c, it) },
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -294,11 +406,12 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
                     MenuEntry(tr(R.string.dup_slide), "slides/dup") { s.duplicateSlide() },
                     if (s.current > 0) MenuEntry(tr(R.string.slide_up), "slides/up") { s.moveSlide(-1) } else null,
                     if (s.current < s.slideCount - 1) MenuEntry(tr(R.string.slide_down), "slides/down") { s.moveSlide(1) } else null,
-                    MenuEntry(tr(R.string.delete_slide), "slides/delete") { if (!s.deleteSlide()) graph.say(Win.SLIDES, graph.str(R.string.last_slide)) },
+                    MenuEntry(tr(R.string.delete_slide), "slides/delete") { if (!s.deleteSlide()) graph.say(s, graph.str(R.string.last_slide)) },
                 ) + THEMES.map { (name, colors) -> MenuEntry(tr(R.string.theme_item, tr(name)), "slides/theme-item") { s.setColors(colors) } })
                 ToolMenu(tr(R.string.menu_insert), "slides/insert", entries = listOf(
                     MenuEntry(tr(R.string.text_box), "slides/textbox") { s.addTextBox("") },
-                    MenuEntry(tr(R.string.ins_picture), "slides/picture") { graph.pickImage(Win.SLIDES) { b, e, w, h -> s.addPicture(b, e, w, h) } },
+                    MenuEntry(tr(R.string.slide_table), "slides/table") { s.addTable() },
+                    MenuEntry(tr(R.string.ins_picture), "slides/picture") { graph.pickImage(s) { b, e, w, h -> s.addPicture(b, e, w, h) } },
                     MenuEntry(tr(R.string.shape_rect), "slides/rect") { s.addShape("rect", SHAPE_FILL) },
                     MenuEntry(tr(R.string.shape_round), "slides/round") { s.addShape("roundRect", SHAPE_FILL) },
                     MenuEntry(tr(R.string.shape_ellipse), "slides/ellipse") { s.addShape("ellipse", SHAPE_FILL) },

@@ -14,13 +14,14 @@ android {
         applicationId = "io.embodit.spatialoffice"
         minSdk = 35
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.2.4"
+        versionCode = 7
+        versionName = "0.2.5"
 
-        // Cloud accounts (PRD §9): each service needs an app registration the user makes (README, "Connecting accounts").
-        // Fill these in local.properties (never committed); left empty, the service says "register the app first".
+        // Cloud accounts (PRD §9): a service is offered in the app only when its client id is put in at build time
+        // (README "连接账号"): `-Pcloud.feishu.appId=…` on the gradle command line, or the same key in local.properties
+        // (never committed). Without one the service does not appear anywhere in the app.
         val local = Properties().also { p -> rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { p.load(it) } }
-        fun cfg(key: String, default: String = "") = "\"" + (local.getProperty(key) ?: default).replace("\"", "") + "\""
+        fun cfg(key: String, default: String = "") = "\"" + ((project.findProperty(key) as String?) ?: local.getProperty(key) ?: default).replace("\"", "") + "\""
         buildConfigField("String", "FEISHU_APP_ID", cfg("cloud.feishu.appId"))
         buildConfigField("String", "FEISHU_APP_SECRET", cfg("cloud.feishu.appSecret"))
         buildConfigField("String", "FEISHU_REDIRECT", cfg("cloud.feishu.redirect", "http://127.0.0.1:53682/callback"))

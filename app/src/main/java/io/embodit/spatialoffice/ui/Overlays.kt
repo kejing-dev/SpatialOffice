@@ -53,9 +53,9 @@ import io.embodit.spatialoffice.platform.held
 
 /** Dialogs and sheets every window can show; each renders only in the window that owns the current overlay. */
 @Composable
-fun SharedOverlays(graph: Graph, win: Win) {
+fun SharedOverlays(graph: Graph, win: Win, tag: String? = null) {
     val o = graph.overlay ?: return
-    if (o.win != win) return
+    if (o.win != win || (o.tag != null && tag != null && o.tag != tag)) return
     val s = graph.session(win)
     when (o) {
         is Overlay.Unsaved -> if (s != null) UnsavedDialog(graph, s)
@@ -313,7 +313,7 @@ private fun FindSheet(graph: Graph, s: DocSession) {
                 SecondaryButton(tr(R.string.close), "find/close", onClick = { graph.overlay = null })
                 PrimaryButton(tr(R.string.replace_all), "find/replace", enabled = hits > 0, onClick = {
                     val n = s.replaceAll(find, repl)
-                    graph.say(Win.DOC, graph.str(R.string.replaced_n, n))
+                    graph.say(s, graph.str(R.string.replaced_n, n))
                 })
             }
         },

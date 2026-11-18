@@ -62,6 +62,31 @@ internal object PptxTemplates {
             "<p:blipFill><a:blip r:embed=\"$rid\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>" +
             "<p:spPr>${xfrm(x, y, w, h)}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr></p:pic>"
 
+    const val URI_TABLE = "http://schemas.openxmlformats.org/drawingml/2006/table"
+
+    /**
+     * A plain table of [rows] × [cols] empty cells in a graphic frame: thin grey lines on every cell (no table style
+     * part is needed), the first row tinted as a header.
+     */
+    fun table(id: Int, rows: Int, cols: Int, x: Long, y: Long, w: Long, h: Long, nsDecl: String): String {
+        val colW = w / cols; val rowH = h / rows
+        fun ln(tag: String) = "<a:$tag w=\"12700\"><a:solidFill><a:srgbClr val=\"9CA3AF\"/></a:solidFill></a:$tag>"
+        val lines = ln("lnL") + ln("lnR") + ln("lnT") + ln("lnB")
+        val sb = StringBuilder("<p:graphicFrame$nsDecl><p:nvGraphicFramePr><p:cNvPr id=\"$id\" name=\"Table $id\"/>")
+        sb.append("<p:cNvGraphicFramePr><a:graphicFrameLocks noGrp=\"1\"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>")
+        sb.append("<p:xfrm><a:off x=\"$x\" y=\"$y\"/><a:ext cx=\"${colW * cols}\" cy=\"${rowH * rows}\"/></p:xfrm>")
+        sb.append("<a:graphic><a:graphicData uri=\"$URI_TABLE\"><a:tbl><a:tblPr firstRow=\"1\"/><a:tblGrid>")
+        repeat(cols) { sb.append("<a:gridCol w=\"$colW\"/>") }
+        sb.append("</a:tblGrid>")
+        repeat(rows) { r ->
+            sb.append("<a:tr h=\"$rowH\">")
+            val fill = if (r == 0) "<a:solidFill><a:srgbClr val=\"E5E7EB\"/></a:solidFill>" else "<a:noFill/>"
+            repeat(cols) { sb.append("<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang=\"en-US\" sz=\"1600\"/></a:p></a:txBody><a:tcPr>$lines$fill</a:tcPr></a:tc>") }
+            sb.append("</a:tr>")
+        }
+        return sb.append("</a:tbl></a:graphicData></a:graphic></p:graphicFrame>").toString()
+    }
+
     /** A filled preset shape with an empty, centred text body. */
     fun shape(id: Int, geom: String, x: Long, y: Long, w: Long, h: Long, fillRgb: Int): String {
         val hex = String.format("%06X", fillRgb and 0xFFFFFF)

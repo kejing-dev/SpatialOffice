@@ -34,7 +34,11 @@ data class Paragraph(
 }
 
 /** Cell text, row by row. A horizontally merged cell is followed by empty strings so every row lines up with the grid. */
-data class TableBlock(override val id: Int, val rows: List<List<String>>) : DocBlock()
+data class TableBlock(
+    override val id: Int, val rows: List<List<String>>,
+    /** Width as a share of the text width, 10–100 (v0.2.5: tables can be made narrower or wider). */
+    val widthPct: Int = 100,
+) : DocBlock()
 
 data class ImageBlock(override val id: Int, val part: String, val widthEmu: Long, val heightEmu: Long) : DocBlock()
 

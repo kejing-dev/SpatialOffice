@@ -42,11 +42,7 @@
     <string name="browse_grant_head" formatted="false">Only files this app created are visible</string>
     <string name="browse_grant_sub" formatted="false">Allow “All files access” to list files that other apps put in Download and Documents. Or use “Open file…” to pick a single file.</string>
     <string name="browse_grant_btn" formatted="false">Allow</string>
-    <string name="br_off_head">%1$s is not available in this version</string>
-    <string name="br_off_sub" formatted="false">It opens once the app identity is registered. Local files are not affected.</string>
     <string name="account_sub" formatted="false">Optional. Local files open, edit and save without any account</string>
-    <string name="acct_off" formatted="false">Not available in this version. Later: browse and open cloud files directly and save changes back</string>
-    <string name="acct_soon" formatted="false">Not yet</string>
     <string name="scope_head" formatted="false">What the app can do once connected</string>
     <string name="scope_sub" formatted="false">Browse your folders, open the files you pick and save changes back in place. Approval happens on the provider’s own page; your password never passes through this app. The token is encrypted on this device and deleted on sign-out.</string>
     <string name="set_language" formatted="false">语言 Language</string>
@@ -224,7 +220,7 @@
     <string name="slide_n">Slide %1$d</string>
     <string name="slide_title_ph" formatted="false">Click to add a title</string>
     <string name="slide_body_ph" formatted="false">Click to add text</string>
-    <string name="slide_other" formatted="false">An object that cannot be shown here yet (read-only, untouched in the file)</string>
+    <string name="slide_other" formatted="false">An object whose content cannot be shown here yet (it can be moved and resized; its content is untouched)</string>
     <string name="last_slide" formatted="false">Keep at least one slide</string>
     <string name="arr_row" formatted="false">Row</string>
     <string name="arr_arc" formatted="false">Arc</string>
@@ -300,10 +296,8 @@
     <string name="acct_expired" formatted="false">Sign-in expired. Changes stay on this device and are saved once you sign in again</string>
     <string name="acct_expired_note" formatted="false">Sign-in expired. Nothing is lost; sign in again, then save</string>
     <string name="acct_failed">Could not connect: %1$s</string>
-    <string name="acct_need_reg">The developer has to register the app first (set %1$s in local.properties, see README)</string>
-    <string name="acct_need_reg_toast">%1$s: the developer has to register the app first. Set %2$s in local.properties and rebuild</string>
     <string name="acct_no_browser" formatted="false">No browser on this device can open the sign-in page</string>
-    <string name="acct_off_now" formatted="false">Not connected. Click Connect to sign in in the browser; your password never passes through this app</string>
+    <string name="acct_off_now" formatted="false">Not connected. Connect opens the browser to sign in; your password never passes through this app</string>
     <string name="acct_on">Connected: %1$s</string>
     <string name="acct_relogin" formatted="false">Sign in again</string>
     <string name="acct_revoked" formatted="false">Access was revoked and the token deleted. Changes stay on this device</string>
@@ -315,8 +309,6 @@
     <string name="align_justify" formatted="false">Justify</string>
     <string name="align_left" formatted="false">Align left</string>
     <string name="align_right" formatted="false">Align right</string>
-    <string name="br_reg_head" formatted="false">This place is not available yet</string>
-    <string name="br_reg_sub">The developer first registers the app in the provider’s developer console, puts the ID in %1$s in local.properties and rebuilds. README “Connecting accounts” lists where to register and which callback address to enter.</string>
     <string name="chart_bar" formatted="false">Column chart</string>
     <string name="chart_line" formatted="false">Line chart</string>
     <string name="chart_n_of">%1$d / %2$d</string>
@@ -426,9 +418,9 @@
     <string name="how_to_slides_hand" formatted="false">Pinch and hold a thumbnail, then drag; let go to drop it</string>
     <string name="how_to_slides_ctrl" formatted="false">Hold the trigger on a thumbnail, then drag; release to drop it</string>
     <string name="how_to_cloud" formatted="false">Connect a cloud drive</string>
-    <string name="how_to_cloud_keys" formatted="false">Home › Accounts &amp; drives › Connect, approve in the browser; then switch Browse to that drive</string>
-    <string name="how_to_cloud_hand" formatted="false">Pinch Connect and approve on the browser page; back here, pinch a file under Browse</string>
-    <string name="how_to_cloud_ctrl" formatted="false">Trigger on Connect and approve on the browser page; back here, trigger on a file under Browse</string>
+    <string name="how_to_cloud_keys" formatted="false">Home › Accounts &amp; drives › Connect: the browser opens the sign-in page and comes back once you approve; then switch Browse to that drive</string>
+    <string name="how_to_cloud_hand" formatted="false">Pinch Connect and approve on the browser page that opens; back here, pinch a file under Browse</string>
+    <string name="how_to_cloud_ctrl" formatted="false">Trigger on Connect and approve on the browser page that opens; back here, trigger on a file under Browse</string>
     <string name="theme_item">Theme: %1$s</string>
     <string name="style_h2_short" formatted="false">Heading 2</string>
     <string name="style_bullet_short" formatted="false">Bullets</string>
@@ -436,7 +428,6 @@
     <string name="group_quick_new" formatted="false">Start a new file</string>
     <string name="new_open_head" formatted="false">Already have a file?</string>
     <string name="new_open_sub" formatted="false">Open a .docx / .xlsx / .pptx and save back to the same file</string>
-    <string name="acct_need_reg_tapped">You pressed Connect: the developer has to register the app first (fill %1$s in local.properties). Until then it cannot connect</string>
     <string name="scan_failed">Could not get a code: %1$s</string>
     <string name="feishu_app_folder" formatted="false">Spatial Office</string>
     <string name="feishu_inbox_folder" formatted="false">Inbox</string>
@@ -444,10 +435,8 @@
     <string name="open" formatted="false">Open</string>
     <string name="inbox_sub" formatted="false">Documents you put here from your computer</string>
     <string name="connect_title">Connect %1$s</string>
-    <string name="connect_need_reg">The developer has to register the app first: fill %1$s in local.properties and rebuild. Until then neither way works</string>
-    <string name="way_scan" formatted="false">Scan with your phone or computer (recommended)</string>
+    <string name="way_scan" formatted="false">Scan with your phone or computer</string>
     <string name="way_scan_sub" formatted="false">The headset only shows a code; you agree on the other device</string>
-    <string name="way_scan_none">%1$s has no scan sign-in; use the browser</string>
     <string name="way_browser" formatted="false">Sign in in the headset browser</string>
     <string name="way_browser_sub" formatted="false">Opens the service’s own sign-in page, then comes back here</string>
     <string name="connect_no_password" formatted="false">You never type a password here</string>
@@ -481,4 +470,29 @@
     <string name="copy_beside_title" formatted="false">Original untouched; saved a copy</string>
     <string name="copy_beside_msg">Feishu would not update this file in place. “%1$s” is left as it was; your changes were saved as “%2$s” beside it, and later saves go to that copy.</string>
     <string name="how_to_cloud_note" formatted="false">If Feishu won’t update a Drive file in place, the original stays as it is and your edits go to “name (Spatial Office copy)” beside it; a dialog tells you</string>
+    <string name="too_many_open">%1$d files of this kind are open already. Close one first</string>
+    <string name="already_open">%1$s is already open: this window</string>
+    <string name="how_to_object" formatted="false">Move and resize inserted objects</string>
+    <string name="how_to_object_keys" formatted="false">Click to pick, hold and drag to move; drag a corner dot to resize. In a document, click a picture or table, then drag a corner</string>
+    <string name="how_to_object_hand" formatted="false">Look at it, pinch and drag; to resize, pinch a corner dot and drag</string>
+    <string name="how_to_object_ctrl" formatted="false">Point the ray at it, hold the trigger and drag; to resize, hold a corner dot and drag</string>
+    <string name="how_to_multi" formatted="false">Several files at once</string>
+    <string name="how_to_multi_keys" formatted="false">Click more files under Recent or Browse: each opens in its own window and nothing is replaced. New windows open in front; switch under Windows n in the title bar, or go Home there</string>
+    <string name="how_to_multi_hand" formatted="false">Pinch Windows n in the title bar, then a file; for side by side choose Side by side, or pinch the small dot under a window and move it aside</string>
+    <string name="how_to_multi_ctrl" formatted="false">Trigger on Windows n in the title bar, then on a file; for side by side choose Side by side, or hold the small dot under a window and move it aside</string>
+    <string name="slide_table" formatted="false">Table</string>
+    <string name="obj_move" formatted="false">Drag to move</string>
+    <string name="obj_resize" formatted="false">Drag to resize</string>
+    <string name="obj_hint" formatted="false">Picked: drag to move, drag a corner dot to resize</string>
+    <string name="slide_cell_ph" formatted="false">Type here</string>
+    <string name="win_menu">Windows %1$d</string>
+    <string name="win_home" formatted="false">Home</string>
+    <string name="win_side_by_side" formatted="false">Side by side</string>
+    <string name="others_behind">%1$d more open behind; switch under Windows in the title bar</string>
+    <string name="open_now" formatted="false">Open now</string>
+    <string name="acct_how_head" formatted="false">Connect opens the browser</string>
+    <string name="acct_how_sub" formatted="false">Sign in and approve on the service’s own page; it then comes back here. You never type a password in this app</string>
+    <string name="browse_sub_local" formatted="false">Files on this device. Saving writes back to where the file came from</string>
+    <string name="about_sub_local">Version %1$s · compatible with .docx / .xlsx / .pptx (open standard) · local files work fully offline</string>
+    <string name="set_legal_local" formatted="false">File format names are used only to describe compatibility. This app is not affiliated with or endorsed by their owners.</string>
 </resources>

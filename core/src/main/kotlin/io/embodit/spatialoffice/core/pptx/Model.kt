@@ -18,6 +18,10 @@ data class Shape(
     val geom: String? = null,
     /** Solid fill as 0xRRGGBB; null when the shape has no plain fill. */
     val fillRgb: Int? = null,
+    /** Cell text of a table (a graphic frame holding `a:tbl`), row by row; null for everything else. */
+    val table: List<List<String>>? = null,
+    /** A plain table (no merged cells): its cells can be typed into ([editable] stays false: a table has no single text). */
+    val cellsEditable: Boolean = false,
 )
 
 data class Slide(val index: Int, val shapes: List<Shape>, val notes: String, val backgroundRgb: Int?)

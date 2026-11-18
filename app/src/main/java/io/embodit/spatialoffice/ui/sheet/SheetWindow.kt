@@ -123,12 +123,11 @@ fun chartRange(s: SheetSession): IntArray? {
 
 /** W2 spreadsheet (Planar 1280 × 800 dp): title bar, formula bar, grid, sheet picker, toolbar. */
 @Composable
-fun SheetWindow() {
-    WindowFrame(Win.SHEET) { graph ->
-        val s = graph.sheet
-        if (s == null) { NoFile(graph, Win.SHEET); return@WindowFrame }
+fun SheetWindow(tag: String? = null) {
+    io.embodit.spatialoffice.ui.EditorWindow(Win.SHEET, tag) { graph, session ->
+        val s = session as? SheetSession ?: return@EditorWindow
         val edit = remember(s) { CellEdit() }
-        Column(Modifier.fillMaxSize().onPreviewKeyEvent { e -> commonKeys(graph, Win.SHEET, e) || sheetKeys(graph, s, edit, e) }) {
+        Column(Modifier.fillMaxSize().onPreviewKeyEvent { e -> commonKeys(graph, s, e) || sheetKeys(graph, s, edit, e) }) {
             EditorTitleBar(graph, Win.SHEET, s)
             Column(Modifier.fillMaxWidth().weight(1f).padding(start = 32.dp, end = 32.dp, bottom = 52.dp)) {
                 FormulaBar(s, edit, Modifier.fillMaxWidth())
@@ -147,7 +146,7 @@ fun sheetKeys(graph: Graph, s: SheetSession, edit: CellEdit, e: KeyEvent): Boole
     if (e.type != KeyEventType.KeyDown) return false
     fun move(dr: Int, dc: Int) { edit.commit(s); s.select(s.row + dr, s.col + dc); edit.load(s) }
     return when {
-        e.isAltPressed && e.key == Key.Equals -> { edit.commit(s); if (s.autoSum() == null) graph.say(Win.SHEET, graph.str(R.string.no_num)); edit.load(s); true }
+        e.isAltPressed && e.key == Key.Equals -> { edit.commit(s); if (s.autoSum() == null) graph.say(s, graph.str(R.string.no_num)); edit.load(s); true }
         e.isCtrlPressed && e.key == Key.B -> { s.setBold(!s.book.cell(s.sheet, s.row, s.col).bold); true }
         e.isCtrlPressed || e.isAltPressed -> false
         e.key == Key.Enter || e.key == Key.NumPadEnter -> { move(if (e.isShiftPressed) -1 else 1, 0); true }
@@ -318,13 +317,15 @@ fun openChart(graph: Graph, s: SheetSession) {
     if (index < 0) {
         val region = currentRegion(s)
         val title = s.book.sheetNames.getOrElse(s.sheet) { "" }
-        if (region == null || !s.addChart(region, title)) { graph.say(Win.SHEET, graph.str(R.string.chart_fail)); return }
+        if (region == null || !s.addChart(region, title)) { graph.say(s, graph.str(R.string.chart_fail)); return }
         index = s.book.charts().indexOfFirst { it.sheet == s.sheet }
-        graph.say(Win.SHEET, graph.str(R.string.chart_made, title))
+        graph.say(s, graph.str(R.string.chart_made, title))
     }
+    graph.activate(s)
+    graph.chartTag = s.tag
     graph.chartIndex = index.coerceAtLeast(0)
     graph.chartYaw = io.embodit.spatialoffice.ui.chart.CHART_DEFAULT_YAW
-    graph.windows.open(Win.CHART)
+    graph.windows.openChart()
 }
 
 /** Fill colours offered in the toolbar: light tints that keep black text readable (≥ 4.5:1). */
@@ -337,9 +338,9 @@ val FILLS: List<Pair<Int, Int?>> = listOf(
 fun makeChart(graph: Graph, s: SheetSession, type: String) {
     val region = currentRegion(s)
     val title = s.book.sheetNames.getOrElse(s.sheet) { "" }
-    if (region == null || !s.addChart(region, title, type)) { graph.say(Win.SHEET, graph.str(R.string.chart_fail)); return }
-    graph.say(Win.SHEET, graph.str(R.string.chart_made, title))
-    graph.overlay = Overlay.ChartView(Win.SHEET, s.book.charts().lastIndex)
+    if (region == null || !s.addChart(region, title, type)) { graph.say(s, graph.str(R.string.chart_fail)); return }
+    graph.say(s, graph.str(R.string.chart_made, title))
+    graph.show(s, Overlay.ChartView(Win.SHEET, s.book.charts().lastIndex))
 }
 
 @Composable
@@ -355,7 +356,7 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
     Toolbar(
         supportingContent = { FileTools(graph, Win.SHEET, s) },
         content = {
-            Box(Modifier.focusRequester(keys).onPreviewKeyEvent { e -> commonKeys(graph, Win.SHEET, e) || sheetKeys(graph, s, edit, e) || typeIntoCell(s, edit, e) }.focusable()) {
+            Box(Modifier.focusRequester(keys).onPreviewKeyEvent { e -> commonKeys(graph, s, e) || sheetKeys(graph, s, edit, e) || typeIntoCell(s, edit, e) }.focusable()) {
             ToolRow {
                 ToolToggle(R.drawable.ic_text_bold, tr(R.string.bold), cell.bold, { on -> edit.commit(s); s.setBold(on) }, enabled = !s.isCsv)
                 ToolMenu(
@@ -369,11 +370,11 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
                     MenuEntry(tr(label), "sheet/fill-item") { run { s.setFill(rgb) } }
                 })
                 ToolIcon(R.drawable.ic_sigma, tr(R.string.autosum), onClick = {
-                    edit.commit(s); if (s.autoSum() == null) graph.say(Win.SHEET, graph.str(R.string.no_num)); edit.load(s)
+                    edit.commit(s); if (s.autoSum() == null) graph.say(s, graph.str(R.string.no_num)); edit.load(s)
                 })
                 ToolMenu(tr(R.string.menu_data), "sheet/data", icon = R.drawable.ic_list_sort_down, entries = listOfNotNull(
-                    MenuEntry(tr(R.string.sort_asc), "sheet/sort-asc") { run { graph.say(Win.SHEET, if (s.sortByColumn(true)) graph.str(R.string.sorted, A1.colName(s.col)) else graph.str(R.string.sort_refused)) } },
-                    MenuEntry(tr(R.string.sort_desc), "sheet/sort-desc") { run { graph.say(Win.SHEET, if (s.sortByColumn(false)) graph.str(R.string.sorted_desc, A1.colName(s.col)) else graph.str(R.string.sort_refused)) } },
+                    MenuEntry(tr(R.string.sort_asc), "sheet/sort-asc") { run { graph.say(s, if (s.sortByColumn(true)) graph.str(R.string.sorted, A1.colName(s.col)) else graph.str(R.string.sort_refused)) } },
+                    MenuEntry(tr(R.string.sort_desc), "sheet/sort-desc") { run { graph.say(s, if (s.sortByColumn(false)) graph.str(R.string.sorted_desc, A1.colName(s.col)) else graph.str(R.string.sort_refused)) } },
                     MenuEntry(tr(R.string.filter_by, cell.display.ifEmpty { tr(R.string.filter_blank) }), "sheet/filter") { run { sheetFilter(graph, s) } },
                     if (s.filterCol >= 0) MenuEntry(tr(R.string.filter_clear), "sheet/filter-clear") { s.filterCol = -1; s.filterValue = null } else null,
                     if (!s.isCsv) MenuEntry(tr(R.string.freeze_top), "sheet/freeze", checked = s.frozen > 0) { run { s.toggleFreeze() } } else null,
@@ -388,7 +389,7 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
                     MenuEntry(tr(R.string.chart_bar), "sheet/chart-bar") { run { makeChart(graph, s, "bar") } },
                     MenuEntry(tr(R.string.chart_line), "sheet/chart-line") { run { makeChart(graph, s, "line") } },
                     MenuEntry(tr(R.string.chart_pie), "sheet/chart-pie") { run { makeChart(graph, s, "pie") } },
-                    if (hasCharts) MenuEntry(tr(R.string.chart_view), "sheet/chart-view") { graph.overlay = Overlay.ChartView(Win.SHEET) } else null,
+                    if (hasCharts) MenuEntry(tr(R.string.chart_view), "sheet/chart-view") { graph.show(s, Overlay.ChartView(Win.SHEET)) } else null,
                     MenuEntry(tr(R.string.chart_3d), "sheet/chart-3d") { run { openChart(graph, s) } },
                 ))
                 ToolDivider()
@@ -401,11 +402,11 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
 
 /** Data ▸ Filter by this value: shows only the rows whose value in this column equals the selected cell's. */
 fun sheetFilter(graph: Graph, s: SheetSession) {
-    if (s.row == 0) { graph.say(Win.SHEET, graph.str(R.string.filter_header)); return }
+    if (s.row == 0) { graph.say(s, graph.str(R.string.filter_header)); return }
     s.filterCol = s.col
     s.filterValue = s.book.cell(s.sheet, s.row, s.col).display
     val n = s.visibleRows(s.rowCount).count { it in 1 until s.rowCount }
-    graph.say(Win.SHEET, graph.str(R.string.filter_on, A1.colName(s.col), s.filterValue ?: "", n))
+    graph.say(s, graph.str(R.string.filter_on, A1.colName(s.col), s.filterValue ?: "", n))
 }
 
 /** A printable key arriving at the toolbar: starts editing the selected cell with it, as typing on the grid does. */

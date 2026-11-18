@@ -1,5 +1,7 @@
 package io.embodit.spatialoffice.ui.doc
 
+import androidx.compose.ui.layout.onSizeChanged
+import io.embodit.spatialoffice.ui.dragTotal
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -146,15 +148,14 @@ fun annotated(spans: List<Span>): AnnotatedString = buildAnnotatedString {
 
 /** W1 document (Planar 1160 × 860 dp; v0.2.1 wider so the English toolbar fits with its longest labels, q1-5): title bar, white paper edited in place, toolbar. */
 @Composable
-fun DocWindow() {
-    WindowFrame(Win.DOC) { graph ->
-        val s = graph.doc
-        if (s == null) { NoFile(graph, Win.DOC); return@WindowFrame }
+fun DocWindow(tag: String? = null) {
+    io.embodit.spatialoffice.ui.EditorWindow(Win.DOC, tag) { graph, session ->
+        val s = session as? DocSession ?: return@EditorWindow
         val focus = remember(s) { DocFocus() }
         Column(Modifier.fillMaxSize().onPreviewKeyEvent { e -> docKeys(graph, s, focus, e) }) {
             EditorTitleBar(graph, Win.DOC, s)
             Box(Modifier.fillMaxWidth().weight(1f).padding(start = 32.dp, end = 32.dp, bottom = 56.dp), contentAlignment = Alignment.TopCenter) {
-                Paper(s, focus, Modifier.width(760.dp).fillMaxSize()) { graph.windows.focus(Win.DOC) }
+                Paper(s, focus, Modifier.width(760.dp).fillMaxSize()) { graph.windows.focus(graph.refOf(s)) }
             }
         }
         DocToolbar(graph, s, focus)
@@ -162,13 +163,13 @@ fun DocWindow() {
 }
 
 private fun docKeys(graph: Graph, s: DocSession, focus: DocFocus, e: androidx.compose.ui.input.key.KeyEvent): Boolean {
-    if (commonKeys(graph, Win.DOC, e)) return true
+    if (commonKeys(graph, s, e)) return true
     if (e.type != KeyEventType.KeyDown || !e.isCtrlPressed) return false
     when (e.key) {
         Key.B -> toggle(s, focus, Attr.BOLD)
         Key.I -> toggle(s, focus, Attr.ITALIC)
         Key.U -> toggle(s, focus, Attr.UNDERLINE)
-        Key.F, Key.H -> if (!s.readOnly) graph.overlay = Overlay.Find(Win.DOC)
+        Key.F, Key.H -> if (!s.readOnly) graph.show(s, Overlay.Find(Win.DOC))
         else -> return false
     }
     return true
@@ -223,8 +224,8 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
         items(all, key = { it.id }) { b ->
             when (b) {
                 is UiBlock.Para -> if (focus != null && b.editable && !s.readOnly) ParaEditor(s, b, focus, all, numbers) else ParaView(b, numbers)
-                is UiBlock.Table -> TableView(b, if (focus != null && s.richText && !s.readOnly) s else null) { onWindowFocus() }
-                is UiBlock.Image -> b.bitmap?.let { Image(bitmap = it.asImageBitmap(), contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) }
+                is UiBlock.Table -> TableView(b, if (focus != null && s.richText && !s.readOnly) s else null, s) { onWindowFocus() }
+                is UiBlock.Image -> PictureView(s, b, focus != null && s.richText && !s.readOnly)
                 is UiBlock.Page -> Image(bitmap = b.bitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.FillWidth, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).border(1.dp, Ink.Line))
                 is UiBlock.Opaque -> OpaqueView(b)
             }
@@ -288,7 +289,7 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
             cursorBrush = SolidColor(Ink.Select),
             modifier = Modifier.weight(1f).heightIn(min = 32.dp).focusRequester(requester)
                 .semantics { contentDescription = "paragraph-${b.id}" }
-                .onFocusChanged { if (it.isFocused) { focus.id = b.id; s.caretBlock = b.id; focus.selection = value.selection } }
+                .onFocusChanged { if (it.isFocused) { focus.id = b.id; s.caretBlock = b.id; focus.selection = value.selection; s.picked = -1 } }
                 .onPreviewKeyEvent { e ->
                     if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     val editable = all.filterIsInstance<UiBlock.Para>().filter { it.editable }
@@ -329,9 +330,87 @@ private fun cut(spans: List<Span>, from: Int, to: Int): List<Span> {
     return out
 }
 
+/**
+ * A picture at the size the file gives it (share of the text width). Clicked, it shows a dot on each corner; dragging
+ * one makes it larger or smaller, proportions kept, never wider than the text (v0.2.5).
+ */
 @Composable
-private fun TableView(b: UiBlock.Table, edit: DocSession?, windowFocus: () -> Unit = {}) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp).border(1.dp, Ink.Line).semantics { contentDescription = "table-${b.id}" }) {
+private fun PictureView(s: DocSession, b: UiBlock.Image, editable: Boolean) {
+    val bmp = b.bitmap ?: return
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        val full = maxWidth
+        val fullPx = with(androidx.compose.ui.platform.LocalDensity.current) { full.toPx() }
+        val live = s.resizing?.takeIf { it.first == b.id }?.second
+        val text = io.embodit.spatialoffice.core.docx.DocxDocument.TEXT_WIDTH_EMU
+        val wEmu = live?.w ?: b.widthEmu.takeIf { it > 0 } ?: text
+        val w = full * (wEmu.toFloat() / text).coerceIn(0.05f, 1f)
+        val h = w * (bmp.height.toFloat() / bmp.width.coerceAtLeast(1))
+        val picked = editable && s.picked == b.id
+        Box(Modifier.size(w, h)) {
+            Image(
+                bitmap = bmp.asImageBitmap(), contentDescription = null, contentScale = ContentScale.FillBounds,
+                modifier = Modifier.fillMaxSize()
+                    .then(if (editable) Modifier.clickable(interactionSource = remember(b.id) { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { s.picked = b.id } else Modifier)
+                    .then(if (picked) Modifier.border(3.dp, Ink.Select) else Modifier)
+                    .semantics { contentDescription = "doc-picture-${b.id}" },
+            )
+            if (picked) {
+                val hit = io.embodit.spatialoffice.ui.cornerHit(w, h)
+                val pxPerEmu = fullPx / text
+                for (c in io.embodit.spatialoffice.core.layout.Corner.values()) io.embodit.spatialoffice.ui.CornerDot(
+                    c, if (c.left) 0.dp else w, if (c.top) 0.dp else h, hit, tr(R.string.obj_resize),
+                    Modifier.dragTotal(
+                        key = Triple(b.id, c, pxPerEmu), name = "doc picture ${b.id} $c",
+                        onStart = { s.beginResize(b.id) },
+                        onTotal = { x, y -> s.resizeBy(c, io.embodit.spatialoffice.core.layout.BoxDrag.units(x, pxPerEmu), io.embodit.spatialoffice.core.layout.BoxDrag.units(y, pxPerEmu)) },
+                        onEnd = { s.endResize() }, onCancel = { s.cancelResize() },
+                    ),
+                    "docpic-${b.id}",
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A table. v0.2.5: it takes its share of the text width, and with the caret in it (or after a click on it) the two
+ * corners on its free side carry dots; dragging one makes the table narrower or wider (20–100 % of the text width).
+ */
+@Composable
+private fun TableView(b: UiBlock.Table, edit: DocSession?, s: DocSession? = edit, windowFocus: () -> Unit = {}) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        val full = maxWidth
+        val fullPx = with(androidx.compose.ui.platform.LocalDensity.current) { full.toPx() }
+        val live = s?.resizing?.takeIf { it.first == b.id }?.second
+        val pct = (live?.w?.toInt() ?: b.widthPct).coerceIn(10, 100)
+        val picked = edit != null && edit.picked == b.id
+        var tableH by remember(b.id) { mutableStateOf(0.dp) }
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        Box(Modifier.width(full * (pct / 100f)).onSizeChanged { tableH = with(density) { it.height.toDp() } }) {
+            TableGrid(b, edit, windowFocus)
+            if (picked) Box(Modifier.matchParentSize().border(3.dp, Ink.Select))
+        }
+        if (picked && edit != null) {
+            val w = full * (pct / 100f)
+            val hit = io.embodit.spatialoffice.ui.cornerHit(w, tableH.coerceAtLeast(48.dp))
+            for (c in listOf(io.embodit.spatialoffice.core.layout.Corner.TOP_RIGHT, io.embodit.spatialoffice.core.layout.Corner.BOTTOM_RIGHT)) io.embodit.spatialoffice.ui.CornerDot(
+                c, w, if (c.top) 0.dp else tableH, hit, tr(R.string.obj_resize),
+                Modifier.dragTotal(
+                    key = Triple(b.id, c, fullPx), name = "doc table ${b.id} $c",
+                    onStart = { edit.beginResize(b.id) },
+                    // a table is resized in percent of the text width: the travel across the page, as a share of it
+                    onTotal = { x, _ -> edit.resizeBy(c, Math.round(x * 100f / fullPx.coerceAtLeast(1f)).toLong(), 0) },
+                    onEnd = { edit.endResize() }, onCancel = { edit.cancelResize() },
+                ),
+                "doctable-${b.id}",
+            )
+        }
+    }
+}
+
+@Composable
+private fun TableGrid(b: UiBlock.Table, edit: DocSession?, windowFocus: () -> Unit = {}) {
+    Column(Modifier.fillMaxWidth().border(1.dp, Ink.Line).semantics { contentDescription = "table-${b.id}" }) {
         b.rows.forEachIndexed { r, row ->
             Row(Modifier.fillMaxWidth().background(if (r == 0) Ink.Header else Ink.Paper)) {
                 row.forEachIndexed { c, cell ->
@@ -371,7 +450,7 @@ private fun TableView(b: UiBlock.Table, edit: DocSession?, windowFocus: () -> Un
                             modifier = cellMod.focusRequester(requester)
                                 .onFocusChanged {
                                     focused = it.isFocused
-                                    if (it.isFocused) { edit.tableCaret = Triple(b.id, r, c); text = text.copy(selection = TextRange(text.text.length)) }
+                                    if (it.isFocused) { edit.tableCaret = Triple(b.id, r, c); edit.picked = b.id; text = text.copy(selection = TextRange(text.text.length)) }
                                 }
                                 .then(if (focused) Modifier.border(2.dp, Ink.Select, RoundedCornerShape(4.dp)) else Modifier)
                                 .semantics { contentDescription = "table-${b.id}-cell-$r-$c" },
@@ -440,20 +519,20 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                 ToolMenu(tr(R.string.menu_insert), "doc/insert", enabled = s.richText, entries = listOf(
                     MenuEntry(tr(R.string.ins_picture), "doc/picture") {
                         val at = insertPoint(s, focus)
-                        graph.pickImage(Win.DOC) { b, e, w, h -> s.insertImage(at, b, e, w, h) }
+                        graph.pickImage(s) { b, e, w, h -> s.insertImage(at, b, e, w, h) }
                     },
-                    MenuEntry(tr(R.string.ins_table), "doc/table") { graph.overlay = Overlay.InsertTable(Win.DOC) },
+                    MenuEntry(tr(R.string.ins_table), "doc/table") { graph.show(s, Overlay.InsertTable(Win.DOC)) },
                 ))
                 ToolMenu(tr(R.string.more), "doc/more", entries = listOfNotNull(
                     if (s.richText && canEdit) MenuEntry(tr(R.string.strike), "doc/strike", checked = hasAttr(s, focus, Attr.STRIKE)) { toggle(s, focus, Attr.STRIKE) } else null,
-                    MenuEntry(tr(R.string.find_replace), "doc/find") { graph.overlay = Overlay.Find(Win.DOC) },
-                    MenuEntry(tr(R.string.word_count), "doc/wordcount") { graph.overlay = Overlay.WordCount(Win.DOC) },
+                    MenuEntry(tr(R.string.find_replace), "doc/find") { graph.show(s, Overlay.Find(Win.DOC)) },
+                    MenuEntry(tr(R.string.word_count), "doc/wordcount") { graph.show(s, Overlay.WordCount(Win.DOC)) },
                 ))
                 ToolDivider()
                 UndoRedo(s)
             } } else Row(verticalAlignment = Alignment.CenterVertically) {
                 Txt(tr(R.string.readonly_note), "doc/readonly-note", Modifier.padding(horizontal = 12.dp), style = PicoTheme.typography.bodyMedium)
-                ToolButton(tr(R.string.word_count), "doc/wordcount-ro", onClick = { graph.overlay = Overlay.WordCount(Win.DOC) })
+                ToolButton(tr(R.string.word_count), "doc/wordcount-ro", onClick = { graph.show(s, Overlay.WordCount(Win.DOC)) })
             }
         },
     )
@@ -461,7 +540,7 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
 
 /** Keys that reach the toolbar window: shortcuts as everywhere, typing into the cell with the caret. */
 private fun toolbarKeys(graph: Graph, s: DocSession, e: androidx.compose.ui.input.key.KeyEvent): Boolean {
-    if (commonKeys(graph, Win.DOC, e)) return true
+    if (commonKeys(graph, s, e)) return true
     if (e.type != KeyEventType.KeyDown || e.isCtrlPressed || s.tableCaret == null) return false
     return when (e.key) {
         Key.Backspace -> s.backspaceInCell()

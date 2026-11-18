@@ -14,6 +14,8 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import io.embodit.spatialoffice.BuildConfig
 import io.embodit.spatialoffice.R
+import io.embodit.spatialoffice.core.cloud.BrowserSignIn
+import io.embodit.spatialoffice.core.cloud.CloudCatalog
 import io.embodit.spatialoffice.core.cloud.AppRegistration
 import io.embodit.spatialoffice.core.cloud.AuthRequest
 import io.embodit.spatialoffice.core.cloud.CloudApi
@@ -61,7 +63,8 @@ data class ScanState(val provider: Provider, val code: DeviceAuth.Code?, val err
 /**
  * Optional cloud accounts (PRD §9). Sign-in happens only on the service's own page in the system browser
  * (authorisation code + PKCE); the app never sees a password. Tokens are kept in EncryptedSharedPreferences and
- * deleted on sign-out. A service whose app registration is missing (README) says so and sends nothing.
+ * deleted on sign-out. v0.2.5: a service whose client id was not put in at build time is not offered at all
+ * ([shown]); for the others [Connect] goes straight to the system browser ([connect]).
  */
 class Accounts(private val app: Application, private val graph: Graph) {
     val info = mutableStateMapOf<Provider, AcctInfo>()
@@ -72,8 +75,19 @@ class Accounts(private val app: Application, private val graph: Graph) {
     var scan by mutableStateOf<ScanState?>(null)
         private set
     private var scanJob: Job? = null
-    /** Service whose [Connect] was pressed last and what happened, shown in that row so the tap visibly did something. */
-    var lastTap by mutableStateOf<Provider?>(null)
+    /** Debug builds: client ids set by the `cloud-id` debug command, to walk the sign-in path on a test machine. */
+    private val overrides = mutableStateMapOf<Provider, AppRegistration>()
+
+    /**
+     * Hands a sign-in address to the system browser; false when nothing could open it. A field, so the emulator log
+     * (`CLOUD … browser intent`) and the unit test of [BrowserSignIn] see the same call.
+     */
+    var launchBrowser: (String) -> Boolean = { url ->
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val ok = runCatching { app.startActivity(intent) }.onFailure { Log.w(TAG, "CLOUD no browser: $it") }.isSuccess
+        Log.i(TAG, "CLOUD browser intent ${intent.action} ${url.substringBefore('?')} started=$ok")
+        ok
+    }
     /** Version stamp of each open cloud file when it was opened / last saved (for the §9.3 conflict check). */
     private val versions = ConcurrentHashMap<String, String>()
     /** Feishu "空间办公" folder and its inbox (PRD §9.4), once known. */
@@ -100,19 +114,26 @@ class Accounts(private val app: Application, private val graph: Graph) {
         if (connected(Provider.FEISHU)) watchInbox()
     }
 
-    fun registration(p: Provider): AppRegistration = when (p) {
+    fun registration(p: Provider): AppRegistration = overrides[p] ?: built(p)
+
+    private fun built(p: Provider): AppRegistration = when (p) {
         Provider.FEISHU -> AppRegistration(BuildConfig.FEISHU_APP_ID, BuildConfig.FEISHU_APP_SECRET, BuildConfig.FEISHU_REDIRECT)
         Provider.GDRIVE -> AppRegistration(BuildConfig.GOOGLE_CLIENT_ID, BuildConfig.GOOGLE_CLIENT_SECRET, BuildConfig.GOOGLE_REDIRECT)
         Provider.ONEDRIVE -> AppRegistration(BuildConfig.ONEDRIVE_CLIENT_ID, "", BuildConfig.ONEDRIVE_REDIRECT)
         Provider.DROPBOX -> AppRegistration(BuildConfig.DROPBOX_APP_KEY, "", BuildConfig.DROPBOX_REDIRECT)
     }
 
-    /** The local.properties key the developer fills in for [p] (shown on screen and in README). */
-    fun configKey(p: Provider): String = when (p) {
-        Provider.FEISHU -> "cloud.feishu.appId"
-        Provider.GDRIVE -> "cloud.google.clientId"
-        Provider.ONEDRIVE -> "cloud.onedrive.clientId"
-        Provider.DROPBOX -> "cloud.dropbox.appKey"
+    /**
+     * The services this build offers: those with a client id. The Accounts page, Browse and How-to list only these;
+     * with none, the app does not mention cloud drives at all (README "连接账号" says how to put the ids in).
+     */
+    val shown: List<Provider> get() { overrides.size; return CloudCatalog.shown(Provider.values().associateWith { registration(it) }) }
+
+    /** Debug builds only (`cloud-id <service> <client id>`): a client id for this run; empty takes it away again. */
+    fun debugClientId(p: Provider, id: String) {
+        if (id.isBlank()) overrides.remove(p) else overrides[p] = built(p).copy(clientId = id)
+        info[p] = initial(p)
+        Log.i(TAG, "CLOUD ${p.id} debug client id ${if (id.isBlank()) "cleared" else "set"}; shown=${shown.map { it.id }}")
     }
 
     private fun initial(p: Provider): AcctInfo {
@@ -136,49 +157,38 @@ class Accounts(private val app: Application, private val graph: Graph) {
     // ------------------------------------------------------------------ sign-in
 
     /**
-     * [Connect] (PRD §9.2 ①–②): shows the choice of way — scan a code with a phone or computer (recommended, where
-     * the service has it) or sign in in the headset's browser. A service that is not registered yet shows the same
-     * dialog with both ways greyed out and what the developer has to register, so the tap always shows something.
+     * [Connect] (v0.2.5, headset 2026-11-17: "应该点了连接弹出浏览器登录飞书吧 … 其他的也同理"): straight to the
+     * service's own sign-in page in the system browser, then back here through the registered callback. Only when
+     * the device has no browser does a service with scan sign-in fall back to the code dialog.
      */
-    fun connect(p: Provider) {
-        val reg = registration(p)
-        if (!reg.registered) {
-            Log.i(TAG, "CLOUD ${p.id} not registered (${configKey(p)} empty)")
-            lastTap = p
-            graph.overlay = Overlay.Connect(p)
-            graph.say(Win.HOME, graph.str(R.string.acct_need_reg_toast, graph.str(nameRes(p)), configKey(p)))
-            return
-        }
-        lastTap = null
-        // only one way: skip the choice (PRD §9.2 ②)
-        if (!DeviceAuth.supported(p)) { connectInBrowser(p); return }
-        graph.overlay = Overlay.Connect(p)
-    }
+    fun connect(p: Provider) = connectInBrowser(p)
 
-    /** ③b: the service's own sign-in page in the system browser, then back here through the registered callback. */
+    /** The service's own sign-in page in the system browser (authorisation code + PKCE), then back through the callback. */
     fun connectInBrowser(p: Provider) {
         val reg = registration(p)
-        if (!reg.registered) return
+        if (!reg.registered) { Log.i(TAG, "CLOUD ${p.id} is not offered in this build"); return }
         if (graph.overlay is Overlay.Connect) graph.overlay = null
         cancel(p)
-        val req = AuthRequest.create(p, reg)
-        pending[p] = req
-        info[p] = AcctInfo(AcctState.WAITING, note = null)
         val loopback = reg.redirectUri.startsWith("http://127.0.0.1") || reg.redirectUri.startsWith("http://localhost")
         if (loopback) listenLoopback(Uri.parse(reg.redirectUri).port.takeIf { it > 0 } ?: 80)
-        val url = req.browserUrl()
         Log.i(TAG, "CLOUD ${p.id} open sign-in page (${p.authUrl}) redirect=${reg.redirectUri}")
-        val ok = runCatching { app.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
-        if (!ok) {
-            pending.remove(p)
-            info[p] = AcctInfo(AcctState.OFF, note = graph.str(R.string.acct_no_browser))
-            graph.say(Win.HOME, graph.str(R.string.acct_no_browser))
-            return
-        }
-        // the code is valid for ten minutes; after that the attempt ends
-        waits[p] = graph.scope.launch {
-            kotlinx.coroutines.delay(10 * 60_000L)
-            if (pending.remove(p) != null) { info[p] = AcctInfo(AcctState.OFF, note = graph.str(R.string.acct_cancelled)); stopLoopback() }
+        when (val r = BrowserSignIn(launchBrowser).start(p, reg)) {
+            is BrowserSignIn.Result.Started -> {
+                pending[p] = r.request
+                info[p] = AcctInfo(AcctState.WAITING, note = null)
+                // the code is valid for ten minutes; after that the attempt ends
+                waits[p] = graph.scope.launch {
+                    kotlinx.coroutines.delay(10 * 60_000L)
+                    if (pending.remove(p) != null) { info[p] = AcctInfo(AcctState.OFF, note = graph.str(R.string.acct_cancelled)); stopLoopback() }
+                }
+            }
+            is BrowserSignIn.Result.NoBrowser -> {
+                if (pending.isEmpty()) stopLoopback()
+                if (DeviceAuth.supported(p)) { Log.i(TAG, "CLOUD ${p.id}: no browser, scan sign-in instead"); connectByScan(p); return }
+                info[p] = AcctInfo(AcctState.OFF, note = graph.str(R.string.acct_no_browser))
+                graph.say(Win.HOME, graph.str(R.string.acct_no_browser))
+            }
+            BrowserSignIn.Result.NotOffered -> {}
         }
     }
 
@@ -237,11 +247,11 @@ class Accounts(private val app: Application, private val graph: Graph) {
         }
     }
 
-    /** Declined or timed out: back to the choice, nothing kept (PRD §9.2 "拒绝或超时"). */
+    /** Declined or timed out: nothing kept (PRD §9.2 "拒绝或超时"). */
     private fun endScan(p: Provider) {
         scan = null; scanJob = null
         info[p] = AcctInfo(AcctState.OFF, note = graph.str(R.string.acct_cancelled))
-        graph.overlay = Overlay.Connect(p)
+        if (graph.overlay is Overlay.Scan) graph.overlay = null
         graph.say(Win.HOME, graph.str(R.string.acct_cancelled))
     }
 

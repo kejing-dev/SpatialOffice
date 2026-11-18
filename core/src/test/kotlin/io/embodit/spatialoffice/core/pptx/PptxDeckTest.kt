@@ -145,7 +145,8 @@ class PptxDeckTest {
 
     @Test fun compatListsReadOnlyContent() {
         val notes = open().compat()
-        assertTrue(notes.contains(CompatNote(CompatKind.READ_ONLY, "table", 1)))
+        // v0.2.5: a plain table is typed into, moved and resized, so it is no longer listed as read-only
+        assertFalse(notes.any { it.code == "table" })
         assertTrue(notes.contains(CompatNote(CompatKind.READ_ONLY, "group", 1)))
         assertTrue(notes.contains(CompatNote(CompatKind.READ_ONLY, "chart", 1)))
     }

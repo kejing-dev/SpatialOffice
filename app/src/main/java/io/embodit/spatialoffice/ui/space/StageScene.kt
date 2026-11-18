@@ -136,7 +136,7 @@ class StageScene(private val graph: Graph) {
         val mode = graph.stageMode
         val wanted = HashMap<String, FloatArray>()
         if (st != null && mode == StageMode.SPREAD) {
-            val s = graph.session(graph.stageKind)
+            val s = graph.stageSession
             val count = s?.pieceCount ?: 0
             val focus = graph.focus.coerceIn(0, (count - 1).coerceAtLeast(0))
             val poses = LayoutRules.poses(graph.stageKind, count, graph.arrangement, focus, graph.radiusSetting)

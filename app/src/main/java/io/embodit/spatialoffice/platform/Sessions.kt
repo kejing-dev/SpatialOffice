@@ -34,8 +34,10 @@ import java.io.File
 sealed class UiBlock {
     abstract val id: Int
     data class Para(override val id: Int, val style: ParaStyle, val spans: List<Span>, val editable: Boolean, val why: String?, val align: Int = 0) : UiBlock()
-    data class Table(override val id: Int, val rows: List<List<String>>) : UiBlock()
-    data class Image(override val id: Int, val bitmap: Bitmap?) : UiBlock()
+    /** [widthPct]: share of the text width, 10–100. */
+    data class Table(override val id: Int, val rows: List<List<String>>, val widthPct: Int = 100) : UiBlock()
+    /** [widthEmu] / [heightEmu]: the size the file gives the picture (0 = unknown, shown at the text width). */
+    data class Image(override val id: Int, val bitmap: Bitmap?, val widthEmu: Long = 0, val heightEmu: Long = 0) : UiBlock()
     data class Opaque(override val id: Int, val kind: String) : UiBlock()
     data class Page(override val id: Int, val bitmap: Bitmap) : UiBlock()
 }
@@ -43,6 +45,8 @@ sealed class UiBlock {
 /** One open file. Edits go through the session so dirty state, undo and recomposition stay in one place. */
 abstract class Session(ref: FileRef, val kind: FileKind) {
     var ref by mutableStateOf(ref)
+    /** Tag of this file's own window (v0.2.5: every open file has a window of its own); set when the file is opened. */
+    var tag: String = ""
     /** Bumped after every change to the model; composables read it to recompose. */
     var version by mutableIntStateOf(0)
         protected set
@@ -137,8 +141,8 @@ class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File)
             return d.blocks.map { b ->
                 when (b) {
                     is Paragraph -> UiBlock.Para(b.id, b.style, b.runs.map { Span(it.text, it.bold, it.italic, it.underline, it.src, it.strike) }, b.editable, b.readOnlyWhy, b.align)
-                    is TableBlock -> UiBlock.Table(b.id, b.rows)
-                    is ImageBlock -> UiBlock.Image(b.id, images.getOrPut(b.part) { d.partBytes(b.part)?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() } })
+                    is TableBlock -> UiBlock.Table(b.id, b.rows, b.widthPct)
+                    is ImageBlock -> UiBlock.Image(b.id, images.getOrPut(b.part) { d.partBytes(b.part)?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() } }, b.widthEmu, b.heightEmu)
                     is OpaqueBlock -> UiBlock.Opaque(b.id, b.kind)
                 }
             }
@@ -248,6 +252,65 @@ class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File)
         runCatching { d.setTableCell(id, row, col, text) }.onFailure { android.util.Log.w(TAG, "table cell not editable: ${it.message}") }
         changed()
     }
+
+    /** Picture or table picked in the document (−1 = none): it shows its resize corners. */
+    var picked by mutableIntStateOf(-1)
+
+    /**
+     * A picture being resized (block id → size in EMU) or a table (block id → width in percent, height unused): what
+     * the block is drawn with until the pointer lets go; [endResize] then writes it to the file as one undo step.
+     */
+    var resizing by mutableStateOf<Pair<Int, io.embodit.spatialoffice.core.layout.UnitBox>?>(null)
+        private set
+    private var resizeStart: io.embodit.spatialoffice.core.layout.UnitBox? = null
+
+    /** Press on a resize corner of picture / table [id]. Returns false when it cannot be resized. */
+    fun beginResize(id: Int): Boolean {
+        val d = docx ?: return false
+        if (readOnly) return false
+        val start = when (val b = d.blocks.firstOrNull { it.id == id }) {
+            is ImageBlock -> io.embodit.spatialoffice.core.layout.UnitBox(0, 0, b.widthEmu.takeIf { it > 0 } ?: DocxDocument.TEXT_WIDTH_EMU, b.heightEmu.takeIf { it > 0 } ?: DocxDocument.TEXT_WIDTH_EMU * 3 / 4)
+            is TableBlock -> io.embodit.spatialoffice.core.layout.UnitBox(0, 0, b.widthPct.toLong(), 0)
+            else -> return false
+        }
+        picked = id; resizeStart = start; resizing = id to start
+        return true
+    }
+
+    /**
+     * The corner has travelled [dx], [dy] since the press (picture: EMU; table: percent of the text width in [dx]).
+     * A picture keeps its proportions and stays within the text width; a table stays between 20 % and 100 %.
+     */
+    fun resizeBy(corner: io.embodit.spatialoffice.core.layout.Corner, dx: Long, dy: Long) {
+        val (id, _) = resizing ?: return
+        val start = resizeStart ?: return
+        val d = docx ?: return
+        resizing = id to when (d.blocks.firstOrNull { it.id == id }) {
+            is ImageBlock -> io.embodit.spatialoffice.core.layout.BoxDrag.resize(start, corner, dx, dy, keepAspect = true, minSide = 457_200L, maxW = DocxDocument.TEXT_WIDTH_EMU)
+            else -> start.copy(w = (if (corner.left) start.w - dx else start.w + dx).coerceIn(20, 100))
+        }
+    }
+
+    /** The pointer let go: write the new size (one undo step). Returns true when something changed. */
+    fun endResize(): Boolean {
+        val (id, box) = resizing ?: return false
+        val start = resizeStart
+        resizing = null; resizeStart = null
+        val d = docx ?: return false
+        if (start == null || box == start) return false
+        mark("")
+        val ok = runCatching {
+            when (d.blocks.firstOrNull { it.id == id }) {
+                is ImageBlock -> d.setImageSize(id, box.w, box.h)
+                is TableBlock -> d.setTableWidth(id, box.w.toInt())
+                else -> error("not resizable")
+            }
+        }.onFailure { android.util.Log.w(TAG, "resize of block $id failed: ${it.message}") }.isSuccess
+        if (ok) changed()
+        return ok
+    }
+
+    fun cancelResize() { resizing = null; resizeStart = null }
 
     /** Matches of [find] in editable paragraphs: (paragraph id, offset). */
     fun find(find: String): List<Pair<Int, Int>> = blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }
@@ -508,6 +571,75 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
         mark("box${sh.id}")
         runCatching { deck.setShapeBox(current, sh.id, x, y, w, h) }.onFailure { return false }
         edits++; changed(); return true
+    }
+
+    /**
+     * The picked object while it is being dragged (shape id → box in EMU): what it is drawn with until the pointer
+     * lets go; [endBoxDrag] then writes it to the file as one undo step. Every pointer event gives the travel since
+     * the press ([io.embodit.spatialoffice.core.layout.DragTotal]), so the box never drifts (profile D53).
+     */
+    var dragBox by mutableStateOf<Pair<Int, io.embodit.spatialoffice.core.layout.UnitBox>?>(null)
+        private set
+    private var dragStart: io.embodit.spatialoffice.core.layout.UnitBox? = null
+
+    /** The box [id] is drawn with right now (the drag in progress, else the file's). */
+    fun boxOf(sh: io.embodit.spatialoffice.core.pptx.Shape): io.embodit.spatialoffice.core.layout.UnitBox =
+        dragBox?.takeIf { it.first == sh.id }?.second ?: io.embodit.spatialoffice.core.layout.UnitBox(sh.x, sh.y, sh.w, sh.h)
+
+    /** Press on object [id] of the current slide (its body, its move tab or a corner): it is picked and the drag starts. */
+    fun beginBoxDrag(id: Int): Boolean {
+        if (readOnly) return false
+        val sh = deck.slides.getOrNull(current)?.shapes?.firstOrNull { it.id == id } ?: return false
+        if (sh.w <= 0 || sh.h <= 0) return false
+        selected = id
+        dragStart = io.embodit.spatialoffice.core.layout.UnitBox(sh.x, sh.y, sh.w, sh.h); dragBox = id to dragStart!!
+        return true
+    }
+
+    /** The pointer has travelled [dx], [dy] EMU since the press: the object follows. */
+    fun moveBoxBy(dx: Long, dy: Long) {
+        val (id, _) = dragBox ?: return
+        val start = dragStart ?: return
+        dragBox = id to io.embodit.spatialoffice.core.layout.BoxDrag.move(start, dx, dy, deck.widthEmu, deck.heightEmu)
+    }
+
+    /** A corner has travelled [dx], [dy] EMU since the press: the opposite corner stays; pictures keep their proportions. */
+    fun resizeBoxBy(corner: io.embodit.spatialoffice.core.layout.Corner, dx: Long, dy: Long) {
+        val (id, _) = dragBox ?: return
+        val start = dragStart ?: return
+        val picture = deck.slides.getOrNull(current)?.shapes?.firstOrNull { it.id == id }?.kind == io.embodit.spatialoffice.core.pptx.ShapeKind.PICTURE
+        dragBox = id to io.embodit.spatialoffice.core.layout.BoxDrag.resize(start, corner, dx, dy, keepAspect = picture)
+    }
+
+    /** The pointer let go: the box goes into the file (one undo step). Returns true when the object moved or changed size. */
+    fun endBoxDrag(): Boolean {
+        val (id, box) = dragBox ?: return false
+        val start = dragStart
+        dragBox = null; dragStart = null
+        if (start == null || box == start) return false
+        mark("")
+        val ok = runCatching { deck.setShapeBox(current, id, box.x, box.y, box.w, box.h) }
+            .onFailure { android.util.Log.w(TAG, "shape $id cannot be moved: ${it.message}") }.isSuccess
+        if (ok) { edits++; changed() }
+        return ok
+    }
+
+    fun cancelBoxDrag() { dragBox = null; dragStart = null }
+
+    /** A 3 × 3 (or [rows] × [cols]) table in the middle of the slide; it is picked at once (D57). */
+    fun addTable(rows: Int = 3, cols: Int = 3) {
+        mark("")
+        val w = deck.widthEmu * 3 / 5; val h = deck.heightEmu / 3
+        selected = deck.addTable(current, rows, cols, (deck.widthEmu - w) / 2, (deck.heightEmu - h) / 2, w, h)
+        edits++; changed()
+    }
+
+    fun setTableCell(slide: Int, shapeId: Int, row: Int, col: Int, text: String) {
+        val old = deck.slides.getOrNull(slide)?.shapes?.firstOrNull { it.id == shapeId }?.table?.getOrNull(row)?.getOrNull(col) ?: return
+        if (old == text) return
+        mark("tc$slide.$shapeId.$row.$col")
+        runCatching { deck.setTableCell(slide, shapeId, row, col, text) }.onFailure { android.util.Log.w(TAG, "table cell not editable: ${it.message}"); return }
+        edits++; changed()
     }
 
     fun setColors(colors: Map<String, Int>) { mark(""); deck.setColorScheme(colors); images.clear(); edits++; changed() }

@@ -105,39 +105,44 @@ fun tr(id: Int, vararg args: Any): String {
  * in-app language and theme, and hosts this window's snackbars and shared dialogs.
  */
 @Composable
-fun WindowFrame(win: Win, content: @Composable (Graph) -> Unit) {
+fun WindowFrame(win: Win, tag: String? = null, content: @Composable (Graph) -> Unit) {
     val base = LocalContext.current
     val graph = remember(base) { Graph.from(base) }
     val nav = LocalSpatialNavigator.current
+    // v0.2.5: an editor window is one of several of its kind; its file's tag tells them apart
+    val ref = remember(win, tag) { io.embodit.spatialoffice.platform.WinRef(win, tag ?: io.embodit.spatialoffice.platform.Containers.TAG_MAIN) }
     DisposableEffect(nav) {
-        graph.windows.attach(win, nav)
-        onDispose { graph.windows.detach(win, nav) }
+        graph.windows.attach(ref, nav)
+        onDispose { graph.windows.detach(ref, nav) }
     }
     val owner = LocalLifecycleOwner.current
     // v0.2.4 (q4-2): this window's container instance, so placements anchor to the live window, not a destroyed one
     val instance = remember(base) { io.embodit.spatialoffice.platform.ContainerIds.of(base) }
     DisposableEffect(owner) {
-        val name = io.embodit.spatialoffice.platform.Containers.id(win)
+        val name = io.embodit.spatialoffice.platform.Containers.key(ref)
         val obs = LifecycleEventObserver { _, e ->
             when (e) {
                 androidx.lifecycle.Lifecycle.Event.ON_CREATE -> io.embodit.spatialoffice.platform.ContainerIds.created(name, instance)
                 androidx.lifecycle.Lifecycle.Event.ON_DESTROY -> io.embodit.spatialoffice.platform.ContainerIds.destroyed(name, instance)
                 else -> {}
             }
-            graph.windows.onLifecycle(win, e.name)
+            graph.windows.onLifecycle(ref, e.name)
         }
         owner.lifecycle.addObserver(obs)
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
+    val sm = com.pico.spatial.ui.platform.LocalSpatialContainerStateManager.current
+    val focused = sm.isFocused.value; val onstage = sm.isOnstage.value; val sighted = sm.isSighted.value
+    LaunchedEffect(focused, onstage, sighted) { graph.windows.seen(ref, focused, onstage, sighted) }
     val lang = graph.settings.value.lang
     val localized = remember(base, lang) { base.localized(lang) }
     CompositionLocalProvider(LocalContext provides localized, LocalRes provides localized.resources) {
         PicoTheme {
             SnackbarHost {
-                ToastPump(graph, win)
+                ToastPump(graph, win, tag)
                 content(graph)
-                SharedOverlays(graph, win)
-                CloudOverlays(graph, win)
+                SharedOverlays(graph, win, tag)
+                CloudOverlays(graph, win, tag)
             }
         }
     }
@@ -145,11 +150,12 @@ fun WindowFrame(win: Win, content: @Composable (Graph) -> Unit) {
 
 /** Shows this window's pending message as a snackbar. */
 @Composable
-private fun ToastPump(graph: Graph, win: Win) {
+private fun ToastPump(graph: Graph, win: Win, tag: String?) {
     val host = LocalSnackbarHostState.current
     val t = graph.toast
     LaunchedEffect(t?.id) {
-        if (t == null || t.win != win) return@LaunchedEffect
+        // a message for an editor goes to the window of that file only
+        if (t == null || t.win != win || (t.tag != null && tag != null && t.tag != tag)) return@LaunchedEffect
         graph.toastShown(t.id)
         val r = if (t.action != null) host.show(message = t.text, action = t.action, duration = SnackbarDuration.custom(6_000L))
         else host.show(message = t.text, duration = SnackbarDuration.custom(4_000L))

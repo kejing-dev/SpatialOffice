@@ -136,6 +136,40 @@ object DebugReceiver {
             "copybeside" -> g.session(win(arg))?.let { s -> g.overlay = Overlay.CopyBeside(win(arg), s.ref.name, io.embodit.spatialoffice.core.files.Naming.appCopyName(s.ref.name, g.settings.value.zh)) }
             "conflict-answer" -> { val (w, c) = arg.split(" ", limit = 2); g.resolveConflict(win(w), c) }
             "inbox" -> g.scope.launch { runCatching { g.accounts.checkInbox() } }
+            // ---- v0.2.5
+            // objdrag <move|top_left|top_right|bottom_left|bottom_right> <n>x<dxEmu>,<dyEmu>: replays n pointer steps on the
+            // picked slide object through the same session calls as the gesture (begin, travel since the press, end)
+            "objdrag" -> g.deck?.let { d ->
+                val (what, steps) = arg.split(" ", limit = 2)
+                val (n, d2) = steps.split("x", limit = 2); val (dx, dy) = d2.split(",").map { it.toFloat() }
+                val corner = io.embodit.spatialoffice.core.layout.Corner.values().firstOrNull { it.name.equals(what, true) }
+                val total = io.embodit.spatialoffice.core.layout.DragTotal()
+                if (d.beginBoxDrag(d.selected)) {
+                    repeat(n.toInt()) { total.add(dx, dy); if (corner == null) d.moveBoxBy(total.x.toLong(), total.y.toLong()) else d.resizeBoxBy(corner, total.x.toLong(), total.y.toLong()) }
+                    Log.i(TAG, "OBJDRAG debug ${d.selected} $what events=${total.events} total=${total.x},${total.y} emu changed=${d.endBoxDrag()}")
+                }
+            }
+            "slide-table" -> g.deck?.let { d -> val p = arg.split(",").mapNotNull { it.toIntOrNull() }; d.addTable(p.getOrElse(0) { 3 }, p.getOrElse(1) { 3 }) }
+            "slide-cell" -> g.deck?.let { d -> val (pos, v) = arg.split("=", limit = 2); val (r, c) = pos.split(",").map { it.toInt() }; d.setTableCell(d.current, d.selected, r, c, v) }
+            // doc-pick <n>: picks the n-th picture / table of the document (shows its corner dots); doc-resize <corner> <dx,dy>
+            // (picture: EMU; table: percent of the text width in dx)
+            "doc-pick" -> g.doc?.let { d -> d.picked = d.blocks().filter { it is UiBlock.Image || it is UiBlock.Table }.getOrNull(arg.toIntOrNull() ?: 0)?.id ?: -1 }
+            "doc-resize" -> g.doc?.let { d ->
+                val (what, d2) = arg.split(" ", limit = 2); val (dx, dy) = d2.split(",").map { it.toLong() }
+                val corner = io.embodit.spatialoffice.core.layout.Corner.values().first { it.name.equals(what, true) }
+                if (d.beginResize(d.picked)) { d.resizeBy(corner, dx, dy); Log.i(TAG, "DOCRESIZE debug ${d.picked} $what $dx,$dy changed=${d.endResize()}") }
+            }
+            // front <tag>: what opening an open file again does; activate <tag>; close-tag <tag>; windows: list
+            "front" -> g.sessionByTag(arg)?.let { g.front(it) }
+            "activate" -> g.sessionByTag(arg)?.let { g.activate(it) }
+            "close-tag" -> g.sessionByTag(arg)?.let { g.requestClose(it) }
+            "win-place" -> Placing.mode = arg.ifEmpty { "front" }
+            "front-home" -> g.windows.frontHome()
+            "arrange" -> (g.sessionByTag(arg) ?: g.sessions.lastOrNull())?.let { g.windows.arrange(g.refOf(it)) }
+            "front-mode" -> g.windows.frontMode = arg.ifEmpty { "auto" }
+            // cloud-id <service> <client id>: a client id for this run only (debug builds), to walk [Connect] → browser
+            // on a machine whose build has none; `cloud-id <service>` takes it away again
+            "cloud-id" -> { val p = arg.split(" ", limit = 2); io.embodit.spatialoffice.core.cloud.Provider.of(p[0])?.let { g.accounts.debugClientId(it, p.getOrElse(1) { "" }) } }
             "dump" -> {}
             // v0.2.4 (q4-1): longest main-thread frame gap over <arg> seconds (baseline of the emulator's own load)
             "mainwatch" -> { val w = io.embodit.spatialoffice.ui.chart.MainWatch("baseline"); w.start(); android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ w.stop() }, (arg?.toLongOrNull() ?: 10L) * 1000) }
