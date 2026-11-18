@@ -212,7 +212,7 @@ class V025Test {
 
     // ------------------------------------------------------------------ 2. several files of one kind
 
-    @Test fun aSecondDocumentOpensBesideTheFirstAndNeitherIsReplaced() {
+    @Test fun aSecondDocumentOpensInItsOwnWindowAndTheFirstStaysOpen() {
         val f = OpenFiles()
         val a = f.open("DOC", "/sdcard/Documents/a.docx") as OpenFiles.Open.New
         val b = f.open("DOC", "/sdcard/Documents/b.docx") as OpenFiles.Open.New
@@ -254,7 +254,7 @@ class V025Test {
         assertTrue(f.open("DOC", "d1.docx") is OpenFiles.Open.New)
     }
 
-    @Test fun noMoreWindowsOfAKindThanFitInView() {
+    @Test fun noMoreThanFiveFilesOfAKindAtOnce() {
         val f = OpenFiles()
         repeat(OpenFiles.MAX_PER_KIND) { assertTrue(f.open("SLIDES", "p$it.pptx") is OpenFiles.Open.New) }
         val full = f.open("SLIDES", "one-more.pptx")

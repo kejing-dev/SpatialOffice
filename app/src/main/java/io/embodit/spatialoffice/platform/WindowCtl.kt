@@ -216,7 +216,11 @@ class WindowCtl(private val graph: Graph) {
     fun arrange(center: WinRef) {
         if (exiting || graph.stageMode != null || !isOpen(center)) return
         val others = graph.sessions.map { graph.refOf(it) }.filter { it != center }
-        Log.i(TAG, "ARRANGE side by side around $center: $others")
+        // the 3D chart is placed over its sheet when it opens: when that sheet moves to the side, the chart is put
+        // away first and opened again over the sheet's new place at the end
+        val chartMoves = isOpen(chart) && chartOn != null && chartOn in others
+        if (chartMoves) { reopen.add(chart); runCatching { nav()?.closeWindowContainer(Containers.CHART, Containers.TAG_MAIN) } }
+        Log.i(TAG, "ARRANGE side by side around $center: $others chartMoves=$chartMoves")
         var right = center; var left = center
         val steps = ArrayList<() -> Unit>()
         others.forEachIndexed { i, ref ->
@@ -230,7 +234,11 @@ class WindowCtl(private val graph: Graph) {
             }
         }
         // last, the window they stand around: back in front if another one had been opened over it
-        steps.add { val s = seen[center]; if (s == null || !s.second) { Log.i(TAG, "ARRANGE: $center back in front"); reopenInFront(center) } }
+        steps.add {
+            val s = seen[center]
+            if (s == null || !s.second) { Log.i(TAG, "ARRANGE: $center back in front"); reopenInFront(center) }
+            if (chartMoves) { Log.i(TAG, "ARRANGE: chart back over $chartOn"); openChartWhenSheetIsUp() }
+        }
         steps.firstOrNull()?.invoke()
     }
 
