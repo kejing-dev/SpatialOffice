@@ -75,6 +75,8 @@ import io.embodit.spatialoffice.ui.sheet.FormulaBar
 import io.embodit.spatialoffice.ui.sheet.SheetGrid
 import io.embodit.spatialoffice.ui.sheet.sheetKeys
 import io.embodit.spatialoffice.ui.slides.SlideCanvas
+import io.embodit.spatialoffice.core.layout.SlideFit
+import androidx.compose.foundation.layout.BoxWithConstraints
 import kotlinx.coroutines.delay
 
 /** S1 / S2: the Stage (Mixed). Spread layout of one file, or slide rehearsal. */
@@ -186,7 +188,8 @@ private fun PiecePanel(graph: Graph, index: Int?) {
                 }
             }
             is DeckSession -> Box(Modifier.fillMaxSize().onPreviewKeyEvent { e -> focused && commonKeys(graph, s, e) }, contentAlignment = Alignment.Center) {
-                SlideCanvas(s, index, w.dp, editable = focused)
+                // any page proportion stays whole inside the piece (a 4:3 page at the full width was cut at the bottom)
+                SlideCanvas(s, index, SlideFit.fit(w.toFloat(), h.toFloat(), s.deck.widthEmu, s.deck.heightEmu).w.dp, editable = focused)
             }
             else -> {}
         }
@@ -249,7 +252,11 @@ private fun RehearsalBar(graph: Graph) {
 private fun RehearsalScreen(graph: Graph) {
     val d = graph.stageSession as? DeckSession ?: return
     d.version
-    SlideCanvas(d, d.current, 960.dp, editable = false)
+    // The screen panel is always 960 × 540 dp (the scene scales that to the screen's place); a page of another
+    // proportion is drawn whole in its middle, so the panel keeps one size from slide to slide and file to file.
+    Box(Modifier.size(960.dp, 540.dp), contentAlignment = Alignment.Center) {
+        SlideCanvas(d, d.current, SlideFit.fit(960f, 540f, d.deck.widthEmu, d.deck.heightEmu).w.dp, editable = false)
+    }
 }
 
 @Composable
@@ -275,7 +282,9 @@ private fun RehearsalNext(graph: Graph) {
         Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Txt(elapsedLabel(graph.rehearsalStart), "rehearsal/clock", style = PicoTheme.typography.displaySmall, weight = FontWeight.Bold)
             Txt(tr(if (last) R.string.rh_last else R.string.rh_next_label), "rehearsal/next-label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
-            if (!last) SlideCanvas(d, d.current + 1, 512.dp, editable = false)
+            if (!last) BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+                SlideCanvas(d, d.current + 1, SlideFit.fit(maxWidth.value, maxHeight.value, d.deck.widthEmu, d.deck.heightEmu).w.dp, editable = false)
+            }
         }
     }
 }

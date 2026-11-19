@@ -1,5 +1,10 @@
 # Changelog · 更新记录
 
+## v0.2.6 · 2026-11-18
+
+- 演示窗口：不管页面是 4:3、16:9、16:10 还是竖版，下面的讲者备注和选中提示都留着位置，看得到也写得了（之前 4:3 的文件画布把备注挤没了）；左边缩略图、故事线里的每一页、预演大屏和「下一页」也按页面比例完整显示
+- Slides window: speaker notes and the picked-object hint keep their place under the slide for any page proportion (4:3, 16:9, 16:10, tall); a 4:3 file used to push them out of the window. Thumbnails, storyline pieces, the rehearsal screen and "next slide" show the whole page too
+
 ## v0.2.5 · 2026-11-18
 
 - 演示里插入的文本框、图片、形状、表格：点一下选中，按住拖动挪位置，拖四个角上的圆点改大小；演示里可以插入表格并逐格输入；文档里的图片和表格也能拖角改大小

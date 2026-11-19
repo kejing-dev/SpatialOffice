@@ -16,6 +16,7 @@ python3 -I tools/gen_strings.py # after editing tools/strings.tsv (zh + en strin
 tools/.venv/bin/python tools/verify/verify_docx_pptx.py   # independent check of saved files (python-docx / python-pptx)
 tools/.venv/bin/python tools/verify/verify_xlsx.py        # same with openpyxl
 tools/.venv/bin/python tools/verify/verify_v025.py        # v0.2.5: moved / resized objects, slide tables, resized doc pictures and tables
+tools/.venv/bin/python tools/fixtures/make_slide_proportions.py <dir>   # v0.2.6: decks of four page proportions for the slides window
 ```
 
 ## Layout
@@ -98,6 +99,24 @@ ACTION_VIEW + BROWSABLE; log `CLOUD … browser intent`); only without a browser
 fall back to the code dialog. No user-facing string mentions registration or build files (gate dev-jargon-ui).
 Debug builds: `cloud-id <service> <client id>` sets a client id for this run to walk the path (`cloud-id <service>`
 clears it).
+
+v0.2.6 (QA #6 q6-1): **slides of any page proportion.** v0.2.5 drew the editing canvas 960 dp wide whatever the page,
+so a 4:3 file's canvas was 720 dp high (the whole column) and the notes label, the notes field and the picked-object
+hint got no height. `core/layout/SlideFit` now sizes every slide drawing: `fit()` = the largest page-shaped rectangle
+inside a space (the smaller of the width and height ratios decides); `editor()` = the slides window's column: the
+canvas may take the column's height less `RESERVED_H` (gap 12 + label row 28 + gap 6 + notes field ≥ 108 dp) and at
+most 960 dp of width, the label row and the notes field are the column's 960 dp wide whatever the canvas (a tall page
+does not squeeze the label and the hint), and the notes field fills down to the bottom. A 16:9 file comes out as
+before (960 × 540, notes 126 dp in the 712 dp column the window opens with). `SlidesWindow` measures the column with `BoxWithConstraints`, so a resized window
+follows. Thumbnails: `SlideFit.thumb` (170 dp wide, at most 128 dp high), and the reorder drag steps by the real row
+height (`dropIndex`; it stepped by the 16:9 height for every file). Storyline pieces (700 × 394), the rehearsal screen
+(960 × 540) and the next-slide preview use `fit()` too: a 4:3 page was cut at the bottom there. Log:
+`SLIDEFIT page=<EMU> column=<dp> canvas=<dp> … px: canvas=… label=… notes=… window=… inside=true|false` whenever the
+layout changes (window px; `inside` = all three inside the window and none over another). Tests: `SlideFitTest`
+(6 page proportions × 3 window sizes; the v0.2.5 rule is kept as `editorV025` and shown to leave 4:3 a notes field of
+≤ 0 dp). Sample decks (4:3, 16:9, 16:10, 3:4, each with notes and a mark in every corner of the page):
+`tools/.venv/bin/python tools/fixtures/make_slide_proportions.py <out dir>`. The emulator's `--spatial --size
+2560x1440` screenshots are stretched 1.33× sideways; judge proportions on the plain `pico-cli capture screenshot`.
 
 ## The save rule
 

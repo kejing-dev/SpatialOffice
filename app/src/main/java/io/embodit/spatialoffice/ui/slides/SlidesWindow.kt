@@ -1,5 +1,15 @@
 package io.embodit.spatialoffice.ui.slides
 
+import android.util.Log
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.findRootCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.unit.IntSize
+import io.embodit.spatialoffice.core.layout.SlideFit
+import io.embodit.spatialoffice.platform.TAG
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -112,25 +122,34 @@ fun SlidesWindow(tag: String? = null) {
             Row(Modifier.fillMaxWidth().weight(1f).padding(start = 32.dp, end = 32.dp, bottom = 52.dp)) {
                 Thumbnails(s, Modifier.width(208.dp).fillMaxHeight())
                 Box(Modifier.width(20.dp))
-                Column(Modifier.weight(1f).fillMaxHeight()) {
+                // q6-1 (v0.2.6): the canvas takes what the notes area leaves, never the other way round
+                BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
                     s.version
-                    val w = 960.dp
-                    SlideCanvas(s, s.current, w, editable = true, modifier = Modifier.align(Alignment.CenterHorizontally))
-                    Box(Modifier.height(12.dp))
-                    Row(Modifier.width(w), verticalAlignment = Alignment.CenterVertically) {
-                        Txt(tr(R.string.notes), "slides/notes-label", Modifier.weight(1f), style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
-                        // what the corner dots and the round tab of the picked object are for
-                        if (s.selected >= 0 && !s.readOnly) Txt(tr(R.string.obj_hint), "slides/obj-hint", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
+                    val fit = SlideFit.editor(maxWidth.value, maxHeight.value, s.deck.widthEmu, s.deck.heightEmu)
+                    val rowW = fit.rowW.dp
+                    val report = remember(s) { FitReport() }
+                    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        SlideCanvas(s, s.current, fit.canvas.w.dp, editable = true, modifier = Modifier.onGloballyPositioned { report.canvas = it.boundsInWindow() })
+                        Box(Modifier.height(SlideFit.GAP_CANVAS.dp))
+                        Row(
+                            Modifier.width(rowW).heightIn(min = SlideFit.LABEL_H.dp).onGloballyPositioned { report.label = it.boundsInWindow() },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Txt(tr(R.string.notes), "slides/notes-label", Modifier.weight(1f), style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
+                            // what the corner dots and the round tab of the picked object are for
+                            if (s.selected >= 0 && !s.readOnly) Txt(tr(R.string.obj_hint), "slides/obj-hint", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
+                        }
+                        Box(Modifier.height(SlideFit.GAP_LABEL.dp))
+                        val slide = s.deck.slides.getOrNull(s.current)
+                        var notes by remember(s.current, s.deck) { mutableStateOf(slide?.notes ?: "") }
+                        TextArea(
+                            value = notes,
+                            onValueChange = { notes = it; s.setNotes(s.current, it) },
+                            modifier = Modifier.width(rowW).weight(1f).semantics { contentDescription = "notes-input" }
+                                .onGloballyPositioned { report.notes(it.boundsInWindow(), it.findRootCoordinates().size, s, fit) },
+                            placeholder = { Txt(tr(R.string.notes_ph), "slides/notes-ph", color = PicoTheme.colorScheme.labelTertiary) },
+                        )
                     }
-                    Box(Modifier.height(6.dp))
-                    val slide = s.deck.slides.getOrNull(s.current)
-                    var notes by remember(s.current, s.deck) { mutableStateOf(slide?.notes ?: "") }
-                    TextArea(
-                        value = notes,
-                        onValueChange = { notes = it; s.setNotes(s.current, it) },
-                        modifier = Modifier.width(w).weight(1f).semantics { contentDescription = "notes-input" },
-                        placeholder = { Txt(tr(R.string.notes_ph), "slides/notes-ph", color = PicoTheme.colorScheme.labelTertiary) },
-                    )
                 }
             }
         }
@@ -161,8 +180,11 @@ private fun Thumbnails(s: DeckSession, modifier: Modifier) {
     // long-press a thumbnail and drag it up or down to reorder; it lands where it is let go
     var dragFrom by remember { mutableIntStateOf(-1) }
     var dragDy by remember { mutableFloatStateOf(0f) }
-    val stepPx = with(androidx.compose.ui.platform.LocalDensity.current) { (THUMB_H + 16.dp).toPx() }
-    LazyColumn(modifier, state = state, verticalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
+    // a thumbnail is as high as the page's proportion makes it (4:3 is higher than 16:9, a tall page is narrower)
+    val pageW = s.deck.widthEmu; val pageH = s.deck.heightEmu
+    val thumb = SlideFit.thumb(pageW, pageH)
+    val dpPx = with(androidx.compose.ui.platform.LocalDensity.current) { 1.dp.toPx() }
+    LazyColumn(modifier, state = state, verticalArrangement = Arrangement.spacedBy(SlideFit.THUMB_SPACING.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
         items(n, key = { it }) { i ->
             val on = i == s.current
             val lifted = i == dragFrom
@@ -174,7 +196,7 @@ private fun Thumbnails(s: DeckSession, modifier: Modifier) {
                             onDragStart = { dragFrom = i; dragDy = 0f; s.current = i },
                             onDrag = { change, dragAmount -> change.consume(); dragDy += dragAmount.y },
                             onDragEnd = {
-                                val to = (i + Math.round(dragDy / stepPx)).coerceIn(0, n - 1)
+                                val to = SlideFit.dropIndex(i, dragDy / dpPx, n, pageW, pageH)
                                 dragFrom = -1; dragDy = 0f
                                 s.moveSlideTo(i, to)
                             },
@@ -186,14 +208,31 @@ private fun Thumbnails(s: DeckSession, modifier: Modifier) {
             ) {
                 Txt((i + 1).toString(), "slides/thumb-no", Modifier.width(26.dp), style = PicoTheme.typography.labelLarge, color = if (on) PicoTheme.colorScheme.labelPrimary else PicoTheme.colorScheme.labelSecondary)
                 Box(Modifier.border(if (on || lifted) 3.dp else 1.dp, if (on || lifted) Ink.Select else Ink.Line, RoundedCornerShape(8.dp)).padding(3.dp)) {
-                    SlideCanvas(s, i, 170.dp, editable = false)
+                    SlideCanvas(s, i, thumb.w.dp, editable = false)
                 }
             }
         }
     }
 }
 
-private val THUMB_H = 170.dp * 9f / 16f + 6.dp
+/**
+ * Where the canvas, the notes label row and the notes field came out in the window, logged whenever it changes:
+ * `SLIDEFIT page=… canvas=… label=… notes=… window=… inside=true|false` (px of the window; q6-1).
+ */
+private class FitReport {
+    var canvas: Rect = Rect.Zero
+    var label: Rect = Rect.Zero
+    private var last = ""
+
+    fun notes(notes: Rect, window: IntSize, s: DeckSession, fit: SlideFit.Editor) {
+        fun r(b: Rect) = "${b.left.toInt()},${b.top.toInt()} ${b.width.toInt()}x${b.height.toInt()}"
+        val inside = listOf(canvas, label, notes).all { it.width > 0f && it.height > 0f && it.left >= 0f && it.top >= 0f && it.right <= window.width && it.bottom <= window.height } &&
+            label.top >= canvas.bottom && notes.top >= label.bottom
+        val line = "SLIDEFIT page=${s.deck.widthEmu}x${s.deck.heightEmu} column=${fit.availW.toInt()}x${fit.availH.toInt()}dp canvas=${fit.canvas.w.toInt()}x${fit.canvas.h.toInt()}dp " +
+            "notesMin=${SlideFit.NOTES_MIN_H.toInt()}dp px: canvas=${r(canvas)} label=${r(label)} notes=${r(notes)} window=${window.width}x${window.height} inside=$inside"
+        if (line != last) { last = line; Log.i(TAG, line) }
+    }
+}
 
 private val Triangle = GenericShape { size, _ -> moveTo(size.width / 2f, 0f); lineTo(size.width, size.height); lineTo(0f, size.height); close() }
 private val Arrow = GenericShape { size, _ ->
