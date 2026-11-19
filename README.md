@@ -1,18 +1,20 @@
 # 空间办公 Spatial Office
 
-在 PICO 头显里直接打开、编辑、保存标准的 .docx / .xlsx / .pptx 文件（另有 .md / .txt / .csv；PDF、图片、网页只读）。文档、表格、演示各开一扇原生窗口，配蓝牙键鼠使用；保存回去仍是标准格式，只改动过的地方，其余内容逐字节保留。表格里的图表可以立成 3D 图表，演示可以在空间里铺开、预演。当前版本 **v0.2.4**。
+在 PICO 头显里直接打开、编辑、保存标准的 .docx / .xlsx / .pptx 文件（另有 .md / .txt / .csv；PDF、图片、网页只读）。文档、表格、演示各开一扇原生窗口，配蓝牙键鼠使用；保存回去仍是标准格式，只改动过的地方，其余内容逐字节保留。表格里的图表可以立成 3D 图表，演示可以在空间里铺开、预演。当前版本 **v0.2.7**。
 
 *English below.*
 
-![3D 图表](docs/shot-01.jpg)
+![空间办公](docs/poster.jpg)
 
 | | |
 |---|---|
-| ![散点](docs/shot-02.jpg) | ![文档](docs/shot-03.jpg) |
-| ![演示](docs/shot-04.jpg) | ![铺开](docs/shot-05.jpg) |
-| ![预演](docs/shot-06.jpg) | ![主页](docs/shot-07.jpg) |
+| ![表格和上方的 3D 图表](docs/shot-01.jpg) | ![文档](docs/shot-02.jpg) |
+| ![演示：选中的形状四角有圆点，可拖动、缩放](docs/shot-03.jpg) | ![两份演示并排摆开](docs/shot-04.jpg) |
+| ![铺开：每一页环绕摆在面前](docs/shot-05.jpg) | ![预演：大屏、讲稿、下一页](docs/shot-06.jpg) |
 
-截图来自 PICO 模拟器（v0.2.4，调试指令驱动），**不是真实手势录像**；演示视频同样由模拟器调试指令驱动、没有声音。
+![主页](docs/shot-07.jpg)
+
+截图来自 PICO 模拟器（v0.2.7，调试指令驱动），**不是真实手势录像**；演示视频同样由模拟器调试指令驱动、没有声音。
 
 ## 能做什么
 
@@ -40,7 +42,7 @@ Release 里的 APK 是 `assembleRelease` 出的**未签名**包（给 Vibe Lab �
 - 同时开几个文件时，新窗口开在正前方，先开的窗口被系统收到它后面（看不见）。系统没有「错开叠放」这种摆法：重叠着摆窗口不显示，并排摆又大半在视野外。用标题栏 [窗口 n] 切换；想同时看就点里面的 [并排摆开]，或捏住窗口下面的小圆点挪开
 - 3D 图表属于打开它的那张表格；把另一张表格叫到前面时图表会收起
 - 挪动、缩放插入的东西在模拟器上用真实指针拖过；手势、手柄射线、眼手三种输入在头显上还没有逐项验过
-- 3D 图表在高负载的模拟器上打开要几秒（v0.2.4 起不再卡住或弹「没有响应」）
+- 3D 图表在高负载的模拟器上打开要 1–3 秒，打开那一下最长一帧约 0.3–0.5 秒（v0.2.4 起不再卡住或弹「没有响应」；机器空闲时的数值没测到）
 - 「系统窗口列表里还留着已销毁的旧窗口」时图表跳过它、挂到当前表格上：图表这条路仍只有单元测试覆盖（v0.2.5 并排摆开文档时，同一条规则在模拟器上跳过了一个已销毁的旧文档窗口）
 - 演示窗口按页面比例留出备注区（v0.2.6）在模拟器上用 4:3、16:9、16:10、竖版四种文件看过；头显上还没看
 - 中文输入法要先点一下表格单元格，候选才能上屏
@@ -91,15 +93,24 @@ Release 里的 APK 是 `assembleRelease` 出的**未签名**包（给 Vibe Lab �
 
 # Spatial Office (English)
 
-Open, edit and save standard .docx, .xlsx and .pptx files right in a PICO headset (plus .md / .txt / .csv; PDF, images and web pages read-only). Documents, spreadsheets and slides each get a native window, made for a Bluetooth keyboard and mouse. Saving writes the same standard format back and touches only what you changed; everything else stays byte-for-byte. Charts in a spreadsheet can stand up as a 3D chart, and a deck can be spread out around you or rehearsed. Current version **v0.2.4**.
+Open, edit and save standard .docx, .xlsx and .pptx files right in a PICO headset (plus .md / .txt / .csv; PDF, images and web pages read-only). Documents, spreadsheets and slides each get a native window, made for a Bluetooth keyboard and mouse. Saving writes the same standard format back and touches only what you changed; everything else stays byte-for-byte. Charts in a spreadsheet can stand up as a 3D chart, and a deck can be spread out around you or rehearsed. Current version **v0.2.7**.
 
-Screenshots: PICO emulator, v0.2.4 / v0.2.5, driven by debug commands, **not a real hand-gesture recording**. The demo video is also debug-driven and has no sound.
+![Spatial Office](docs/poster-en.jpg)
+
+| | |
+|---|---|
+| ![Sheet with the 3D chart above it](docs/shot-en-01.jpg) | ![Document](docs/shot-en-02.jpg) |
+| ![Slides: a picked shape with corner dots](docs/shot-en-03.jpg) | ![Two decks side by side](docs/shot-en-04.jpg) |
+| ![Spread: every slide in an arc](docs/shot-en-05.jpg) | ![Rehearsal: big slide, notes, next slide](docs/shot-en-06.jpg) |
+
+Screenshots: PICO emulator, v0.2.7, driven by debug commands, **not a real hand-gesture recording**. The demo video is also debug-driven and has no sound.
 
 ## What it does
 
 - **Documents**: headings / body / lists, alignment, strikethrough, pictures, tables, find and replace, word count
 - **Spreadsheets**: 45 common functions, number and date formats, fill colours, sort and filter, freeze top row, insert / delete rows and columns, bar / line / pie charts
-- **Slides**: new slide (title / body / two columns / blank), text boxes, shapes, pictures, colour themes, drag to reorder
+- **Slides**: new slide (title / body / two columns / blank), text boxes, shapes, pictures, tables, colour themes, drag to reorder; what you insert is picked with a click, moved by dragging and resized by its corner dots
+- **Several files at once**: one window per file; Windows n in the title bar switches, goes Home or sets them side by side
 - **3D chart**: select data, Chart › 3D chart; the chart floats above the sheet window and follows every edit; columns or scatter, turn left / right
 - **Spread / rehearse**: lay a deck out in a row, an arc or layers; rehearsal shows a big slide, notes and a timer
 - **Saving**: the first save backs up the original; Save as a copy / PDF / CSV / TXT / PNG per slide
@@ -128,7 +139,7 @@ Feishu, Google Drive, OneDrive and Dropbox are optional; every local file works 
 - With several files open, a new window opens in front and the system hides the one underneath. The system has no staggered placement (an overlapping window is not shown; a window beside another is mostly out of view). Switch under Windows n in the title bar, or choose Side by side there
 - The 3D chart belongs to the sheet it was opened from; it is put away when another sheet comes to the front
 - Moving and resizing was checked with a real pointer drag on the emulator; hand, controller ray and gaze + pinch have not been checked one by one on the headset
-- On a loaded emulator the 3D chart takes a few seconds to open (since v0.2.4 it no longer freezes or shows "not responding")
+- On a loaded emulator the 3D chart takes 1 to 3 s to open, with one frame of about 0.3 to 0.5 s as it appears (since v0.2.4 it no longer freezes or shows "not responding"; not measured on an idle machine)
 - The slides window keeping the notes area for any page proportion (v0.2.6) was checked on the emulator with 4:3, 16:9, 16:10 and tall files, not yet on the headset
 - With the Chinese IME, tap a sheet cell once before typing
 - The demo video has no sound and is driven by debug commands, not real hand gestures
