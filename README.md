@@ -41,6 +41,7 @@ Release 里的 APK 是 `assembleRelease` 出的**未签名**包（给 Vibe Lab �
 - 这一版的安装包里**没有放任何云盘的应用 ID**，所以应用里不出现「账号与云盘」和云盘位置；放了 ID 再打包才有（见下「连接账号」）。真实云账号的登录、浏览、保存都**没有验证**，只有单元测试核过请求和应答格式
 - 同时开几个文件时，新窗口开在正前方，先开的窗口被系统收到它后面（看不见）。系统没有「错开叠放」这种摆法：重叠着摆窗口不显示，并排摆又大半在视野外。用标题栏 [窗口 n] 切换；想同时看就点里面的 [并排摆开]，或捏住窗口下面的小圆点挪开
 - 3D 图表属于打开它的那张表格；把另一张表格叫到前面时图表会收起
+- 3D 图表左边的图例一行放三个名字，名字长了（约 5 个汉字 / 11 个英文字母以上）末尾会被裁掉
 - 挪动、缩放插入的东西在模拟器上用真实指针拖过；手势、手柄射线、眼手三种输入在头显上还没有逐项验过
 - 3D 图表在高负载的模拟器上打开要 1–3 秒，打开那一下最长一帧约 0.3–0.5 秒（v0.2.4 起不再卡住或弹「没有响应」；机器空闲时的数值没测到）
 - 「系统窗口列表里还留着已销毁的旧窗口」时图表跳过它、挂到当前表格上：图表这条路仍只有单元测试覆盖（v0.2.5 并排摆开文档时，同一条规则在模拟器上跳过了一个已销毁的旧文档窗口）
@@ -138,6 +139,7 @@ Feishu, Google Drive, OneDrive and Dropbox are optional; every local file works 
 - This release contains no cloud client ids, so Accounts & drives does not appear; sign-in, browsing and saving with real cloud accounts are **not verified** (unit tests check the request and response formats only)
 - With several files open, a new window opens in front and the system hides the one underneath. The system has no staggered placement (an overlapping window is not shown; a window beside another is mostly out of view). Switch under Windows n in the title bar, or choose Side by side there
 - The 3D chart belongs to the sheet it was opened from; it is put away when another sheet comes to the front
+- The 3D chart legend puts three names on a row; a long name (about 5 Chinese characters or 11 letters and up) is cut off at the end
 - Moving and resizing was checked with a real pointer drag on the emulator; hand, controller ray and gaze + pinch have not been checked one by one on the headset
 - On a loaded emulator the 3D chart takes 1 to 3 s to open, with one frame of about 0.3 to 0.5 s as it appears (since v0.2.4 it no longer freezes or shows "not responding"; not measured on an idle machine)
 - The slides window keeping the notes area for any page proportion (v0.2.6) was checked on the emulator with 4:3, 16:9, 16:10 and tall files, not yet on the headset
