@@ -272,8 +272,6 @@ sa_txt	纯文本 .txt	Plain text .txt
 sa_txt_sub	只有文字，没有格式	Text only, no formatting
 sa_png	图片（每页一张 PNG）	Images (one PNG per slide)
 sa_png_sub	放进以文件名命名的文件夹	Placed in a folder named after the file
-sa_cloud	存到云盘	Save to a cloud drive
-sa_cloud_sub	先在「账号与云盘」连接一个云盘	Connect a drive under Accounts & drives first
 save_to	保存到	Save to
 saveas_note	正在编辑的文件不受影响	The file you are editing is not affected
 saveas_go	另存	Save
@@ -317,7 +315,6 @@ cloud_kept_local	登录过期了，改动留在这台设备上没有丢。重新
 cloud_kind_fdoc	飞书云文档	Feishu doc
 cloud_kind_fsheet	飞书电子表格	Feishu sheet
 cloud_loading	正在读取…	Loading…
-cloud_none_connected	还没有连接任何云盘	No cloud drive is connected
 cloud_offline	连不上。已经打开的文件可以接着改，联网后再保存	Cannot reach the service. Open files can still be edited; save once you are online
 cloud_readonly_save	这个文件在云端是只读的（Google 自己格式的文档、飞书幻灯片）。用 [另存为] 存一份副本	This file is read-only in the cloud (Google’s own formats, Feishu slides). Use Save as to keep a copy
 cloud_readonly_tag	只读	Read-only

@@ -275,8 +275,6 @@
     <string name="sa_txt_sub" formatted="false">Text only, no formatting</string>
     <string name="sa_png" formatted="false">Images (one PNG per slide)</string>
     <string name="sa_png_sub" formatted="false">Placed in a folder named after the file</string>
-    <string name="sa_cloud" formatted="false">Save to a cloud drive</string>
-    <string name="sa_cloud_sub" formatted="false">Connect a drive under Accounts &amp; drives first</string>
     <string name="save_to" formatted="false">Save to</string>
     <string name="saveas_note" formatted="false">The file you are editing is not affected</string>
     <string name="saveas_go" formatted="false">Save</string>
@@ -320,7 +318,6 @@
     <string name="cloud_kind_fdoc" formatted="false">Feishu doc</string>
     <string name="cloud_kind_fsheet" formatted="false">Feishu sheet</string>
     <string name="cloud_loading" formatted="false">Loading…</string>
-    <string name="cloud_none_connected" formatted="false">No cloud drive is connected</string>
     <string name="cloud_offline" formatted="false">Cannot reach the service. Open files can still be edited; save once you are online</string>
     <string name="cloud_readonly_save" formatted="false">This file is read-only in the cloud (Google’s own formats, Feishu slides). Use Save as to keep a copy</string>
     <string name="cloud_readonly_tag" formatted="false">Read-only</string>

@@ -201,7 +201,9 @@ private fun RecentPage(graph: Graph) {
         val openKeys = graph.sessions.map { it.ref.key }.toSet()
         val openMark = " · " + tr(R.string.open_now)
         val items = all.filter { it.cloud == null }
-        val cloudItems = all.filter { it.cloud != null }
+        // a cloud file is listed only while its service is offered: in a build without that drive its row could not open it (v0.2.7)
+        val offeredNow = graph.accounts.shown
+        val cloudItems = all.filter { r -> r.cloud != null && (r.ref() as? io.embodit.spatialoffice.platform.FileRef.Cloud)?.let { io.embodit.spatialoffice.core.cloud.CloudCatalog.listsRecent(offeredNow, it.provider) } == true }
         GroupLabel(tr(R.string.group_device), "recent")
         if (items.isEmpty()) {
             InfoRow(R.drawable.ic_info_circle, tr(R.string.recent_empty), tr(R.string.first_hint), "recent/empty")

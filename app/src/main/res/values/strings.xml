@@ -275,8 +275,6 @@
     <string name="sa_txt_sub" formatted="false">只有文字，没有格式</string>
     <string name="sa_png" formatted="false">图片（每页一张 PNG）</string>
     <string name="sa_png_sub" formatted="false">放进以文件名命名的文件夹</string>
-    <string name="sa_cloud" formatted="false">存到云盘</string>
-    <string name="sa_cloud_sub" formatted="false">先在「账号与云盘」连接一个云盘</string>
     <string name="save_to" formatted="false">保存到</string>
     <string name="saveas_note" formatted="false">正在编辑的文件不受影响</string>
     <string name="saveas_go" formatted="false">另存</string>
@@ -320,7 +318,6 @@
     <string name="cloud_kind_fdoc" formatted="false">飞书云文档</string>
     <string name="cloud_kind_fsheet" formatted="false">飞书电子表格</string>
     <string name="cloud_loading" formatted="false">正在读取…</string>
-    <string name="cloud_none_connected" formatted="false">还没有连接任何云盘</string>
     <string name="cloud_offline" formatted="false">连不上。已经打开的文件可以接着改，联网后再保存</string>
     <string name="cloud_readonly_save" formatted="false">这个文件在云端是只读的（Google 自己格式的文档、飞书幻灯片）。用 [另存为] 存一份副本</string>
     <string name="cloud_readonly_tag" formatted="false">只读</string>

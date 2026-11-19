@@ -18,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -135,13 +136,22 @@ private fun FateRow(icon: Int, head: String, sub: String, tag: String) {
     }
 }
 
-/** Save as (PRD §7): pick one target; the file being edited is never touched. */
+/**
+ * Save as (PRD §7): pick one target; the file being edited is never touched. The rows are [Exporter.rows]: the local
+ * targets, and a copy to a cloud drive only while one is signed in (v0.2.7, QA #7 q7-1: the dialog always drew a grey
+ * "Save to a cloud drive · connect one under Accounts & drives first" row that did nothing, in a build without an
+ * Accounts page). Every row that is drawn can be picked.
+ */
 @Composable
 private fun SaveAsSheet(graph: Graph, win: Win, s: Session) {
     val zh = graph.settings.value.zh
-    val targets = remember(s.kind) { Exporter.targets(s) }
-    var picked by remember { mutableStateOf(targets.first()) }
+    val drive = graph.accounts.saveAsDrive
+    val rows = remember(s.kind, drive) { Exporter.rows(s, drive) }
+    var choice by remember { mutableStateOf(rows.first()) }
+    // signed out while the dialog is open: the cloud row goes, and so does a pick of it
+    val picked = choice.takeIf { it in rows } ?: rows.first()
     val dest = remember(picked, s.ref.key, graph.filesVersion) { Exporter.destination(graph, s, picked, zh) }
+    LaunchedEffect(rows) { android.util.Log.i(io.embodit.spatialoffice.platform.TAG, "SAVEAS rows=${rows.joinToString(",")} drive=${drive?.id ?: "none"} offered=${graph.accounts.shown.map { it.id }}") }
     Sheet(
         modifier = Modifier.width(680.dp),
         onDismissRequest = { graph.overlay = null },
@@ -156,42 +166,29 @@ private fun SaveAsSheet(graph: Graph, win: Win, s: Session) {
     ) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Txt(tr(R.string.saveas_label), "saveas/label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
-            targets.forEach { t ->
+            rows.forEach { t ->
                 val (head, sub) = when (t) {
                     SaveAsTarget.COPY -> tr(R.string.sa_copy, s.ref.name.substringAfterLast('.')) to tr(R.string.sa_copy_sub)
                     SaveAsTarget.PDF -> tr(R.string.sa_pdf) to tr(R.string.sa_pdf_sub)
                     SaveAsTarget.CSV -> tr(R.string.sa_csv) to tr(R.string.sa_csv_sub)
                     SaveAsTarget.TXT -> tr(R.string.sa_txt) to tr(R.string.sa_txt_sub)
                     SaveAsTarget.PNG -> tr(R.string.sa_png) to tr(R.string.sa_png_sub)
-                    SaveAsTarget.CLOUD -> "" to ""
+                    // in [rows] only with a drive
+                    SaveAsTarget.CLOUD -> tr(R.string.sa_cloud_to, drive?.let { tr(io.embodit.spatialoffice.platform.Accounts.nameRes(it)) } ?: "") to tr(R.string.sa_cloud_to_sub)
                 }
                 val on = t == picked
                 Row(
                     Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(16.dp))
                         .background(if (on) PicoTheme.colorScheme.fillSecondary else PicoTheme.colorScheme.fillLight)
-                        .clickable { picked = t }.padding(horizontal = 16.dp, vertical = 8.dp),
+                        .clickable { choice = t }.padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(Modifier.size(20.dp).clip(RoundedCornerShape(10.dp)).background(if (on) PicoTheme.colorScheme.interaction else PicoTheme.colorScheme.fillTertiary))
+                    if (t == SaveAsTarget.CLOUD) Icon(painter = painterResource(R.drawable.ic_cloud), contentDescription = null, modifier = Modifier.size(20.dp), tint = if (on) PicoTheme.colorScheme.interaction else PicoTheme.colorScheme.labelPrimary)
+                    else Box(Modifier.size(20.dp).clip(RoundedCornerShape(10.dp)).background(if (on) PicoTheme.colorScheme.interaction else PicoTheme.colorScheme.fillTertiary))
                     Column(Modifier.weight(1f).padding(start = 14.dp)) {
-                        Txt(head, "saveas/target", style = PicoTheme.typography.titleMedium, maxLines = 2)
-                        Txt(sub, "saveas/target-sub", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2)
+                        Txt(head, if (t == SaveAsTarget.CLOUD) "saveas/cloud" else "saveas/target", style = PicoTheme.typography.titleMedium, maxLines = 2)
+                        Txt(sub, if (t == SaveAsTarget.CLOUD) "saveas/cloud-sub" else "saveas/target-sub", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2)
                     }
-                }
-            }
-            // a copy to the first connected cloud drive; without a connection the row says where to connect
-            val cloud = io.embodit.spatialoffice.core.cloud.Provider.values().firstOrNull { graph.accounts.connected(it) }
-            val onCloud = picked == SaveAsTarget.CLOUD
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(16.dp))
-                    .background(if (onCloud) PicoTheme.colorScheme.fillSecondary else PicoTheme.colorScheme.fillLight)
-                    .clickable(enabled = cloud != null) { picked = SaveAsTarget.CLOUD }.padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(painter = painterResource(R.drawable.ic_cloud), contentDescription = null, modifier = Modifier.size(20.dp), tint = if (cloud != null) PicoTheme.colorScheme.labelPrimary else PicoTheme.colorScheme.labelSecondary)
-                Column(Modifier.weight(1f).padding(start = 14.dp)) {
-                    Txt(if (cloud != null) tr(R.string.sa_cloud_to, tr(io.embodit.spatialoffice.platform.Accounts.nameRes(cloud))) else tr(R.string.sa_cloud), "saveas/cloud", style = PicoTheme.typography.titleMedium, maxLines = 2)
-                    Txt(tr(if (cloud != null) R.string.sa_cloud_to_sub else R.string.sa_cloud_sub), "saveas/cloud-sub", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2)
                 }
             }
             Spacer(Modifier.height(4.dp))

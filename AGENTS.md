@@ -118,6 +118,20 @@ layout changes (window px; `inside` = all three inside the window and none over 
 `tools/.venv/bin/python tools/fixtures/make_slide_proportions.py <out dir>`. The emulator's `--spatial --size
 2560x1440` screenshots are stretched 1.33× sideways; judge proportions on the plain `pico-cli capture screenshot`.
 
+v0.2.7 (QA #7 q7-1): **no dead cloud row in Save as.** The dialog of all three editors drew, whatever the build, a
+grey row "Save to a cloud drive · connect one under Accounts & drives first" that could not be clicked, and this
+release has no Accounts page. The dialog now draws exactly `Exporter.rows(session, accounts.saveAsDrive)`: the local
+targets, plus the cloud copy only when `core/cloud/CloudCatalog.saveAsDrive(shown, connected)` names a drive (the first
+service this build offers that is signed in). Offered but not signed in → no row either: every row drawn can be picked.
+The strings `sa_cloud`, `sa_cloud_sub`, `cloud_none_connected` are gone; `Accounts.saveCopy` takes the drive the row
+named; `Graph.saveAs(CLOUD)` without a drive does nothing. Recent lists a cloud file only while its service is offered
+(`CloudCatalog.listsRecent`). Log when the dialog opens: `SAVEAS rows=COPY,PDF,TXT drive=none offered=[]`. Tests
+(`app` `SaveAsRowsTest`): no client ids → none of the three editors has a cloud row; offered but signed out → none;
+signed in → one, last; the removed strings are in no language; only strings drawn with a drive offered
+(`nav_account`, `cloud_none`, `how_to_cloud_keys`) name the Accounts page.
+**Rule for anything new that touches accounts or drives:** gate it on `accounts.shown` (offered in this build) or
+`accounts.saveAsDrive` / `connected` (signed in); never draw a disabled row that tells the user to go to a page.
+
 ## The save rule
 
 Opening never changes a file. Saving rewrites only the parts that hold an edit, and inside such a part only the
@@ -166,7 +180,7 @@ Each command calls the same function as the control it stands for; the app logs 
 | `chart-add`, `chartview` | `bar` `line` `pie` / index | make a chart from the data around the selection / show the flat chart sheet |
 | `browse` | `0`–`4` | Browse page at Device / Feishu / Google Drive / OneDrive / Dropbox |
 | `connect` | `feishu` `gdrive` `onedrive` `dropbox` | same as [Connect]: the system browser on the service's sign-in page (nothing when the build has no client id for it) |
-| `saveas-cloud` | `doc` `sheet` `slides` | Save as ▸ a copy to the first connected drive |
+| `saveas-cloud` | `doc` `sheet` `slides` | Save as ▸ a copy to the signed-in drive (`Accounts.saveAsDrive`); with none the dialog has no such row and this does nothing (log `SAVEAS cloud ignored`) |
 | `browse-dir` | absolute folder path | Browse page inside that folder |
 | `scan` | `feishu` `onedrive` | scan-to-sign-in for real (needs a registration) |
 | `scan-preview` | `feishu` `onedrive` | the scan dialog filled with a **sample** code `SAMP-LE42` (no request sent; for screenshots only) |

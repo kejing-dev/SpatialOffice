@@ -25,6 +25,13 @@ object Exporter {
         else -> listOf(SaveAsTarget.COPY, SaveAsTarget.PDF, SaveAsTarget.TXT)
     }
 
+    /**
+     * Every row the Save-as dialog draws, in order: the local targets, then the cloud copy only when there is a
+     * [drive] to put it on ([io.embodit.spatialoffice.core.cloud.CloudCatalog.saveAsDrive]). No drive, no row.
+     */
+    fun rows(s: Session, drive: io.embodit.spatialoffice.core.cloud.Provider?): List<SaveAsTarget> =
+        targets(s) + listOfNotNull(SaveAsTarget.CLOUD.takeIf { drive != null })
+
     /** Where [target] will be written (a free name; for PNG the folder). */
     fun destination(graph: Graph, s: Session, target: SaveAsTarget, zh: Boolean): File {
         val dir = graph.storage.newDir

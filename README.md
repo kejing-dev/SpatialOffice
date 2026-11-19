@@ -28,13 +28,13 @@
 ## 安装
 
 ```
-adb install -r SpatialOffice-v0.2.6.apk
+adb install -r SpatialOffice-v0.2.7.apk
 pico-cli app launch io.embodit.spatialoffice
 ```
 
 Release 里的 APK 是 `assembleRelease` 出的**未签名**包（给 Vibe Lab 平台托管签名用），本机直接装需要先自己签名，或用 `./gradlew :app:assembleDebug` 出 debug 包。构建、目录结构、调试广播见 [AGENTS.md](AGENTS.md)。
 
-## 已知问题（v0.2.6）
+## 已知问题（v0.2.7）
 
 - 这一版的安装包里**没有放任何云盘的应用 ID**，所以应用里不出现「账号与云盘」和云盘位置；放了 ID 再打包才有（见下「连接账号」）。真实云账号的登录、浏览、保存都**没有验证**，只有单元测试核过请求和应答格式
 - 同时开几个文件时，新窗口开在正前方，先开的窗口被系统收到它后面（看不见）。系统没有「错开叠放」这种摆法：重叠着摆窗口不显示，并排摆又大半在视野外。用标题栏 [窗口 n] 切换；想同时看就点里面的 [并排摆开]，或捏住窗口下面的小圆点挪开
@@ -50,7 +50,7 @@ Release 里的 APK 是 `assembleRelease` 出的**未签名**包（给 Vibe Lab �
 
 账号是可选的：一个都不连，本机文件全部能用。
 
-**应用里只出现放了应用 ID 的那几家。** 打包时没放 ID 的服务，在「账号与云盘」「浏览」「怎么操作」里都不出现，也不会发出任何请求；四家都没放，「账号与云盘」这一页和「最近」里的云端分组都不显示。放了 ID 的服务显示 [连接]：**点一下直接弹出系统浏览器**，打开那一家自己的登录页（授权码 + PKCE），登录同意后浏览器自动跳回应用，全程不在应用里输密码。设备上没有浏览器时，飞书和 OneDrive 会改用扫码（设备授权码 RFC 8628：头显上只显示二维码和一组代码，在手机或电脑上同意）。
+**应用里只出现放了应用 ID 的那几家。** 打包时没放 ID 的服务，在「账号与云盘」「浏览」「怎么操作」里都不出现，也不会发出任何请求；四家都没放，「账号与云盘」这一页、「最近」里的云端分组和 [另存为] 里的云盘那一行都不显示。放了 ID 的服务显示 [连接]：**点一下直接弹出系统浏览器**，打开那一家自己的登录页（授权码 + PKCE），登录同意后浏览器自动跳回应用，全程不在应用里输密码。设备上没有浏览器时，飞书和 OneDrive 会改用扫码（设备授权码 RFC 8628：头显上只显示二维码和一组代码，在手机或电脑上同意）。
 
 **怎么放 ID（给打包的人看）**：先到那一家的开发者后台登记一个应用（下表），然后二选一：
 
@@ -74,7 +74,7 @@ Release 里的 APK 是 `assembleRelease` 出的**未签名**包（给 Vibe Lab �
 - 飞书云文档、飞书电子表格直接改，保存时只写回改过的段落 / 单元格；飞书幻灯片、Google 自己格式的文档只读（Google 文档会导出成 .docx / .xlsx / .pptx 打开，可以 [另存为] 一份副本）。
 - **保存前比对云端版本**（PRD §9.3）：打开时记下版本号（飞书云文档 `revision_id`、电子表格 `revision`、云盘文件 `latest_modify_time`；Google `version`；OneDrive `cTag`；Dropbox `rev`），保存前再读一次；不一样就问「覆盖云端的 / 另存为副本 / 取消」，不会悄悄盖掉别人的改动。副本放在原文件同一个文件夹。
 - **飞书收件夹**（PRD §9.4）：第一次连上飞书时在「我的空间」建「空间办公」和「空间办公 / 收件夹」。应用在前台时每 10 秒看一次收件夹，新东西排到「最近」最上面，并提示「电脑发来…」[打开]。电脑上一条命令放进去：`lark-cli drive +create-shortcut --type docx --file-token <文档 token> --folder-token <收件夹 token>`（或在网页上把文档拖进去）。「浏览 › 飞书」第一行就是收件夹。应用不在前台时不检查（没有后台同步）。
-- 「最近」里本机和云端的文件分两组列出；[另存为] 可以选「存一份到 <云盘>」，飞书放在「空间办公」文件夹，其他放在云盘最上一层。
+- 「最近」里本机和云端的文件分两组列出；登录了一个云盘之后，[另存为] 里多一行「存一份到 <云盘>」（没登录时没有这一行），飞书放在「空间办公」文件夹，其他放在云盘最上一层。
 - 断网时已经打开的文件可以继续改，联网后再保存；登录过期时改动留在头显上，重新登录后再保存。
 
 ### 设计取舍（用户已同意）
@@ -108,7 +108,7 @@ Screenshots: PICO emulator, v0.2.4 / v0.2.5, driven by debug commands, **not a r
 ## Install
 
 ```
-adb install -r SpatialOffice-v0.2.6.apk
+adb install -r SpatialOffice-v0.2.7.apk
 pico-cli app launch io.embodit.spatialoffice
 ```
 
@@ -120,9 +120,9 @@ Every open file has its own window; opening a second document, sheet or deck nev
 
 ## Cloud drives
 
-Feishu, Google Drive, OneDrive and Dropbox are optional; every local file works without an account. **A service appears in the app only when its client id was put in at build time** (`-Pcloud.feishu.appId=…` on the gradle command line, or the same key in `local.properties`, which is not in git). Without one the service is not mentioned anywhere and no request is sent; this release ships with none. With one, **Connect opens the system browser** on the service's own sign-in page (authorisation code + PKCE) and comes back through the registered callback. Where to register, redirect URIs, scopes and keys are in the Chinese table above.
+Feishu, Google Drive, OneDrive and Dropbox are optional; every local file works without an account. **A service appears in the app only when its client id was put in at build time** (`-Pcloud.feishu.appId=…` on the gradle command line, or the same key in `local.properties`, which is not in git). Without one the service is not mentioned anywhere (no Accounts page, no Browse location, no cloud group in Recent, no cloud row in Save as) and no request is sent; this release ships with none. Save as offers "Save a copy to <drive>" only while a drive is signed in. With one, **Connect opens the system browser** on the service's own sign-in page (authorisation code + PKCE) and comes back through the registered callback. Where to register, redirect URIs, scopes and keys are in the Chinese table above.
 
-## Known issues (v0.2.6)
+## Known issues (v0.2.7)
 
 - This release contains no cloud client ids, so Accounts & drives does not appear; sign-in, browsing and saving with real cloud accounts are **not verified** (unit tests check the request and response formats only)
 - With several files open, a new window opens in front and the system hides the one underneath. The system has no staggered placement (an overlapping window is not shown; a window beside another is mostly out of view). Switch under Windows n in the title bar, or choose Side by side there

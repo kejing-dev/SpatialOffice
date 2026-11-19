@@ -14,8 +14,8 @@ android {
         applicationId = "io.embodit.spatialoffice"
         minSdk = 35
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.2.6"
+        versionCode = 9
+        versionName = "0.2.7"
 
         // Cloud accounts (PRD §9): a service is offered in the app only when its client id is put in at build time
         // (README "连接账号"): `-Pcloud.feishu.appId=…` on the gradle command line, or the same key in local.properties

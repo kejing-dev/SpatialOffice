@@ -457,11 +457,15 @@ class Graph(val app: Application) {
 
     fun saveAs(win: Win, target: SaveAsTarget) {
         val s = session(win) ?: return
+        // the cloud copy exists only with a drive to put it on: the dialog has no such row otherwise (v0.2.7, q7-1),
+        // and the debug command that stands for the row does nothing either
+        val drive = accounts.saveAsDrive
+        if (target == SaveAsTarget.CLOUD && drive == null) { Log.i(TAG, "SAVEAS cloud ignored: no drive offered and signed in"); return }
         overlay = null
         val zh = settings.value.zh
-        if (target == SaveAsTarget.CLOUD) {
+        if (target == SaveAsTarget.CLOUD && drive != null) {
             scope.launch {
-                val r = withContext(Dispatchers.IO) { runCatching { accounts.saveCopy(s.ref.name, if (s.readOnly) storage.read(s.ref) else s.serialize()) } }
+                val r = withContext(Dispatchers.IO) { runCatching { accounts.saveCopy(drive, s.ref.name, if (s.readOnly) storage.read(s.ref) else s.serialize()) } }
                 r.onFailure { e -> Log.e(TAG, "SAVEAS cloud failed", e); say(s, str(R.string.cloud_save_failed, e.message ?: "")) }
                     .onSuccess { where -> Log.i(TAG, "SAVEAS cloud -> $where"); say(s, str(R.string.saved_as, where)) }
             }

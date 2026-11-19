@@ -145,6 +145,8 @@ class Accounts(private val app: Application, private val graph: Graph) {
     fun state(p: Provider): AcctState = info[p]?.state ?: AcctState.UNREGISTERED
     fun connected(p: Provider): Boolean = state(p) == AcctState.ON
     val anyConnected: Boolean get() = Provider.values().any { connected(it) }
+    /** Where "Save as" puts a cloud copy; null = this build offers no drive or none is signed in, and the dialog has no cloud row. */
+    val saveAsDrive: Provider? get() = CloudCatalog.saveAsDrive(shown) { connected(it) }
 
     private fun tokens(p: Provider): Tokens? = prefs?.getString("${p.id}.tokens", null)?.let { Tokens.fromJson(it) }
 
@@ -667,9 +669,8 @@ class Accounts(private val app: Application, private val graph: Graph) {
         return graph.str(nameRes(p)) + " › " + copyName
     }
 
-    /** Save as → a new file at the top of the first connected drive. Returns where it went. */
-    fun saveCopy(name: String, bytes: ByteArray): String {
-        val p = Provider.values().firstOrNull { connected(it) } ?: throw IOException(graph.str(R.string.cloud_none_connected))
+    /** Save as → a new file at the top of drive [p] (the one the dialog's row named, [saveAsDrive]). Returns where it went. */
+    fun saveCopy(p: Provider, name: String, bytes: ByteArray): String {
         when (p) {
             Provider.FEISHU -> {
                 // the app's own folder made on first connection (PRD §9.2 ⑤), else the top of My Space

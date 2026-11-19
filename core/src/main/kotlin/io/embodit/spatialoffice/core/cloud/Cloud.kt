@@ -50,6 +50,17 @@ data class AppRegistration(val clientId: String, val clientSecret: String, val r
  */
 object CloudCatalog {
     fun shown(registrations: Map<Provider, AppRegistration>): List<Provider> = Provider.values().filter { registrations[it]?.registered == true }
+
+    /**
+     * The drive "Save as" can put a copy on: the first service this build offers that is signed in right now; null =
+     * the dialog has no cloud row at all (v0.2.7, QA #7 q7-1: it always drew a grey "Save to a cloud drive · connect
+     * one under Accounts & drives first" row that did nothing, in a build that has no Accounts page). A service that
+     * is not offered never counts, whatever sign-in an earlier build left on the device.
+     */
+    fun saveAsDrive(shown: List<Provider>, connected: (Provider) -> Boolean): Provider? = shown.firstOrNull { connected(it) }
+
+    /** A recent cloud file is listed only while its service is offered ([providerId] = [Provider.id]); otherwise its row could not open anything. */
+    fun listsRecent(shown: List<Provider>, providerId: String): Boolean = shown.any { it.id == providerId }
 }
 
 /**

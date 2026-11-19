@@ -1,5 +1,12 @@
 # Changelog · 更新记录
 
+## v0.2.7 · 2026-11-18
+
+- [另存为]：没有登录着的云盘时，对话框里不再有那一行灰掉、点了没反应的「存到云盘」；登录了才出现「存一份到 <云盘>」，出现的每一行都能选
+- 「最近」里的云端文件只在那一家云盘这一版能连时才列出
+- Save as: without a signed-in cloud drive the dialog no longer has the greyed-out "Save to a cloud drive" row that did nothing; "Save a copy to <drive>" appears only once a drive is signed in, and every row drawn can be picked
+- Recent lists a cloud file only while this build offers its drive
+
 ## v0.2.6 · 2026-11-18
 
 - 演示窗口：不管页面是 4:3、16:9、16:10 还是竖版，下面的讲者备注和选中提示都留着位置，看得到也写得了（之前 4:3 的文件画布把备注挤没了）；左边缩略图、故事线里的每一页、预演大屏和「下一页」也按页面比例完整显示
