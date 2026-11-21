@@ -232,6 +232,62 @@ internal class Styles(xml0: String) {
         return xfWith(xf, mapOf("numFmtId" to id.toString(), "applyNumberFormat" to "1"), "applyNumberFormat")
     }
 
+    /** Horizontal alignment ("left" / "center" / "right" / other names as written; null = general) and wrap of a cell style. */
+    fun alignment(style: Int): Pair<String?, Boolean> {
+        val raw = xfs.getOrNull(style)?.raw ?: return Pair(null, false)
+        val e = Xml.root(raw) ?: return Pair(null, false)
+        val al = XmlX.kid(raw, e, "alignment") ?: return Pair(null, false)
+        val a = Xml.attrs(raw, al)
+        val h = a["horizontal"]?.takeIf { it != "general" }
+        val w = a["wrapText"].let { it == "1" || it == "true" }
+        return Pair(h, w)
+    }
+
+    /**
+     * Style index equal to [style] but with horizontal alignment [horizontal] (null = general) and wrap [wrap]. Other
+     * alignment attributes (vertical, indent, rotation…) are kept.
+     */
+    fun withAlignment(style: Int, horizontal: String?, wrap: Boolean): Int {
+        if (alignment(style) == Pair(horizontal, wrap)) return style
+        val xf = baseXf(style)
+        val e = Xml.root(xf.raw)!!
+        val old = if (e.selfClosing) null else XmlX.kid(xf.raw, e, "alignment")
+        val set = LinkedHashMap<String, String?>()
+        set["horizontal"] = horizontal
+        set["wrapText"] = if (wrap) "1" else null
+        val newAl: String = if (old != null) {
+            val tag = XmlX.startTag(xf.raw, old, set, true)
+            // an alignment element left without attributes says nothing
+            if (Xml.attrs(tag, Xml.root(tag)!!).isEmpty()) "" else tag
+        } else {
+            val attrs = set.entries.filter { it.value != null }.joinToString("") { " ${it.key}=\"${it.value}\"" }
+            if (attrs.isEmpty()) "" else "<${pfx}alignment$attrs/>"
+        }
+        val start = XmlX.startTag(xf.raw, e, mapOf("applyAlignment" to "1"), false)
+        val inner = when {
+            e.selfClosing -> newAl
+            old != null -> xf.raw.substring(e.openEnd, old.start) + newAl + xf.raw.substring(old.end, e.closeStart)
+            else -> newAl + xf.raw.substring(e.openEnd, e.closeStart) // alignment comes first among an xf's children
+        }
+        val raw = if (inner.isEmpty()) XmlX.startTag(xf.raw, e, mapOf("applyAlignment" to "1"), true) else start + inner + "</" + e.name + ">"
+        return xfRaw(raw, "applyAlignment")
+    }
+
+    /** Number format code of a style ("General" when none). */
+    fun formatCode(style: Int): String {
+        val id = xfs.getOrNull(style)?.numFmtId ?: return "General"
+        if (id == 0) return "General"
+        return customFmts[id] ?: NumFormat.builtin(id) ?: "General"
+    }
+
+    private fun xfRaw(raw: String, applyFlag: String): Int {
+        val key = xfKey(raw, applyFlag)
+        val hit = xfs.indexOfFirst { xfKey(it.raw, applyFlag) == key }
+        if (hit >= 0) return hit
+        append("cellXfs", raw)
+        return xfs.size - 1
+    }
+
     /** What a cell format says, apart from one `apply…` flag: an existing format that differs only in that flag is reused. */
     private fun xfKey(raw: String, ignore: String): String {
         val e = Xml.root(raw) ?: return raw

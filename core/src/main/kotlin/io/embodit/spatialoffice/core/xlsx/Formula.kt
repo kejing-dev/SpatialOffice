@@ -466,6 +466,33 @@ internal object Formula {
         }
     }
 
+    /**
+     * A formula copied ([dRow], [dCol]) cells away: relative row / column parts move, `$` parts stay, a reference pushed
+     * off the sheet becomes `#REF!`. Works with or without the leading `=` and returns the same form.
+     */
+    fun offset(formula: String, dRow: Int, dCol: Int): String {
+        val eq = formula.startsWith("=")
+        val body = if (eq) formula.substring(1) else formula
+        val out = translate(body, dRow, dCol)
+        return if (eq) "=$out" else out
+    }
+
+    /**
+     * Rewrites the sheet part of every reference qualified with sheet [old] (case-insensitive): to [newName] (quoted
+     * as needed), or, when [newName] is null (the sheet was deleted), the whole reference becomes `#REF!`.
+     */
+    fun renameSheetRefs(text: String, old: String, newName: String?): String {
+        val toks = Lexer.tokenize(text)
+        val edits = ArrayList<Triple<Int, Int, String>>()
+        for (t in toks) {
+            val r = t.ref ?: continue
+            if (r.sheet == null || !r.sheet.equals(old, ignoreCase = true)) continue
+            if (newName == null) edits.add(Triple(t.s, r.e, "#REF!"))
+            else edits.add(Triple(t.s, r.s, Charts.quoteSheet(newName) + "!"))
+        }
+        return splice(text, edits)
+    }
+
     /** Expands a shared formula: relative coordinates move by ([dRow], [dCol]), absolute ones stay. */
     fun translate(text: String, dRow: Int, dCol: Int): String {
         if (dRow == 0 && dCol == 0) return text

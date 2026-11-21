@@ -56,9 +56,13 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         val cells = TreeMap<Int, CellRec>()
         var style = 0
         var touched = false
+        /** Row height in points as read (`ht`); [htChanged] when set here. */
+        var ht: Float? = null
+        var htChanged = false
     }
 
-    private class ColInfo(val min: Int, val max: Int, val width: Float?, val style: Int)
+    /** One `<col>` span; [attrs] = all its attributes as read (or set here), in order, for writing it back. */
+    private class ColInfo(val min: Int, val max: Int, val width: Float?, val style: Int, val attrs: LinkedHashMap<String, String> = LinkedHashMap())
 
     private class Sheet(val index: Int, val name: String, val part: String, val xml: String) {
         val rows = TreeMap<Int, RowRec>()
@@ -68,6 +72,9 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         var pfx = ""
         val cols = ArrayList<ColInfo>()
         var defaultWidth = 8.43f
+        var defaultHeight = 15f
+        /** Column widths were changed here: `<cols>` is rewritten from [cols] on save. */
+        var colsChanged = false
         /** Rows were inserted or reordered: the whole `<sheetData>` content is regenerated on save. */
         var structural = false
         /** Row / column insertions and deletions since load, in order: [axis (0 rows, 1 columns), at, delta]. */
@@ -202,12 +209,17 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         s.root = root
         s.rootKids = Xml.children(xml, root)
         for (k in s.rootKids) when (Xml.local(k.name)) {
-            "sheetFormatPr" -> Xml.attr(xml, k, "defaultColWidth")?.toFloatOrNull()?.let { s.defaultWidth = it }
+            "sheetFormatPr" -> {
+                Xml.attr(xml, k, "defaultColWidth")?.toFloatOrNull()?.let { s.defaultWidth = it }
+                Xml.attr(xml, k, "defaultRowHeight")?.toFloatOrNull()?.let { s.defaultHeight = it }
+            }
             "cols" -> for (c in Xml.children(xml, k)) {
                 val a = Xml.attrs(xml, c)
                 val min = a["min"]?.toIntOrNull() ?: continue
                 val max = a["max"]?.toIntOrNull() ?: min
-                s.cols.add(ColInfo(min - 1, max - 1, a["width"]?.toFloatOrNull(), a["style"]?.toIntOrNull() ?: 0))
+                val raw = LinkedHashMap<String, String>()
+                for (sp in XmlX.attrSpans(xml, c)) raw[sp.name] = Xml.unescape(xml.substring(sp.valStart, sp.valEnd))
+                s.cols.add(ColInfo(min - 1, max - 1, a["width"]?.toFloatOrNull(), a["style"]?.toIntOrNull() ?: 0, raw))
             }
             "sheetData" -> if (s.sheetData == null) { s.sheetData = k; s.pfx = XmlX.prefixOf(k.name); parseRows(s, k) }
             "sheetViews" -> XmlX.kid(xml, k, "sheetView")?.let { v -> XmlX.kid(xml, v, "pane") }?.let { pane ->
@@ -231,6 +243,7 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             nextRow = idx + 1
             val row = RowRec(idx, re)
             if (ra["customFormat"].let { it == "1" || it == "true" }) row.style = ra["s"]?.toIntOrNull() ?: 0
+            row.ht = ra["ht"]?.toFloatOrNull()
             s.rows[idx] = row
             var nextCol = 0
             for (ce in Xml.children(xml, re)) {
@@ -467,7 +480,8 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             else -> { kind = CellKind.TEXT; display = v.toString(); input = display }
         }
         if (formula != null) input = "=$formula"
-        return Cell(input, display, kind, number, formula != null, bold, fmt.kind)
+        val (h, wrap) = styles?.alignment(c.style) ?: Pair(null, false)
+        return Cell(input, display, kind, number, formula != null, bold, fmt.kind, h, wrap)
     }
 
     /** Column width in characters of the default font, as stored in the file (default 8.43). */
@@ -744,7 +758,7 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             val shifted = ArrayList<ColInfo>()
             for (ci in s.cols) {
                 val rg = applyOps(intArrayOf(0, ci.min, 0, ci.max), listOf(intArrayOf(1, at, delta))) ?: continue
-                shifted.add(ColInfo(rg[1], rg[3], ci.width, ci.style))
+                shifted.add(ColInfo(rg[1], rg[3], ci.width, ci.style, LinkedHashMap(ci.attrs).also { it["min"] = (rg[1] + 1).toString(); it["max"] = (rg[3] + 1).toString() }))
             }
             s.cols.clear(); s.cols.addAll(shifted)
         }
@@ -820,6 +834,440 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         if (c.style == ns) return
         c.style = ns
         c.styleChanged = true
+        dirty = true
+    }
+
+    // ---- alignment, wrap, decimals (M1) ----
+
+    private fun restyle(sheet: Int, row: Int, col: Int, f: (Styles, Int) -> Int) {
+        val s = sheetAt(sheet)
+        checkPos(row, col)
+        val existing = s.rows[row]?.cells?.get(col)
+        val cur = existing?.style ?: inheritedStyle(s, row, col)
+        val ns = f(ensureStyles(), cur)
+        if (ns == cur && (existing == null || existing.style == ns)) return
+        val c = existing ?: createCell(s, row, col)
+        if (c.style == ns) return
+        c.style = ns
+        c.styleChanged = true
+        dirty = true
+    }
+
+    /** Horizontal alignment of a cell: "left", "center", "right", or null for general. Wrap is kept. */
+    fun setHAlign(sheet: Int, row: Int, col: Int, align: String?) {
+        val a = align?.lowercase(Locale.ROOT)?.takeIf { it != "general" }
+        val s = sheetAt(sheet)
+        val cur = s.rows[row]?.cells?.get(col)?.style ?: inheritedStyle(s, row, col)
+        if ((styles?.alignment(cur)?.first) == a) return
+        restyle(sheet, row, col) { st, style -> st.withAlignment(style, a, st.alignment(style).second) }
+    }
+
+    /** Text wrapping inside a cell (`wrapText`). Horizontal alignment is kept. */
+    fun setWrap(sheet: Int, row: Int, col: Int, wrap: Boolean) {
+        val s = sheetAt(sheet)
+        val cur = s.rows[row]?.cells?.get(col)?.style ?: inheritedStyle(s, row, col)
+        if ((styles?.alignment(cur)?.second ?: false) == wrap) return
+        restyle(sheet, row, col) { st, style -> st.withAlignment(style, st.alignment(style).first, wrap) }
+    }
+
+    /** One decimal place more ([delta] > 0) or fewer ([delta] < 0) in the cell's number format (date and text formats stay). */
+    fun adjustDecimals(sheet: Int, row: Int, col: Int, delta: Int) {
+        if (delta == 0) return
+        val s = sheetAt(sheet)
+        checkPos(row, col)
+        val rec = s.rows[row]?.cells?.get(col)
+        val cur = rec?.style ?: inheritedStyle(s, row, col)
+        val code = styles?.formatCode(cur) ?: "General"
+        val v = rec?.let { valueOf(sheet, it) } as? Double
+        val next = Decimals.adjust(code, delta, v)
+        if (next == code) return
+        restyle(sheet, row, col) { st, style -> st.withNumFmt(style, next) }
+    }
+
+    // ---- ranges: copy, paste, clear (M1) ----
+
+    /** The cells of a rectangle as the formula bar shows them, with their style indices. */
+    fun copyRange(sheet: Int, r1: Int, c1: Int, r2: Int, c2: Int): List<List<ClipCell>> {
+        val s = sheetAt(sheet)
+        val rows = ArrayList<List<ClipCell>>()
+        for (r in minOf(r1, r2)..maxOf(r1, r2)) {
+            val line = ArrayList<ClipCell>()
+            for (c in minOf(c1, c2)..maxOf(c1, c2)) {
+                val rec = s.rows[r]?.cells?.get(c)
+                line.add(ClipCell(cell(sheet, r, c).input, rec?.style ?: inheritedStyle(s, r, c)))
+            }
+            rows.add(line)
+        }
+        return rows
+    }
+
+    /**
+     * Writes [cells] with their top-left at ([row], [col]). Formulas are moved by ([dRow], [dCol]) (relative parts
+     * shift, `$` parts stay, references pushed off the sheet become `#REF!`); an empty input clears the cell. With
+     * [withStyles] each cell also takes the copied style index (only meaningful within the same workbook). Cells that
+     * would land outside the sheet are skipped.
+     */
+    fun pasteRange(sheet: Int, row: Int, col: Int, cells: List<List<ClipCell>>, dRow: Int, dCol: Int, withStyles: Boolean = true) {
+        val s = sheetAt(sheet)
+        val styleCount = styles?.styleCount ?: 1
+        for ((i, line) in cells.withIndex()) for ((j, cc) in line.withIndex()) {
+            val r = row + i
+            val c = col + j
+            if (r < 0 || r > A1.MAX_ROW || c < 0 || c > A1.MAX_COL) continue
+            var input = cc.input
+            if (input.length > 1 && input[0] == '=' && Formula.parse(input.substring(1)).root != null) input = Formula.offset(input, dRow, dCol)
+            setCell(sheet, r, c, input)
+            if (withStyles && cc.style in 0 until styleCount) {
+                val rec = s.rows[r]?.cells?.get(c)
+                val cur = rec?.style ?: inheritedStyle(s, r, c)
+                if (cur != cc.style || (rec != null && rec.style != cc.style)) {
+                    val k = rec ?: createCell(s, r, c)
+                    if (k.style != cc.style) { k.style = cc.style; k.styleChanged = true; dirty = true }
+                }
+            }
+        }
+    }
+
+    /** Clears the contents of a rectangle; with [styles] its cell formats too (cut, Delete). */
+    fun clearRange(sheet: Int, r1: Int, c1: Int, r2: Int, c2: Int, styles: Boolean) {
+        val s = sheetAt(sheet)
+        val ra = minOf(r1, r2); val rb = maxOf(r1, r2)
+        val ca = minOf(c1, c2); val cb = maxOf(c1, c2)
+        for (r in ArrayList(s.rows.subMap(ra, true, rb, true).values)) {
+            for (c in ArrayList(r.cells.subMap(ca, true, cb, true).values)) {
+                if (c.value != null || c.formula != null) setCell(sheet, r.index, c.col, "")
+                if (styles && c.style != 0) { c.style = 0; c.styleChanged = true; dirty = true }
+            }
+        }
+    }
+
+    // ---- column widths, row heights (M1) ----
+
+    /** Sets the width of one column in characters (1–255), splitting a `<col>` span that covers more columns. */
+    fun setColWidth(sheet: Int, col: Int, widthChars: Float) {
+        val s = sheetAt(sheet)
+        if (col < 0 || col > A1.MAX_COL) throw IndexOutOfBoundsException("col $col")
+        val w = widthChars.coerceIn(1f, 255f)
+        if (colWidthChars(sheet, col) == w && s.cols.any { col in it.min..it.max && it.width == w }) return
+        fun info(min: Int, max: Int, base: ColInfo?, width: Float?): ColInfo {
+            val a = if (base != null) LinkedHashMap(base.attrs) else LinkedHashMap()
+            a["min"] = (min + 1).toString(); a["max"] = (max + 1).toString()
+            if (width != null) { a["width"] = fmtNum(width); a["customWidth"] = "1" }
+            return ColInfo(min, max, width ?: base?.width, base?.style ?: 0, a)
+        }
+        val out = ArrayList<ColInfo>()
+        var hit = false
+        for (ci in s.cols) {
+            if (col < ci.min || col > ci.max) { out.add(ci); continue }
+            hit = true
+            if (ci.min < col) out.add(info(ci.min, col - 1, ci, null))
+            out.add(info(col, col, ci, w))
+            if (ci.max > col) out.add(info(col + 1, ci.max, ci, null))
+        }
+        if (!hit) out.add(info(col, col, null, w))
+        out.sortBy { it.min }
+        s.cols.clear(); s.cols.addAll(out)
+        s.colsChanged = true
+        dirty = true
+    }
+
+    /** Row height in points: the row's own, else the sheet's default (15 when the sheet does not say). */
+    fun rowHeightPt(sheet: Int, row: Int): Float {
+        val s = sheetAt(sheet)
+        return s.rows[row]?.ht ?: s.defaultHeight
+    }
+
+    /** Sets a row's height in points (6–409). */
+    fun setRowHeight(sheet: Int, row: Int, pt: Float) {
+        val s = sheetAt(sheet)
+        if (row < 0 || row > A1.MAX_ROW) throw IndexOutOfBoundsException("row $row")
+        val h = pt.coerceIn(6f, 409f)
+        val r = s.rows[row] ?: RowRec(row, null).also { s.rows[row] = it }
+        if (r.ht == h) return
+        r.ht = h
+        r.htChanged = true
+        r.touched = true
+        dirty = true
+    }
+
+    /** Fits a column to its longest shown text (full-width characters count twice), 4–120 characters; returns the width. */
+    fun autoFitColumn(sheet: Int, col: Int): Float {
+        val s = sheetAt(sheet)
+        var longest = 0
+        for (r in s.rows.values) {
+            if (r.cells[col] == null) continue
+            val d = cell(sheet, r.index, col).display
+            var n = 0
+            for (line in d.split('\n')) n = maxOf(n, textWidth(line))
+            if (n > longest) longest = n
+        }
+        val w = (longest + 2).toFloat().coerceIn(4f, 120f)
+        setColWidth(sheet, col, w)
+        return w
+    }
+
+    private fun textWidth(t: String): Int {
+        var n = 0
+        var i = 0
+        while (i < t.length) {
+            val cp = t.codePointAt(i)
+            n += if (wide(cp)) 2 else 1
+            i += Character.charCount(cp)
+        }
+        return n
+    }
+
+    private fun wide(cp: Int): Boolean {
+        if (cp in 0x1100..0x115F || cp in 0x2E80..0xA4CF || cp in 0xAC00..0xD7A3 || cp in 0xF900..0xFAFF || cp in 0xFE30..0xFE4F ||
+            cp in 0xFF00..0xFF60 || cp in 0xFFE0..0xFFE6 || cp in 0x20000..0x3FFFD) return true
+        return false
+    }
+
+    // ---- worksheets (M1) ----
+
+    private fun wbSheetElems(wbXml: String): List<Xml.Elem> {
+        val root = Xml.root(wbXml) ?: return emptyList()
+        val sheetsEl = XmlX.kid(wbXml, root, "sheets") ?: return emptyList()
+        return Xml.children(wbXml, sheetsEl).filter { Xml.local(it.name) == "sheet" }
+    }
+
+    /** The `<sheet>` element of workbook.xml that belongs to sheet [index] (matched through its relationship). */
+    private fun wbSheetElem(wbXml: String, index: Int): Xml.Elem {
+        val part = sheetAt(index).part
+        val byId = Rels.of(pkg, wbPart).associateBy { it.id }
+        return wbSheetElems(wbXml).firstOrNull { e ->
+            val rel = XmlX.prefixedAttr(wbXml, e, "id")?.let { byId[it] }
+            rel != null && !rel.external && OoxmlPackage.resolve(wbPart, rel.target) == part
+        } ?: throw IllegalStateException("workbook has no entry for sheet $index")
+    }
+
+    private fun validName(name: String, except: Int): String {
+        val n = name.trim()
+        require(n.isNotEmpty()) { "sheet name is empty" }
+        require(n.length <= 31) { "sheet name is longer than 31 characters" }
+        require(n.none { it in "[]:*?/\\" }) { "sheet name has a character that is not allowed" }
+        require(!n.startsWith("'") && !n.endsWith("'")) { "sheet name starts or ends with an apostrophe" }
+        require(sheets.withIndex().none { it.index != except && it.value.name.equals(n, ignoreCase = true) }) { "a sheet called $n exists" }
+        return n
+    }
+
+    private fun freeName(base: String): String {
+        fun taken(n: String) = sheets.any { it.name.equals(n, ignoreCase = true) }
+        val stem = Regex(" \\(\\d+\\)$").find(base)?.let { base.substring(0, it.range.first) } ?: base
+        var k = 2
+        while (true) {
+            val suffix = " ($k)"
+            val n = stem.take(31 - suffix.length) + suffix
+            if (!taken(n)) return n
+            k++
+        }
+    }
+
+    private fun newSheetPart(): String {
+        var n = 1
+        while (pkg.has("xl/worksheets/sheet$n.xml")) n++
+        return "xl/worksheets/sheet$n.xml"
+    }
+
+    /** Adds a `<sheet>` entry for [part] to workbook.xml, after entry [afterIndex] (−1 = at the end). */
+    private fun addWbEntry(name: String, part: String, afterIndex: Int) {
+        val rid = Rels.add(pkg, wbPart, "$REL/worksheet", relTarget(wbPart, part))
+        ContentTypes.addOverride(pkg, part, CT_SHEET)
+        val wbXml = pkg.text(wbPart)!!
+        val root = Xml.root(wbXml)!!
+        val all = wbSheetElems(wbXml)
+        val ids = all.mapNotNull { Xml.attr(wbXml, it, "sheetId")?.toIntOrNull() }
+        val sheetId = (ids.maxOrNull() ?: 0) + 1
+        val proto = all.firstOrNull()
+        val elName = proto?.name ?: "sheet"
+        val idKey = proto?.let { p -> Xml.attrs(wbXml, p).keys.firstOrNull { it.indexOf(':') >= 0 && it.substringAfter(':') == "id" } } ?: "r:id"
+        val nsPfx = idKey.substringBefore(':')
+        val declared = Xml.attr(wbXml, root, "xmlns:$nsPfx") == REL
+        val tag = "<$elName" + (if (declared) "" else " xmlns:$nsPfx=\"$REL\"") +
+            " name=\"${Xml.escape(name)}\" sheetId=\"$sheetId\" $idKey=\"$rid\"/>"
+        val out = if (afterIndex >= 0) {
+            val at = wbSheetElem(wbXml, afterIndex)
+            wbXml.substring(0, at.end) + tag + wbXml.substring(at.end)
+        } else {
+            val sheetsEl = XmlX.kid(wbXml, root, "sheets") ?: throw IllegalStateException("workbook has no sheet list")
+            if (sheetsEl.selfClosing) wbXml.substring(0, sheetsEl.start) + XmlX.startTag(wbXml, sheetsEl, emptyMap(), false) + tag + "</" + sheetsEl.name + ">" + wbXml.substring(sheetsEl.end)
+            else wbXml.substring(0, sheetsEl.closeStart) + tag + wbXml.substring(sheetsEl.closeStart)
+        }
+        pkg.putText(wbPart, out)
+    }
+
+    /**
+     * Moves sheet-index numbers in workbook.xml after a sheet was inserted at [at] ([delta] = 1) or deleted at [at]
+     * ([delta] = −1): `localSheetId` of defined names (a name local to a deleted sheet goes) and the active / first tab.
+     */
+    private fun shiftWbIndices(at: Int, delta: Int, count: Int) {
+        var wbXml = pkg.text(wbPart) ?: return
+        val root = Xml.root(wbXml) ?: return
+        val edits = ArrayList<Triple<Int, Int, String>>()
+        XmlX.kid(wbXml, root, "definedNames")?.let { dn ->
+            for (n in Xml.children(wbXml, dn)) {
+                val id = Xml.attr(wbXml, n, "localSheetId")?.toIntOrNull() ?: continue
+                if (delta < 0 && id == at) { edits.add(Triple(n.start, n.end, "")); continue }
+                if (id >= at && !(delta < 0 && id == at)) {
+                    val span = XmlX.attrValueSpan(wbXml, n, "localSheetId") ?: continue
+                    val nid = if (delta > 0) id + 1 else id - 1
+                    edits.add(Triple(span.first, span.second, nid.toString()))
+                }
+            }
+        }
+        XmlX.kid(wbXml, root, "bookViews")?.let { bv ->
+            for (v in Xml.children(wbXml, bv)) for (attr in listOf("activeTab", "firstSheet")) {
+                val cur = Xml.attr(wbXml, v, attr)?.toIntOrNull() ?: continue
+                var nv = if (cur >= at && delta > 0) cur + 1 else if (cur > at && delta < 0) cur - 1 else cur
+                nv = nv.coerceIn(0, (count - 1).coerceAtLeast(0))
+                if (nv != cur) XmlX.attrValueSpan(wbXml, v, attr)?.let { edits.add(Triple(it.first, it.second, nv.toString())) }
+            }
+        }
+        if (edits.isNotEmpty()) { wbXml = Xml.splice(wbXml, edits); pkg.putText(wbPart, wbXml) }
+    }
+
+    /** Applies [f] to the text of every chart `c:f` and every defined name. */
+    private fun rewriteFormulaParts(f: (String) -> String) {
+        for (part in pkg.names()) {
+            if (!part.startsWith("xl/charts/") || !part.endsWith(".xml") || part.contains("/_rels/")) continue
+            val xml = pkg.text(part) ?: continue
+            val root = Xml.root(xml) ?: continue
+            if (Xml.local(root.name) != "chartSpace") continue
+            textEdits(xml, XmlX.findAllLocal(xml, root, "f"), f)?.let { pkg.putText(part, it) }
+        }
+        pkg.text(wbPart)?.let { wbXml ->
+            val names = Xml.root(wbXml)?.let { XmlX.kid(wbXml, it, "definedNames") }
+            if (names != null) textEdits(wbXml, Xml.children(wbXml, names), f)?.let { pkg.putText(wbPart, it) }
+        }
+    }
+
+    private fun textEdits(xml: String, elems: List<Xml.Elem>, f: (String) -> String): String? {
+        val edits = ArrayList<Triple<Int, Int, String>>()
+        for (e in elems) {
+            if (e.selfClosing) continue
+            val text = Xml.text(xml, e)
+            val nt = f(text)
+            if (nt != text) edits.add(Triple(e.openEnd, e.closeStart, Xml.escape(nt)))
+        }
+        return if (edits.isEmpty()) null else Xml.splice(xml, edits)
+    }
+
+    /** Rewrites every formula cell for which [f] gives new text, then puts everything into the parts. */
+    private fun rewriteFormulaCells(skipSheet: Int, f: (String) -> String) {
+        var any = false
+        for (c in ArrayList(formulaCells)) {
+            if (c.sheet == skipSheet) continue
+            val old = c.formula ?: continue
+            val nf = f(old)
+            if (nf != old) { setFormulaText(sheets[c.sheet], c, nf); any = true }
+        }
+        if (any) {
+            formulaLayoutChanged = true
+            for (c in formulaCells) if (!c.opaque) { c.state = TODO; c.precs = null }
+            dirty = true
+        }
+    }
+
+    /** Adds a blank sheet at the end, called [name] or the first free "SheetN"; returns its index. */
+    fun addSheet(name: String? = null): Int {
+        flush()
+        val n = if (name != null) validName(name, -1) else {
+            var k = sheets.size + 1
+            while (sheets.any { it.name.equals("Sheet$k", ignoreCase = true) }) k++
+            "Sheet$k"
+        }
+        val part = newSheetPart()
+        pkg.putText(part, DECL + "<worksheet xmlns=\"$MAIN\" xmlns:r=\"$REL\"><sheetData/></worksheet>")
+        addWbEntry(n, part, -1)
+        load()
+        dirty = true
+        return sheets.indexOfFirst { it.part == part }
+    }
+
+    /**
+     * Renames a sheet. Throws [IllegalArgumentException] for an empty name, one longer than 31 characters, one with
+     * `[ ] : * ? / \`, or one another sheet has (any case). References to the sheet in formulas of every sheet, in chart
+     * series and in defined names follow the new name.
+     */
+    fun renameSheet(index: Int, name: String) {
+        val old = sheetAt(index).name
+        val n = validName(name, index)
+        if (n == old) return
+        flush()
+        rewriteFormulaCells(-1) { Formula.renameSheetRefs(it, old, n) }
+        // the new name resolves while caches are recomputed before writing
+        sheetIndexByName = sheetIndexByName + (n.lowercase(Locale.ROOT) to index)
+        commitToPackage()
+        rewriteFormulaParts { Formula.renameSheetRefs(it, old, n) }
+        val wbXml = pkg.text(wbPart)!!
+        val e = wbSheetElem(wbXml, index)
+        val span = XmlX.attrValueSpan(wbXml, e, "name")!!
+        pkg.putText(wbPart, wbXml.substring(0, span.first) + Xml.escape(n) + wbXml.substring(span.second))
+        load()
+        dirty = true
+    }
+
+    /**
+     * Inserts a copy of a sheet right after it, called "Name (2)" (first free); returns its index. Cells, styles,
+     * column widths and row heights are copied, formulas unchanged. Drawings, charts, tables, comments and links of
+     * the source are not copied.
+     */
+    fun copySheet(index: Int): Int {
+        val src = sheetAt(index)
+        flush()
+        val name = freeName(sheets[index].name)
+        val xml = pkg.text(src.part) ?: throw IllegalStateException("sheet $index has no part")
+        val root = Xml.root(xml) ?: throw IllegalStateException("sheet $index is not readable")
+        val edits = ArrayList<Triple<Int, Int, String>>()
+        for (k in Xml.children(xml, root)) when (Xml.local(k.name)) {
+            "drawing", "legacyDrawing", "legacyDrawingHF", "drawingHF", "picture", "oleObjects", "controls", "tableParts", "hyperlinks" ->
+                edits.add(Triple(k.start, k.end, ""))
+            "pageSetup" -> XmlX.attrSpans(xml, k).firstOrNull { it.name.indexOf(':') >= 0 && it.name.substringAfter(':') == "id" }?.let { a ->
+                edits.add(Triple(a.start - 1, a.end, ""))
+            }
+            "sheetViews" -> for (v in Xml.children(xml, k)) XmlX.attrSpans(xml, v).firstOrNull { it.name == "tabSelected" }?.let { a ->
+                edits.add(Triple(a.start - 1, a.end, ""))
+            }
+        }
+        val part = newSheetPart()
+        pkg.putText(part, Xml.splice(xml, edits))
+        addWbEntry(name, part, index)
+        shiftWbIndices(index + 1, 1, sheets.size + 1)
+        load()
+        dirty = true
+        return sheets.indexOfFirst { it.part == part }
+    }
+
+    /**
+     * Deletes a sheet; refuses ([IllegalStateException]) the only one. References to it from other sheets, charts and
+     * defined names become `#REF!`; names local to it go; the active tab stays in range.
+     */
+    fun deleteSheet(index: Int) {
+        val gone = sheetAt(index)
+        if (sheets.size <= 1) throw IllegalStateException("a workbook keeps at least one sheet")
+        flush()
+        val name = gone.name
+        rewriteFormulaCells(index) { Formula.renameSheetRefs(it, name, null) }
+        commitToPackage()
+        rewriteFormulaParts { Formula.renameSheetRefs(it, name, null) }
+        val wbXml = pkg.text(wbPart)!!
+        val e = wbSheetElem(wbXml, index)
+        val rid = XmlX.prefixedAttr(wbXml, e, "id")
+        pkg.putText(wbPart, wbXml.substring(0, e.start) + wbXml.substring(e.end))
+        shiftWbIndices(index, -1, sheets.size - 1)
+        // the relationship, the part, its own relationships and its content-type entry
+        val relsName = OoxmlPackage.relsOf(wbPart)
+        pkg.text(relsName)?.let { rx ->
+            val rr = Xml.root(rx)
+            val hit = rr?.let { r -> Xml.children(rx, r).firstOrNull { Xml.attr(rx, it, "Id") == rid } }
+            if (hit != null) pkg.putText(relsName, rx.substring(0, hit.start) + rx.substring(hit.end))
+        }
+        pkg.remove(gone.part)
+        OoxmlPackage.relsOf(gone.part).let { if (pkg.has(it)) pkg.remove(it) }
+        ContentTypes.removeOverride(pkg, gone.part)
+        formulaLayoutChanged = true
+        dropCalcChain()
+        load()
         dirty = true
     }
 
@@ -1216,8 +1664,8 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             if (src == null) {
                 val sb = StringBuilder()
                 for (c in r.cells.values) if (materialises(c)) { sb.append(cellXml(s, c)); extent(c) }
-                if (sb.isEmpty()) continue
-                val rowXml = "<${p}row r=\"${r.index + 1}\">$sb</${p}row>"
+                if (sb.isEmpty() && !(r.htChanged && r.ht != null)) continue
+                val rowXml = "<${p}row r=\"${r.index + 1}\"" + htAttrs(r) + ">$sb</${p}row>"
                 if (sd == null || sd.selfClosing) detached.append(rowXml) else edits.add(Triple(rowPos.getValue(r), rowPos.getValue(r), rowXml))
                 continue
             }
@@ -1237,7 +1685,11 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
                     if (c.col > addMax) addMax = c.col
                 }
             }
-            if (inserts.isEmpty()) continue
+            val htSet: Map<String, String?> = if (r.htChanged) mapOf("ht" to r.ht?.let { fmtNum(it) }, "customHeight" to (if (r.ht != null) "1" else null)) else emptyMap()
+            if (inserts.isEmpty()) {
+                if (htSet.isNotEmpty()) edits.add(Triple(src.start, src.openEnd, XmlX.startTag(xml, src, htSet, src.selfClosing)))
+                continue
+            }
             // keep the optional spans hint true when a cell lands outside it
             var spans: String? = null
             Xml.attr(xml, src, "spans")?.let { cur ->
@@ -1245,12 +1697,13 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
                 val b = cur.substringAfter(':').trim().toIntOrNull()
                 if (a != null && b != null && (addMin + 1 < a || addMax + 1 > b)) spans = "${minOf(a, addMin + 1)}:${maxOf(b, addMax + 1)}"
             }
+            val set = LinkedHashMap<String, String?>(htSet)
+            if (spans != null) set["spans"] = spans
             if (src.selfClosing) {
-                val set = if (spans != null) mapOf<String, String?>("spans" to spans) else emptyMap()
                 val body = inserts.asReversed().joinToString("") { it.second }
                 edits.add(Triple(src.start, src.end, XmlX.startTag(xml, src, set, false) + body + "</" + src.name + ">"))
             } else {
-                if (spans != null) edits.add(Triple(src.start, src.openEnd, XmlX.startTag(xml, src, mapOf<String, String?>("spans" to spans), false)))
+                if (set.isNotEmpty()) edits.add(Triple(src.start, src.openEnd, XmlX.startTag(xml, src, set, false)))
                 for (ins in inserts.asReversed()) edits.add(Triple(ins.first, ins.first, ins.second))
             }
         }
@@ -1290,10 +1743,14 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
                 sb.append(xml, src.start, src.end)
                 continue
             }
-            if (src == null && cells.isEmpty()) continue
-            if (src != null) sb.append(XmlX.startTag(xml, src, mapOf("r" to (r.index + 1).toString(), "spans" to null), cells.isEmpty()))
-            else sb.append("<${p}row r=\"${r.index + 1}\">")
+            if (src == null && cells.isEmpty() && !(r.htChanged && r.ht != null)) continue
+            val rowSet = LinkedHashMap<String, String?>()
+            rowSet["r"] = (r.index + 1).toString(); rowSet["spans"] = null
+            if (r.htChanged) { rowSet["ht"] = r.ht?.let { fmtNum(it) }; rowSet["customHeight"] = if (r.ht != null) "1" else null }
+            if (src != null) sb.append(XmlX.startTag(xml, src, rowSet, cells.isEmpty()))
+            else sb.append("<${p}row r=\"${r.index + 1}\"" + htAttrs(r) + ">")
             if (src != null && cells.isEmpty()) continue
+            if (src == null && cells.isEmpty()) { sb.append("</${p}row>"); continue }
             for (c in cells) {
                 val cs = c.src
                 if (cs != null && !needsRewrite(c) && !moved(c)) sb.append(xml, cs.start, cs.end) else sb.append(cellXml(s, c))
@@ -1320,7 +1777,7 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             "mergeCells" -> for (m in Xml.children(xml, k)) shiftAttr(m, "ref")
             "conditionalFormatting" -> shiftAttr(k, "sqref")
             "dataValidations" -> for (m in Xml.children(xml, k)) shiftAttr(m, "sqref")
-            "cols" -> if (colOps.isNotEmpty()) for (m in Xml.children(xml, k)) {
+            "cols" -> if (colOps.isNotEmpty() && !s.colsChanged) for (m in Xml.children(xml, k)) {
                 val a = Xml.attrs(xml, m)
                 val min = a["min"]?.toIntOrNull() ?: continue
                 val max = a["max"]?.toIntOrNull() ?: min
@@ -1335,6 +1792,7 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         val edits = ArrayList<Triple<Int, Int, String>>()
         if (s.structural) structuralEdits(s, edits) else inPlaceEdits(s, edits)
         if (s.freezeSet) freezeEdits(s, edits)
+        if (s.colsChanged) colsEdits(s, edits)
         val rid = s.pendingDrawingRid
         val root = s.root
         if (rid != null && root != null) {
@@ -1344,6 +1802,23 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             edits.add(Triple(pos, pos, "<${s.pfx}drawing " + (if (declared) "" else "xmlns:r=\"$REL\" ") + "r:id=\"$rid\"/>"))
         }
         return if (edits.isEmpty()) null else Xml.splice(s.xml, edits)
+    }
+
+    private fun htAttrs(r: RowRec): String = if (r.htChanged && r.ht != null) " ht=\"${fmtNum(r.ht!!)}\" customHeight=\"1\"" else ""
+
+    /** Rewrites `<cols>` from the sheet's column list (created in front of the sheet data when the sheet had none). */
+    private fun colsEdits(s: Sheet, edits: MutableList<Triple<Int, Int, String>>) {
+        val xml = s.xml
+        val p = s.pfx
+        val old = s.rootKids.firstOrNull { Xml.local(it.name) == "cols" }
+        val block = if (s.cols.isEmpty()) "" else s.cols.sortedBy { it.min }.joinToString("", "<${p}cols>", "</${p}cols>") { ci ->
+            "<${p}col" + ci.attrs.entries.joinToString("") { " ${it.key}=\"${Xml.escape(it.value)}\"" } + "/>"
+        }
+        if (old != null) edits.add(Triple(old.start, old.end, block))
+        else if (block.isNotEmpty()) {
+            val pos = s.sheetData?.start ?: s.root?.closeStart ?: return
+            edits.add(Triple(pos, pos, block))
+        }
     }
 
     /** Writes the frozen-rows pane into the first sheet view, creating the view list when the sheet has none. */
@@ -1389,16 +1864,26 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
      */
     fun save(): ByteArray {
         if (!dirty) return pkg.write()
+        commitToPackage()
+        val bytes = pkg.write()
+        load()
+        dirty = false
+        return bytes
+    }
+
+    /** Writes every pending cell / style edit into the package parts (what [save] does before zipping). */
+    private fun commitToPackage() {
         evaluateAll()
         for (s in sheets) sheetXmlForSave(s)?.let { pkg.putText(s.part, it) }
         val st = styles
         val sp = stylesPart
         if (st != null && sp != null && st.changed) pkg.putText(sp, st.xml)
         if (formulaLayoutChanged) dropCalcChain()
-        val bytes = pkg.write()
-        load()
-        dirty = false
-        return bytes
+    }
+
+    /** Puts pending edits into the parts and re-reads them, so whole-sheet operations work on the parts' text. Stays dirty. */
+    private fun flush() {
+        if (dirty) { commitToPackage(); load() }
     }
 
     companion object {
@@ -1411,6 +1896,10 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         private const val REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
         private const val REL_PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
         private const val CT_STYLES = "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"
+        private const val CT_SHEET = "application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"
+
+        /** A width / height for the file: at most two decimals, no trailing zeros ("23", "14.5"). */
+        private fun fmtNum(f: Float): String = BigDecimal(f.toString()).setScale(2, java.math.RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
         private const val DECL = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n"
         private const val APP_NAME = "Spatial Office"
 

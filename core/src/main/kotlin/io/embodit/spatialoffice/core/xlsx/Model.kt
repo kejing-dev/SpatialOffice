@@ -13,7 +13,14 @@ data class Cell(
     val isFormula: Boolean,
     val bold: Boolean,
     val fmt: NumFmt,
+    /** Horizontal alignment from the cell format: "left", "center", "right", or null (general). */
+    val hAlign: String? = null,
+    /** Text wraps inside the cell (`wrapText`). */
+    val wrap: Boolean = false,
 )
+
+/** One cell as copied: what the formula bar showed and its cell style index (meaningful within the same workbook). */
+data class ClipCell(val input: String, val style: Int)
 
 data class ChartSeries(
     val name: String,
