@@ -308,6 +308,207 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         slideChanged(part)
     }
 
+    // ---- M1: object clipboard and drawing order
+
+    /**
+     * Copies a top-level object of a slide. Nothing in the deck changes. A placeholder is copied as a plain shape: its
+     * `p:ph` is dropped and, when it inherited its box from the layout, the resolved box is written into it.
+     * @throws IllegalArgumentException when the slide has no such object.
+     * @throws IllegalStateException for objects that own parts of their own (charts, diagrams, embedded objects).
+     */
+    fun copyShape(slide: Int, shapeId: Int): ShapeClip {
+        val part = slidePart(slide)
+        val sx = pkg.text(part)!!
+        val root = Xml.root(sx) ?: throw IllegalStateException("slide $slide is not readable")
+        val e = topShapes(sx).firstOrNull { shapeId(sx, it) == shapeId } ?: throw IllegalArgumentException("slide $slide has no shape $shapeId")
+        val box = slides[slide].shapes.firstOrNull { it.id == shapeId }?.let { longArrayOf(it.x, it.y, it.w, it.h) } ?: boxOf(sx, e) ?: longArrayOf(0, 0, 0, 0)
+        var xml = XmlEx.src(sx, e)
+        if (e.name == "p:sp" || e.name == "p:pic" || e.name == "p:graphicFrame") xml = unplaceholder(xml, box)
+
+        val nsDecls = LinkedHashMap<String, String>()
+        for ((k, v) in Xml.attrs(sx, root)) if (k == "xmlns" || k.startsWith("xmlns:")) nsDecls[k] = v
+        val rPrefixes = HashSet<String>()
+        for ((k, v) in nsDecls) if (v == PptxTemplates.NS_R && k.startsWith("xmlns:")) rPrefixes.add(k.substringAfter(':'))
+        for (m in NS_DECL.findAll(xml)) if (m.groupValues[2] == PptxTemplates.NS_R) rPrefixes.add(m.groupValues[1])
+
+        val srcRels = Rels.of(pkg, part).associateBy { it.id }
+        val rels = LinkedHashMap<String, ClipRel>()
+        for (m in R_ATTR.findAll(xml)) {
+            if (m.groupValues[1] !in rPrefixes) continue
+            val rid = Xml.unescape(m.groupValues[3])
+            if (rid.isEmpty() || rid in rels) continue
+            val rel = srcRels[rid] ?: continue
+            if (!COPYABLE_REL.any { rel.type.endsWith(it) }) throw IllegalStateException("shape $shapeId owns a part of its own (${rel.type.substringAfterLast('/')}) and cannot be copied")
+            rels[rid] = ClipRel(rel.type, if (rel.external) rel.target else OoxmlPackage.resolve(part, rel.target), rel.external)
+        }
+        return ShapeClip(xml, part, nsDecls, rels, box)
+    }
+
+    /**
+     * Puts a copied object on top of slide [slide], moved by ([dx], [dy]) EMU (kept on the slide). Every `p:cNvPr` in
+     * it gets a fresh id unique on that slide; the relationships it uses are found or made in the slide's .rels, pointing
+     * at the same parts (pictures are shared, not duplicated). Returns the new object's id.
+     * @throws IllegalArgumentException when a part the copy points at is not in this deck.
+     */
+    fun pasteShape(slide: Int, clip: ShapeClip, dx: Long, dy: Long): Int {
+        val part = slidePart(slide)
+        for (r in clip.rels.values) if (!r.external && !pkg.has(r.target)) throw IllegalArgumentException("the copied object needs ${r.target}, which this deck does not have")
+        val sx = pkg.text(part)!!
+        val root = Xml.root(sx) ?: throw IllegalStateException("slide $slide is not readable")
+        val tree = Xml.find(sx, root, "p:spTree") ?: throw IllegalStateException("slide $slide has no shape tree")
+        var xml = clip.xml
+
+        // ids: every object inside gets a fresh one; connections between them follow
+        var next = maxShapeId(sx) + 1
+        val idMap = HashMap<String, String>()
+        xml = CNVPR_ID.replace(xml) { m -> val n = (next++).toString(); idMap[m.groupValues[2]] = n; m.groupValues[1] + n + "\"" }
+        xml = CXN_ID.replace(xml) { m -> idMap[m.groupValues[2]]?.let { m.groupValues[1] + it + "\"" } ?: m.value }
+        val newId = idMap.values.minOfOrNull { it.toInt() } ?: throw IllegalStateException("the copied object has no id")
+
+        // relationships
+        if (clip.rels.isNotEmpty()) {
+            val ridMap = HashMap<String, String>()
+            for ((old, r) in clip.rels) {
+                val have = Rels.of(pkg, part)
+                fun same(x: io.embodit.spatialoffice.core.pkg.Rel) = x.type == r.type && x.external == r.external &&
+                    (if (r.external) x.target == r.target else OoxmlPackage.resolve(part, x.target) == r.target)
+                val keep = if (part == clip.sourcePart) have.firstOrNull { it.id == old && same(it) } else null
+                ridMap[old] = (keep ?: have.firstOrNull { same(it) })?.id ?: addRel(part, r.type, if (r.external) r.target else XmlEx.relativize(part, r.target), r.external)
+            }
+            val rPrefixes = HashSet<String>()
+            for ((k, v) in clip.nsDecls) if (v == PptxTemplates.NS_R && k.startsWith("xmlns:")) rPrefixes.add(k.substringAfter(':'))
+            for (m in NS_DECL.findAll(xml)) if (m.groupValues[2] == PptxTemplates.NS_R) rPrefixes.add(m.groupValues[1])
+            xml = R_ATTR.replace(xml) { m ->
+                val to = if (m.groupValues[1] in rPrefixes) ridMap[Xml.unescape(m.groupValues[3])] else null
+                if (to == null) m.value else m.groupValues[1] + ":" + m.groupValues[2] + "=\"" + Xml.escape(to) + "\""
+            }
+        }
+
+        // position, kept on the slide
+        val el = Xml.root(xml) ?: throw IllegalStateException("the copied object is not readable")
+        val off = offElem(xml, el)
+        val b = clip.box
+        val w = widthEmu; val h = heightEmu
+        val nx = (b[0] + dx).coerceAtMost(w - b[2]).coerceAtLeast(0)
+        val ny = (b[1] + dy).coerceAtMost(h - b[3]).coerceAtLeast(0)
+        if (off != null && (dx != 0L || dy != 0L || nx != b[0] || ny != b[1])) {
+            var tag = xml.substring(off.start, off.openEnd)
+            tag = XmlEx.tagWithAttr(tag, "x", nx.toString())
+            tag = XmlEx.tagWithAttr(tag, "y", ny.toString())
+            xml = xml.substring(0, off.start) + tag + xml.substring(off.openEnd)
+        }
+
+        // namespace bindings the source slide gave it and this slide does not
+        val here = Xml.attrs(sx, root)
+        val top = Xml.root(xml)!!
+        val ownTag = xml.substring(top.start, top.openEnd)
+        val add = StringBuilder()
+        for ((k, v) in clip.nsDecls) {
+            if (here[k] == v) continue
+            if (Regex("\\s" + Regex.escape(k) + "\\s*=").containsMatchIn(ownTag)) continue
+            add.append(' ').append(k).append("=\"").append(Xml.escape(v)).append('"')
+        }
+        if (add.isNotEmpty()) {
+            val at = top.start + 1 + top.name.length
+            xml = xml.substring(0, at) + add + xml.substring(at)
+        }
+
+        pkg.putText(part, insertIntoTree(sx, tree, xml))
+        slideChanged(part)
+        return newId
+    }
+
+    /** Copies an object and pastes it on the same slide, a little down and to the right (1/40 of the slide width). */
+    fun duplicateShape(slide: Int, shapeId: Int): Int {
+        val d = widthEmu / 40
+        return pasteShape(slide, copyShape(slide, shapeId), d, d)
+    }
+
+    /**
+     * Changes where an object sits in the slide's drawing order (back to front = order in `p:spTree`). Only the slide
+     * part changes and the object's own XML is moved as it is. Returns false when it is already there.
+     */
+    fun reorderShape(slide: Int, shapeId: Int, op: ZOrder): Boolean {
+        val part = slidePart(slide)
+        val sx = pkg.text(part)!!
+        val shapes = topShapes(sx).filter { it.name != "p:extLst" }
+        val i = shapes.indexOfFirst { shapeId(sx, it) == shapeId }
+        if (i < 0) throw IllegalArgumentException("slide $slide has no shape $shapeId")
+        val to = when (op) {
+            ZOrder.FRONT -> shapes.lastIndex
+            ZOrder.BACK -> 0
+            ZOrder.FORWARD -> (i + 1).coerceAtMost(shapes.lastIndex)
+            ZOrder.BACKWARD -> (i - 1).coerceAtLeast(0)
+        }
+        if (to == i) return false
+        val order = shapes.indices.toMutableList()
+        order.removeAt(i)
+        order.add(to, i)
+        // the elements change places; whatever lies between them stays where it was
+        val sb = StringBuilder(sx.length)
+        sb.append(sx, 0, shapes.first().start)
+        for (k in shapes.indices) {
+            sb.append(XmlEx.src(sx, shapes[order[k]]))
+            if (k < shapes.lastIndex) sb.append(sx, shapes[k].end, shapes[k + 1].start)
+        }
+        sb.append(sx, shapes.last().end, sx.length)
+        pkg.putText(part, sb.toString())
+        slideChanged(part)
+        return true
+    }
+
+    /** [xml] of a top-level `p:sp` / `p:pic` / `p:graphicFrame` without its `p:ph`, with [box] written in when it had none. */
+    private fun unplaceholder(xml: String, box: LongArray): String {
+        val el = Xml.root(xml) ?: return xml
+        val ph = Xml.find(xml, el, "p:ph") ?: return xml
+        val edits = ArrayList<Triple<Int, Int, String>>()
+        edits.add(Triple(ph.start, ph.end, ""))
+        if (offElem(xml, el) == null) {
+            if (el.name == "p:graphicFrame") {
+                val xf = Xml.child(xml, el, "p:xfrm")
+                val inner = "<a:off x=\"${box[0]}\" y=\"${box[1]}\"/><a:ext cx=\"${box[2]}\" cy=\"${box[3]}\"/>"
+                if (xf != null) edits.add(Triple(xf.start, xf.end, "<p:xfrm>$inner</p:xfrm>"))
+                else Xml.child(xml, el, "p:nvGraphicFramePr")?.let { edits.add(Triple(it.end, it.end, "<p:xfrm>$inner</p:xfrm>")) }
+            } else {
+                val f = PptxTemplates.xfrm(box[0], box[1], box[2], box[3])
+                val spPr = Xml.child(xml, el, "p:spPr")
+                when {
+                    spPr == null -> Xml.children(xml, el).firstOrNull { it.name.startsWith("p:nv") }?.let { edits.add(Triple(it.end, it.end, "<p:spPr>$f</p:spPr>")) }
+                    spPr.selfClosing -> edits.add(Triple(spPr.start, spPr.end, "<p:spPr>$f</p:spPr>"))
+                    else -> {
+                        val old = Xml.child(xml, spPr, "a:xfrm")
+                        if (old != null) edits.add(Triple(old.start, old.end, f)) else edits.add(Triple(spPr.openEnd, spPr.openEnd, f))
+                    }
+                }
+            }
+        }
+        return Xml.splice(xml, edits)
+    }
+
+    /** The `a:off` of a top-level object's own box, null when it has none. */
+    private fun offElem(xml: String, e: Xml.Elem): Xml.Elem? {
+        val xf = when (e.name) {
+            "p:sp", "p:pic", "p:cxnSp" -> Xml.child(xml, e, "p:spPr")?.let { Xml.child(xml, it, "a:xfrm") }
+            "p:grpSp" -> Xml.child(xml, e, "p:grpSpPr")?.let { Xml.child(xml, it, "a:xfrm") }
+            "p:graphicFrame" -> Xml.child(xml, e, "p:xfrm")
+            else -> Xml.find(xml, e, "a:xfrm") ?: Xml.find(xml, e, "p:xfrm")
+        } ?: return null
+        return Xml.child(xml, xf, "a:off")
+    }
+
+    /** [Rels.add] that can also write an external target. */
+    private fun addRel(part: String, type: String, target: String, external: Boolean): String {
+        val id = Rels.add(pkg, part, type, target)
+        if (!external) return id
+        val relsName = OoxmlPackage.relsOf(part)
+        val rx = pkg.text(relsName)!!
+        val root = Xml.root(rx)!!
+        val e = Xml.children(rx, root).last { Xml.attr(rx, it, "Id") == id }
+        val tag = rx.substring(e.start, e.openEnd).let { if (it.endsWith("/>")) it.dropLast(2).trimEnd() + " TargetMode=\"External\"/>" else it.dropLast(1) + " TargetMode=\"External\">" }
+        pkg.putText(relsName, rx.substring(0, e.start) + tag + rx.substring(e.openEnd))
+        return id
+    }
+
     /**
      * Moves / resizes a top-level shape: text box, placeholder, drawn shape, picture, connector, group (its children
      * keep their own coordinates and scale with it) or graphic frame (table, chart). A placeholder that inherited its
@@ -1051,6 +1252,12 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         fun blank(): PptxDeck = PptxDeck(PptxTemplates.blankPackage(), null)
 
         private const val NO_SOLID = -1
+        private val CNVPR_ID = Regex("(<p:cNvPr\\b[^>]*?\\sid=\")(\\d+)\"")
+        private val CXN_ID = Regex("(<a:(?:stCxn|endCxn)\\b[^>]*?\\sid=\")(\\d+)\"")
+        private val R_ATTR = Regex("(?<![\\w:.-])([A-Za-z_][\\w.-]*):(embed|link|id|pict|dm|lo|qs|cs)=\"([^\"]*)\"")
+        private val NS_DECL = Regex("xmlns:([\\w.-]+)=\"([^\"]*)\"")
+        /** Relationship types a copied object may share with its original (everything else is a part only it owns). */
+        private val COPYABLE_REL = listOf("/image", "/hyperlink", "/media", "/video", "/audio", "/slide")
         private val FOOTER_TYPES = setOf("dt", "ftr", "sldNum", "hdr")
         private val BULLET_ELEMS = setOf("a:buNone", "a:buChar", "a:buAutoNum", "a:buBlip")
         private val APPR_ORDER = listOf(

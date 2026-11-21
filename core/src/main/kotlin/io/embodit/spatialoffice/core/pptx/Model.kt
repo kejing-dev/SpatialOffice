@@ -27,3 +27,24 @@ data class Shape(
 data class Slide(val index: Int, val shapes: List<Shape>, val notes: String, val backgroundRgb: Int?)
 
 enum class SlideLayoutKind { TITLE, TITLE_BODY, TWO_COLUMN, BLANK }
+
+/** Drawing-order moves of [PptxDeck.reorderShape]. FRONT / BACK: to the top / bottom; FORWARD / BACKWARD: one step. */
+enum class ZOrder { FRONT, BACK, FORWARD, BACKWARD }
+
+/**
+ * A copied top-level slide object ([PptxDeck.copyShape]); opaque to callers. It holds the object's XML as text (a
+ * placeholder already turned into a plain shape with a box of its own), the namespace bindings it was written with,
+ * and the relationships its `r:` attributes use, so it stays valid after the source object is edited or deleted, after
+ * an undo (a reopened deck) and across saves. Pasting needs the media parts it names to exist in the target deck.
+ * [box] = x, y, w, h in EMU.
+ */
+class ShapeClip internal constructor(
+    internal val xml: String,
+    internal val sourcePart: String,
+    internal val nsDecls: Map<String, String>,
+    internal val rels: Map<String, ClipRel>,
+    val box: LongArray,
+)
+
+/** A relationship a copied object uses: internal targets are absolute part names, external ones as written. */
+internal class ClipRel(val type: String, val target: String, val external: Boolean)
