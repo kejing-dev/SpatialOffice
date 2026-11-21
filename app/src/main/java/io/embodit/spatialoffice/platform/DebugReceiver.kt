@@ -339,7 +339,27 @@ object DebugReceiver {
                 Log.i(TAG, "SLIDETEXT debug ${p[0]} ok=$ok runs=" + sh?.let { d.spansOf(it).joinToString("|") { sp -> sp.text.take(12) + ":c=" + (sp.color?.let { c -> String.format("%06X", c) }) + ":sz=" + sp.size + ":b=" + sp.bold + ":src=" + sp.src } } + " paras=" + sh?.paras?.joinToString { "a=" + it.align + ",bu=" + it.bullet })
             }
             // obj-fill RRGGBB|none, obj-line RRGGBB|none [pt], obj-rot <deg> (absolute), obj-rotby <deg>, rotdrag <deg> (the handle: press, drag to the angle, release)
-            "obj-fill" -> g.deck?.setFill(arg.takeIf { it.isNotEmpty() && it != "none" }?.toInt(16))
+            // ---- M3 slides: p26 page background, p40 table rows / columns / merge (same session calls as the menus)
+            "slide-bg" -> g.deck?.let { d ->
+                val p = arg.trim().split(" ")
+                val all = p.getOrNull(1) == "all"
+                val v = p[0]
+                when {
+                    v.startsWith("img:") -> {
+                        val f = File(v.removePrefix("img:"))
+                        d.setBackgroundPicture(f.readBytes(), f.extension.lowercase().ifEmpty { "png" }, all)
+                    }
+                    v == "none" -> d.setBackground(null, all)
+                    else -> d.setBackground(v.toInt(16), all)
+                }
+                val sl = d.deck.slides[d.current]
+                Log.i(TAG, "SLIDEBG debug slide=${d.current} own=${sl.ownBackground} rgb=${sl.backgroundRgb?.let { "%06X".format(it) }} picture=${sl.backgroundImage}")
+            }
+            "stable-cell" -> g.deck?.let { d -> val (r, c) = arg.split(",").map { it.trim().toInt() }; d.pickCell(d.selected, r, c); Log.i(TAG, "SLIDETABLE cell ${d.currentCell()} of ${d.selected}") }
+            "stable-row" -> g.deck?.tableRow(arg.trim())
+            "stable-col" -> g.deck?.tableCol(arg.trim())
+            "stable-merge" -> g.deck?.tableMerge(arg.trim() == "down")
+            "obj-fill" ->g.deck?.setFill(arg.takeIf { it.isNotEmpty() && it != "none" }?.toInt(16))
             "obj-line" -> g.deck?.let { d -> val p = arg.split(" "); d.setLine(p[0].takeIf { it != "none" }?.toInt(16), p.getOrNull(1)?.toFloat()?.let { Math.round(it * 12700f).toLong() }) }
             "obj-rot" -> g.deck?.setRotation(arg.toInt())
             "obj-rotby" -> g.deck?.rotateBy(arg.toInt())

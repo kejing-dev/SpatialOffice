@@ -205,6 +205,8 @@ object Exporter {
         val deck = s.deck
         val slide = deck.slides[index]
         canvas.drawColor(slide.backgroundRgb?.let { 0xFF000000.toInt() or it } ?: Color.WHITE)
+        // M3 p26: a picture background, stretched over the page
+        slide.backgroundImage?.let { s.image(it) }?.let { canvas.drawBitmap(it, null, RectF(0f, 0f, w, h), Paint(Paint.FILTER_BITMAP_FLAG)) }
         val sx = w / deck.widthEmu; val sy = h / deck.heightEmu
         val ptPx = h / (deck.heightEmu / 12700f)
         for (sh in slide.shapes) {

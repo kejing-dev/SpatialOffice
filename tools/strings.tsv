@@ -622,3 +622,19 @@ tbl_col_delete	删掉这一列	Delete column
 tbl_merge_right	与右侧合并	Merge with right
 tbl_merge_down	与下方合并	Merge with below
 tbl_merge_none	这里没有能合并的格子	Nothing to merge with here
+# M3 slides
+bg_menu	背景	Background
+bg_color	背景 · %1$s	Background · %1$s
+bg_picture	用图片当背景…	Picture background…
+bg_none	用版式的背景	Layout's background
+bg_all	所有页都用	Apply to all slides
+stable_menu	表格行列（第 %1$d 行第 %2$d 列）	Table rows & columns (row %1$d, col %2$d)
+stable_row_above	上面插一行	Insert row above
+stable_row_below	下面插一行	Insert row below
+stable_col_left	左边插一列	Insert column left
+stable_col_right	右边插一列	Insert column right
+stable_row_del	删掉这一行	Delete row
+stable_col_del	删掉这一列	Delete column
+stable_merge_right	和右边合并	Merge with right
+stable_merge_down	和下面合并	Merge with below
+stable_merge_no	旁边那格高矮或宽窄不一样，合并不了。	That neighbour spans different rows or columns, so they can't merge.

@@ -1302,6 +1302,98 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
         edits++; changed()
     }
 
+    // ---- M3 p40: rows, columns and merged cells of the picked table
+
+    /** The current cell (shape id, row, col) of a table: the last cell clicked; the table tools act on it. */
+    var tableCell by mutableStateOf<Triple<Int, Int, Int>?>(null)
+
+    /** The picked object when it is a table whose cells can be worked on. */
+    fun pickedTable(): io.embodit.spatialoffice.core.pptx.Shape? = pickedShape()?.takeIf { it.table != null && it.cellsEditable }
+
+    /** The current cell of the picked table (row, col), the first cell when none was clicked yet; null without a table. */
+    fun currentCell(): Pair<Int, Int>? {
+        val t = pickedTable() ?: return null
+        val rows = t.table!!.size; val cols = t.table!!.firstOrNull()?.size ?: 0
+        val c = tableCell?.takeIf { it.first == t.id } ?: return 0 to 0
+        return c.second.coerceIn(0, rows - 1) to c.third.coerceIn(0, cols - 1)
+    }
+
+    /** Sets the current cell of table [shapeId] (a click on the cell; the debug `stable-cell`). Covered cells name their area's first cell. */
+    fun pickCell(shapeId: Int, row: Int, col: Int) {
+        val t = deck.slides.getOrNull(current)?.shapes?.firstOrNull { it.id == shapeId } ?: return
+        val a = runCatching { deck.tableArea(current, shapeId, row, col) }.getOrNull()
+        tableCell = if (a != null && t.cellsEditable) Triple(shapeId, a[0], a[1]) else Triple(shapeId, row, col)
+    }
+
+    private fun tableOp(what: String, op: (Int, Int, Int) -> Boolean, next: (Int, Int) -> Pair<Int, Int>): Boolean {
+        val t = pickedTable() ?: return false
+        val (r, c) = currentCell() ?: return false
+        mark("")
+        val ok = runCatching { op(t.id, r, c) }.onFailure { android.util.Log.w(TAG, "SLIDETABLE $what failed: ${it.message}") }.getOrDefault(false)
+        android.util.Log.i(TAG, "SLIDETABLE $what shape=${t.id} cell=$r,$c ok=$ok")
+        if (!ok) return false
+        val (nr, nc) = next(r, c)
+        edits++; changed()
+        pickedTable()?.let { nt ->
+            val rows = nt.table!!.size; val cols = nt.table!!.firstOrNull()?.size ?: 1
+            tableCell = Triple(nt.id, nr.coerceIn(0, rows - 1), nc.coerceIn(0, cols - 1))
+            android.util.Log.i(TAG, "SLIDETABLE now rows=$rows cols=$cols cell=${tableCell?.second},${tableCell?.third} spans=${nt.tableCells?.flatten()?.count { it.gridSpan > 1 || it.rowSpan > 1 }}")
+        }
+        return true
+    }
+
+    /** Insert a row above / below the current cell, or delete its row ("above", "below", "delete"). */
+    fun tableRow(op: String): Boolean = when (op) {
+        "above" -> tableOp("row-above", { id, r, _ -> deck.tableInsertRow(current, id, r, below = false) }) { r, c -> r to c }
+        "below" -> tableOp("row-below", { id, r, _ -> deck.tableInsertRow(current, id, r, below = true) }) { r, c -> (r + 1) to c }
+        "delete" -> tableOp("row-delete", { id, r, _ -> deck.tableDeleteRow(current, id, r) }) { r, c -> r to c }
+        else -> false
+    }
+
+    /** Insert a column left / right of the current cell, or delete its column ("left", "right", "delete"). */
+    fun tableCol(op: String): Boolean = when (op) {
+        "left" -> tableOp("col-left", { id, _, c -> deck.tableInsertCol(current, id, c, right = false) }) { r, c -> r to c }
+        "right" -> tableOp("col-right", { id, _, c -> deck.tableInsertCol(current, id, c, right = true) }) { r, c -> r to (c + 1) }
+        "delete" -> tableOp("col-delete", { id, _, c -> deck.tableDeleteCol(current, id, c) }) { r, c -> r to c }
+        else -> false
+    }
+
+    /** Merge the current cell with the one to its right / below it. */
+    fun tableMerge(down: Boolean): Boolean = tableOp(if (down) "merge-down" else "merge-right", { id, r, c -> deck.tableMerge(current, id, r, c, down) }) { r, c -> r to c }
+
+    /** What the table rows & columns menu can do now: (can delete a row, can delete a column, can merge right, can merge down). */
+    fun tableAbilities(): BooleanArray {
+        val t = pickedTable() ?: return BooleanArray(4)
+        val (r, c) = currentCell() ?: return BooleanArray(4)
+        val rows = t.table!!.size; val cols = t.table!!.firstOrNull()?.size ?: 0
+        val a = runCatching { deck.tableArea(current, t.id, r, c) }.getOrNull() ?: intArrayOf(r, c, r, c)
+        fun fits(nr: Int, nc: Int, down: Boolean): Boolean {
+            if (nr >= rows || nc >= cols) return false
+            val b = runCatching { deck.tableArea(current, t.id, nr, nc) }.getOrNull() ?: return false
+            return if (down) b[1] == a[1] && b[3] == a[3] else b[0] == a[0] && b[2] == a[2]
+        }
+        return booleanArrayOf(rows > 1, cols > 1, fits(a[0], a[3] + 1, false), fits(a[2] + 1, a[1], true))
+    }
+
+    // ---- M3 p26: page background
+
+    /** A plain background colour on the current slide, or with [all] on every slide; null = back to the layout's. */
+    fun setBackground(rgb: Int?, all: Boolean) {
+        mark("")
+        val which = if (all) deck.slides.indices.toList() else listOf(current)
+        for (i in which) deck.setSlideBackground(i, rgb)
+        android.util.Log.i(TAG, "SLIDEBG color=${rgb?.let { "%06X".format(it) } ?: "none"} slides=${which.joinToString(",")}")
+        images.clear(); edits++; changed()
+    }
+
+    /** A picture background on the current slide, or with [all] on every slide (one picture part, shared). */
+    fun setBackgroundPicture(bytes: ByteArray, ext: String, all: Boolean) {
+        mark("")
+        val media = deck.setSlideBackgroundPicture(current, bytes, ext)
+        if (all) for (i in deck.slides.indices) if (i != current) deck.setSlideBackgroundPicturePart(i, media)
+        android.util.Log.i(TAG, "SLIDEBG picture=$media bytes=${bytes.size} slides=${if (all) "all" else current.toString()}")
+        images.clear(); edits++; changed()
+    }
     fun setColors(colors: Map<String, Int>) { mark(""); deck.setColorScheme(colors); images.clear(); edits++; changed() }
     fun deleteSlide(): Boolean {
         if (deck.slides.size <= 1) return false

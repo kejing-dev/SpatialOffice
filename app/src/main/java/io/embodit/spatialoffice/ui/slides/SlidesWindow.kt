@@ -328,6 +328,10 @@ fun SlideCanvas(s: DeckSession, index: Int, width: Dp, editable: Boolean, modifi
                 // a click on the empty slide lets go of the picked object
                 .then(if (editable) Modifier.pointerInput(index) { detectTapGestures(onTap = { s.selected = -1; focusManager.clearFocus() }) } else Modifier),
         ) {
+            // M3 p26: a picture background, stretched over the slide like PowerPoint's stretch fill
+            slide.backgroundImage?.let { s.image(it) }?.let { bmp ->
+                Image(bitmap = bmp.asImageBitmap(), contentDescription = null, contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
+            }
             for (sh in slide.shapes) {
                 val b = if (editable) s.boxOf(sh) else UnitBox(sh.x, sh.y, sh.w, sh.h)
                 val w = (b.w * perEmu).coerceAtLeast(1f).dp
@@ -643,27 +647,78 @@ fun slideToggle(s: DeckSession, attr: Attr): Boolean {
     return s.formatText { sp, a, b -> RichText.setAttr(sp, a, b, attr, on) }
 }
 
-/** A table on the slide: its cells as a grid over the frame. On the editing canvas a click types into a cell; a drag moves the table. */
+/**
+ * A table on the slide: its cells over the frame, laid out by the table's own column widths and row heights; a merged
+ * cell spans its area and the cells it covers are not drawn (M3 p40). On the editing canvas a click types into a cell
+ * and makes it the current cell (blue frame) the table tools act on; a drag moves the table.
+ */
 @Composable
 private fun SlideTable(s: DeckSession, slide: Int, sh: Shape, box: Modifier, perPt: Float, editable: Boolean) {
     val rows = sh.table ?: return
+    val nCols = rows.firstOrNull()?.size ?: 0
+    if (nCols == 0) return
+    val spans = sh.tableCells
+    val colW = sh.tableColW?.takeIf { it.size == nCols && it.all { w -> w > 0 } } ?: List(nCols) { 1L }
+    val rowH = sh.tableRowH?.takeIf { it.size == rows.size && it.all { h -> h > 0 } } ?: List(rows.size) { 1L }
+    val sumW = colW.sum().toFloat(); val sumH = rowH.sum().toFloat()
     val size = 16f * perPt
-    Column(box.background(Ink.Paper).border(1.dp, Ink.Line).semantics { contentDescription = "slide-table-${sh.id}" }) {
+    val cur = if (editable && s.selected == sh.id) s.currentCell() else null
+    BoxWithConstraints(box.background(Ink.Paper).border(1.dp, Ink.Line).semantics { contentDescription = "slide-table-${sh.id}" }) {
+        val fullW = maxWidth; val fullH = maxHeight
         rows.forEachIndexed { r, row ->
-            Row(Modifier.fillMaxWidth().weight(1f).background(if (r == 0) Ink.Header else Ink.Paper)) {
-                row.forEachIndexed { c, cell ->
-                    val style = TextStyle(fontSize = size.sp, lineHeight = (size * 1.2f).sp, color = Ink.Text, fontWeight = if (r == 0) FontWeight.SemiBold else null)
-                    val cellBox = Modifier.weight(1f).fillMaxHeight().border(0.5.dp, Ink.Line)
-                    if (!editable) Box(cellBox.padding(horizontal = 4.dp), contentAlignment = Alignment.CenterStart) { Text(cell, style = style, modifier = Modifier.fillMaxWidth()) }
-                    else TapEdit(
-                        key = Triple(slide, sh.id, r * 100 + c), model = cell, style = style, name = "slide-table-${sh.id}-cell-$r-$c",
-                        whole = cellBox, inner = Modifier, align = Alignment.CenterStart, hint = null, editable = true,
-                        onPick = { s.selected = sh.id }, onChange = { s.setTableCell(slide, sh.id, r, c, it) },
-                    )
-                }
+            row.forEachIndexed { c, cell ->
+                val tc = spans?.getOrNull(r)?.getOrNull(c)
+                if (tc?.covered == true) return@forEachIndexed
+                val span = (tc?.gridSpan ?: 1).coerceIn(1, row.size - c)
+                val rspan = (tc?.rowSpan ?: 1).coerceIn(1, rows.size - r)
+                val x = fullW * (colW.subList(0, c).sum() / sumW); val w = fullW * (colW.subList(c, c + span).sum() / sumW)
+                val y = fullH * (rowH.subList(0, r).sum() / sumH); val h = fullH * (rowH.subList(r, r + rspan).sum() / sumH)
+                val isCur = cur != null && cur.first == r && cur.second == c
+                val style = TextStyle(fontSize = size.sp, lineHeight = (size * 1.2f).sp, color = Ink.Text, fontWeight = if (r == 0) FontWeight.SemiBold else null)
+                val cellBox = Modifier.offset(x, y).size(w, h).background(if (r == 0) Ink.Header else Ink.Paper)
+                    .border(if (isCur) 2.dp else 0.5.dp, if (isCur) Ink.Select else Ink.Line)
+                if (!editable) Box(cellBox.padding(horizontal = 4.dp), contentAlignment = Alignment.CenterStart) { Text(cell, style = style, modifier = Modifier.fillMaxWidth()) }
+                else TapEdit(
+                    key = Triple(slide, sh.id, r * 100 + c), model = cell, style = style, name = "slide-table-${sh.id}-cell-$r-$c",
+                    whole = cellBox, inner = Modifier, align = Alignment.CenterStart, hint = null, editable = true,
+                    onPick = { s.selected = sh.id; s.pickCell(sh.id, r, c) }, onChange = { s.setTableCell(slide, sh.id, r, c, it) },
+                )
             }
         }
     }
+}
+
+/** M3 p40: [Object ▸ Table rows & columns ›] on the picked table's current cell (only what can happen now). */
+@Composable
+private fun tableEntries(graph: Graph, s: DeckSession): List<MenuEntry> {
+    val cell = s.currentCell() ?: return emptyList()
+    if (s.readOnly) return emptyList()
+    val can = s.tableAbilities()
+    return listOf(subMenu(tr(R.string.stable_menu, cell.first + 1, cell.second + 1), "slides/table-rc", listOfNotNull(
+        MenuEntry(tr(R.string.stable_row_above), "slides/table-row-above") { s.tableRow("above") },
+        MenuEntry(tr(R.string.stable_row_below), "slides/table-row-below") { s.tableRow("below") },
+        MenuEntry(tr(R.string.stable_col_left), "slides/table-col-left") { s.tableCol("left") },
+        MenuEntry(tr(R.string.stable_col_right), "slides/table-col-right") { s.tableCol("right") },
+        if (can[0]) MenuEntry(tr(R.string.stable_row_del), "slides/table-row-del") { s.tableRow("delete") } else null,
+        if (can[1]) MenuEntry(tr(R.string.stable_col_del), "slides/table-col-del") { s.tableCol("delete") } else null,
+        if (can[2]) MenuEntry(tr(R.string.stable_merge_right), "slides/table-merge-right") { if (!s.tableMerge(false)) graph.say(s, graph.str(R.string.stable_merge_no)) } else null,
+        if (can[3]) MenuEntry(tr(R.string.stable_merge_down), "slides/table-merge-down") { if (!s.tableMerge(true)) graph.say(s, graph.str(R.string.stable_merge_no)) } else null,
+    )))
+}
+
+/** M3 p26: [Page ▸ Background ›]: colours, a picture, the layout's own; the same again for every slide on a second page. */
+@Composable
+private fun backgroundEntries(graph: Graph, s: DeckSession): MenuEntry {
+    val slide = s.deck.slides.getOrNull(s.current)
+    val own = slide?.takeIf { it.ownBackground }
+    val colorLabels = TextPalette.SHAPE.map { tr(R.string.bg_color, tr(it.first)) }
+    val pictureLabel = tr(R.string.bg_picture)
+    val noneLabel = tr(R.string.bg_none)
+    fun page(all: Boolean, tag: String): List<MenuEntry> =
+        TextPalette.SHAPE.mapIndexed { i, (_, v) -> MenuEntry(colorLabels[i], "$tag-item", checked = !all && own?.backgroundImage == null && own?.backgroundRgb == v) { s.setBackground(v, all) } } +
+            MenuEntry(pictureLabel, "$tag-picture", checked = !all && own?.backgroundImage != null) { graph.pickImage(s) { b, e, _, _ -> s.setBackgroundPicture(b, e, all) } } +
+            MenuEntry(noneLabel, "$tag-none", checked = !all && own == null) { s.setBackground(null, all) }
+    return subMenu(tr(R.string.bg_menu), "slides/bg", page(false, "slides/bg") + subMenu(tr(R.string.bg_all), "slides/bg-all", page(true, "slides/bg-all")))
 }
 
 /** p22 / p24: [Object ▾] fill ›, line ›, and the 90° turns (fill only for drawn shapes and text boxes). */
@@ -722,6 +777,8 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
                 ))
                 ToolMenu(tr(R.string.menu_page), "slides/page", entries = listOfNotNull(
                     MenuEntry(tr(R.string.dup_slide), "slides/dup") { s.duplicateSlide() },
+                    // M3 p26 page background (this slide / all slides)
+                    if (!s.readOnly) backgroundEntries(graph, s) else null,
                     // d28 version history (the slides toolbar has no More)
                     MenuEntry(tr(R.string.menu_history), "slides/history") { graph.show(s, io.embodit.spatialoffice.platform.Overlay.History(Win.SLIDES)) },
                     if (s.current > 0) MenuEntry(tr(R.string.slide_up), "slides/up") { s.moveSlide(-1) } else null,
@@ -771,7 +828,7 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
                     // p19 copy / paste / duplicate, p20 layer order (only the moves that can still happen)
                     MenuEntry(tr(R.string.obj_copy), "slides/obj-copy") { objCopy(graph, s) },
                     MenuEntry(tr(R.string.obj_duplicate), "slides/obj-dup") { s.duplicateSelected() },
-                ) + objectStyleEntries(s) + listOf(
+                ) + tableEntries(graph, s) + objectStyleEntries(s) + listOf(
                     ZOrder.FRONT to R.string.z_front, ZOrder.FORWARD to R.string.z_forward, ZOrder.BACKWARD to R.string.z_backward, ZOrder.BACK to R.string.z_back,
                 ).filter { s.canReorder(it.first) }.map { (op, label) -> MenuEntry(tr(label), "slides/z-" + op.name.lowercase()) { s.reorder(op) } })
                 ToolDivider()
