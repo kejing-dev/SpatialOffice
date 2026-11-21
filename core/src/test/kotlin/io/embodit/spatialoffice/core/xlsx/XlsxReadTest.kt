@@ -186,8 +186,7 @@ class XlsxReadTest {
 
     @Test fun compatListsWhatIsKeptButNotEdited() {
         val sales = Fx.sales().compat().associateBy { it.code }
-        assertEquals(1, sales.getValue("merged-cells").count)
-        assertEquals(CompatKind.READ_ONLY, sales.getValue("merged-cells").kind)
+        assertFalse(sales.containsKey("merged-cells")) // v0.5.0 (s25): merged cells can be edited
         assertEquals(1, sales.getValue("conditional-format").count)
         assertEquals(1, sales.getValue("data-validation").count)
         assertEquals(1, sales.getValue("defined-names").count)
@@ -195,7 +194,7 @@ class XlsxReadTest {
 
         val cached = Fx.cached().compat().associateBy { it.code }
         assertEquals(1, cached.getValue("defined-names").count)
-        assertEquals(2, cached.getValue("formula").count) // STDEV(…) and SUM(<name>)
+        assertEquals(1, cached.getValue("formula").count) // SUM(<name>); STDEV is evaluated since v0.5.0
         assertEquals(CompatKind.APPROX, cached.getValue("formula").kind)
     }
 

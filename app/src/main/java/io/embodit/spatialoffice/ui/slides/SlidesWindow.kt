@@ -1,5 +1,8 @@
 package io.embodit.spatialoffice.ui.slides
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import io.embodit.spatialoffice.platform.SOFT_BREAK
 import io.embodit.spatialoffice.platform.typingTarget
 import io.embodit.spatialoffice.ui.noKeyFocus
@@ -157,7 +160,15 @@ fun SlidesWindow(tag: String? = null) {
                     val rowW = fit.rowW.dp
                     val report = remember(s) { FitReport() }
                     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-                        SlideCanvas(s, s.current, fit.canvas.w.dp, editable = true, modifier = Modifier.onGloballyPositioned { report.canvas = it.boundsInWindow() })
+                        // v0.5.0 (p41): the slide at the window's zoom inside the same frame (100 % = fits the window); larger scrolls
+                        val zw = fit.canvas.w * s.zoom / 100f
+                        Box(
+                            Modifier.width(fit.canvas.w.dp).height(fit.canvas.h.dp)
+                                .then(if (s.zoom > 100) Modifier.clip(RoundedCornerShape(8.dp)).horizontalScroll(rememberScrollState()).verticalScroll(rememberScrollState()) else Modifier),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            SlideCanvas(s, s.current, zw.dp, editable = true, modifier = Modifier.onGloballyPositioned { report.canvas = it.boundsInWindow() })
+                        }
                         Box(Modifier.height(SlideFit.GAP_CANVAS.dp))
                         Row(
                             Modifier.width(rowW).heightIn(min = SlideFit.LABEL_H.dp).onGloballyPositioned { report.label = it.boundsInWindow() },

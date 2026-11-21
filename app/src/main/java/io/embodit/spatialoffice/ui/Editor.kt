@@ -90,6 +90,7 @@ fun EditorTitleBar(graph: Graph, win: Win, s: Session, extra: (@Composable () ->
                     if (graph.overlay is Overlay.Compat) graph.overlay = null else graph.show(s, Overlay.Compat(win))
                 })
                 extra?.invoke()
+                ZoomMenu(s)
                 WindowsMenu(graph, s)
                 Box {
                     ToolIcon(R.drawable.ic_ellipsis, tr(R.string.more), onClick = { menu = !menu })
@@ -126,9 +127,37 @@ fun commonKeys(graph: Graph, s: Session, e: KeyEvent): Boolean {
         Key.S -> graph.save(s)
         Key.Z -> s.undo()
         Key.Y -> s.redo()
+        // v0.5.0 (d43 / s41 / p41): view zoom, display only
+        Key.Equals, Key.Plus, Key.NumPadAdd -> s.zoomBy(1)
+        Key.Minus, Key.NumPadSubtract -> s.zoomBy(-1)
+        Key.Zero, Key.NumPad0 -> s.zoomReset()
         else -> return false
     }
     return true
+}
+
+/**
+ * v0.5.0: title bar [100 % ▾]: the zoom of this window's view (Ctrl+= / Ctrl+- / Ctrl+0 have their entries here).
+ * Display only; the file is not touched.
+ */
+@Composable
+fun ZoomMenu(s: Session) {
+    val resetLabel = when (s.editor) { io.embodit.spatialoffice.core.files.FileKind.SHEET -> R.string.zoom_100; io.embodit.spatialoffice.core.files.FileKind.SLIDES -> R.string.zoom_fit_window; else -> R.string.zoom_fit_width }
+    ToolMenu("${s.zoom} %", "editor/zoom", above = false, width = 104.dp, entries = listOf(
+        MenuEntry(tr(R.string.zoom_in), "editor/zoom-in") { s.zoomBy(1) },
+        MenuEntry(tr(R.string.zoom_out), "editor/zoom-out") { s.zoomBy(-1) },
+        MenuEntry(tr(resetLabel), "editor/zoom-reset", checked = s.zoom == 100) { s.zoomReset() },
+    ))
+}
+
+/** Content drawn at the session's zoom: dp and sp both scale, so layout, hit-testing and text follow (display only). */
+@Composable
+fun Zoomed(s: Session, content: @Composable () -> Unit) {
+    val d = androidx.compose.ui.platform.LocalDensity.current
+    val z = s.zoom / 100f
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d.density * z, d.fontScale),
+    ) { content() }
 }
 
 @Composable

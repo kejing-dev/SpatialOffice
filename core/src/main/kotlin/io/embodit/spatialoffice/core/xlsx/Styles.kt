@@ -96,7 +96,49 @@ internal class Styles(xml0: String) {
     var changed: Boolean = false
         private set
 
-    private class Xf(val numFmtId: Int, val fontId: Int, val fillId: Int, val raw: String)
+    private class Xf(val numFmtId: Int, val fontId: Int, val fillId: Int, val raw: String, val borderId: Int = 0)
+
+    private val borders = ArrayList<String>()
+    private val borderSides = ArrayList<Int>()
+
+    /** Which sides of [borderRaw] have a line: bits [LEFT] [RIGHT] [TOP] [BOTTOM]. */
+    private fun sidesOf(borderRaw: String): Int {
+        val b = Xml.root(borderRaw) ?: return 0
+        if (b.selfClosing) return 0
+        var m = 0
+        for (k in Xml.children(borderRaw, b)) {
+            val st = Xml.attr(borderRaw, k, "style") ?: continue
+            if (st == "none") continue
+            m = m or when (Xml.local(k.name)) { "left", "start" -> LEFT; "right", "end" -> RIGHT; "top" -> TOP; "bottom" -> BOTTOM; else -> 0 }
+        }
+        return m
+    }
+
+    /** v0.5.0 (s26): sides of a cell style's border that have a line (any style), as [LEFT] / [RIGHT] / [TOP] / [BOTTOM] bits. */
+    fun borderMask(style: Int): Int = xfs.getOrNull(style)?.let { borderSides.getOrNull(it.borderId) } ?: 0
+
+    /**
+     * Style index equal to [style] but with thin automatic-colour lines on exactly the sides in [mask] (0 = no border,
+     * border 0). Appends a `<border>` and an `<xf>` only when no equal one exists.
+     */
+    fun withBorders(style: Int, mask: Int): Int {
+        if (borderMask(style) == mask && (mask != 0 || (xfs.getOrNull(style)?.borderId ?: 0) == 0)) return style
+        val xf = baseXf(style)
+        val borderId = if (mask == 0) 0 else {
+            fun side(n: String, bit: Int) = if (mask and bit != 0) "<$pfx$n style=\"thin\"><${pfx}color auto=\"1\"/></$pfx$n>" else "<$pfx$n/>"
+            val raw = "<${pfx}border>" + side("left", LEFT) + side("right", RIGHT) + side("top", TOP) + side("bottom", BOTTOM) + "<${pfx}diagonal/></${pfx}border>"
+            var id = borders.indexOf(raw)
+            if (id < 0) {
+                val root = Xml.root(xml)!!
+                if (XmlX.kid(xml, root, "borders") == null) throw UnsupportedOperationException("styles part has no borders")
+                append("borders", raw)
+                id = borders.size - 1
+            }
+            id
+        }
+        if (xf.borderId == borderId && style in xfs.indices) return style
+        return xfWith(xf, mapOf("borderId" to borderId.toString(), "applyBorder" to "1"), "applyBorder")
+    }
 
     private val xfs = ArrayList<Xf>()
     private val fonts = ArrayList<String>()
@@ -109,7 +151,7 @@ internal class Styles(xml0: String) {
     init { parse() }
 
     private fun parse() {
-        xfs.clear(); fonts.clear(); fontBold.clear(); customFmts.clear(); fills.clear(); fillRgb.clear()
+        xfs.clear(); fonts.clear(); fontBold.clear(); customFmts.clear(); fills.clear(); fillRgb.clear(); borders.clear(); borderSides.clear()
         val root = Xml.root(xml) ?: return
         pfx = XmlX.prefixOf(root.name)
         for (k in Xml.children(xml, root)) when (Xml.local(k.name)) {
@@ -130,7 +172,12 @@ internal class Styles(xml0: String) {
             }
             "cellXfs" -> for (x in Xml.children(xml, k)) {
                 val a = Xml.attrs(xml, x)
-                xfs.add(Xf(a["numFmtId"]?.toIntOrNull() ?: 0, a["fontId"]?.toIntOrNull() ?: 0, a["fillId"]?.toIntOrNull() ?: 0, xml.substring(x.start, x.end)))
+                xfs.add(Xf(a["numFmtId"]?.toIntOrNull() ?: 0, a["fontId"]?.toIntOrNull() ?: 0, a["fillId"]?.toIntOrNull() ?: 0, xml.substring(x.start, x.end), a["borderId"]?.toIntOrNull() ?: 0))
+            }
+            "borders" -> for (f in Xml.children(xml, k)) {
+                val raw = xml.substring(f.start, f.end)
+                borders.add(raw)
+                borderSides.add(sidesOf(raw))
             }
         }
     }
@@ -411,6 +458,10 @@ internal class Styles(xml0: String) {
     }
 
     companion object {
+        const val LEFT = 1
+        const val RIGHT = 2
+        const val TOP = 4
+        const val BOTTOM = 8
         private val FONT_ORDER = listOf("b", "i", "strike", "condense", "extend", "outline", "shadow", "u", "vertAlign", "sz", "color", "name", "family", "charset", "scheme")
         private val BUILTIN_BY_CODE = mapOf("General" to 0, "0" to 1, "0.00" to 2, "#,##0" to 3, "#,##0.00" to 4, "0%" to 9, "0.00%" to 10)
 

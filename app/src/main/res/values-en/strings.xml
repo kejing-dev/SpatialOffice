@@ -637,4 +637,25 @@
     <string name="stable_merge_right" formatted="false">Merge with right</string>
     <string name="stable_merge_down" formatted="false">Merge with below</string>
     <string name="stable_merge_no" formatted="false">That neighbour spans different rows or columns, so they can\'t merge.</string>
+    <string name="fill_down" formatted="false">Fill down Ctrl+D</string>
+    <string name="fill_right" formatted="false">Fill right Ctrl+R</string>
+    <string name="fill_series" formatted="false">Fill series</string>
+    <string name="fill_nothing" formatted="false">Nothing to fill. Select a few cells; the first row or column is what gets copied.</string>
+    <string name="fill_done">Filled %1$d cells</string>
+    <string name="series_nothing" formatted="false">Start the selection with one or two values, like 1, 2 or a date.</string>
+    <string name="menu_borders" formatted="false">Borders</string>
+    <string name="border_all" formatted="false">All borders</string>
+    <string name="border_outline" formatted="false">Outside border</string>
+    <string name="border_bottom" formatted="false">Bottom border</string>
+    <string name="border_none" formatted="false">No border</string>
+    <string name="merge_cells" formatted="false">Merge cells</string>
+    <string name="unmerge_cells" formatted="false">Unmerge cells</string>
+    <string name="merge_refused" formatted="false">Select two or more cells to merge.</string>
+    <string name="merged">Merged %1$s; only the top-left value stays</string>
+    <string name="zoom_menu" formatted="false">Zoom</string>
+    <string name="zoom_in" formatted="false">Zoom in Ctrl+=</string>
+    <string name="zoom_out" formatted="false">Zoom out Ctrl+-</string>
+    <string name="zoom_fit_width" formatted="false">Fit width Ctrl+0</string>
+    <string name="zoom_100" formatted="false">100% Ctrl+0</string>
+    <string name="zoom_fit_window" formatted="false">Fit window Ctrl+0</string>
 </resources>

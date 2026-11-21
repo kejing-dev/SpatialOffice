@@ -315,6 +315,14 @@ object DebugReceiver {
             "font-color" -> g.sheet?.setFontColor(arg.takeIf { it.isNotEmpty() && it != "none" }?.toInt(16))
             "font-size" -> g.sheet?.let { s -> when (arg) { "up" -> s.stepFontSize(1); "down" -> s.stepFontSize(-1); else -> s.setFontSize(arg.toFloat()) } }
             "font-clear" -> g.sheet?.clearFont()
+            // v0.5.0 (M3 sheets): the same calls as [Edit ▾ ▸ Fill ›], [Rows & columns ▾ ▸ Merge], [Colour ▾ ▸ Borders ›]
+            "fill" -> g.sheet?.let { s -> io.embodit.spatialoffice.ui.sheet.fillCells(g, s, arg != "right") }
+            "series" -> g.sheet?.let { s -> if (arg.isEmpty()) io.embodit.spatialoffice.ui.sheet.fillSeries(g, s) else s.fillSeries(arg != "right") }
+            "merge" -> g.sheet?.merge()
+            "unmerge" -> g.sheet?.unmerge()
+            "border" -> g.sheet?.setBorders(arg.ifEmpty { "outline" })
+            // v0.5.0 (d43 / s41 / p41): title bar [n % ▾] / Ctrl+= / Ctrl+- / Ctrl+0 on that window's file
+            "zoom" -> { val p = arg.split(" "); g.session(win(p[0]))?.let { s -> when (val v = p.getOrElse(1) { "in" }) { "in" -> s.zoomBy(1); "out" -> s.zoomBy(-1); "reset" -> s.zoomReset(); else -> s.setZoomPct(v.toInt()) } } }
             // stext-sel <a>,<b>: select characters a..b of the picked slide text box (as the text field reports it)
             "stext-sel" -> g.deck?.let { d -> val (a, b) = arg.split(",").map { it.toInt() }; d.textSel = DeckSession.TextSel(d.current, d.selected, a, b) }
             // stext bold|italic|underline|strike | color RRGGBB|none | size up|down|<pt> | align 0|1|2 | bullet 1|0 | clear (Text / Colour menus on the picked text box)

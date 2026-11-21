@@ -389,13 +389,14 @@ class XlsxEditTest {
         val src = Fx.bytes("xlsx-cached.xlsx")
         val wb = XlsxWorkbook.open(src)
         wb.setCell(0, 1, 1, "11") // B2, an input of STDEV(B2:B4) and of SUM(B2:B4)
-        assertEquals(10.0, wb.cell(0, 4, 2).number!!, 0.0)
+        assertEquals(9.50438495292217, wb.cell(0, 4, 2).number!!, 1e-12) // v0.5.0: STDEV is evaluated
         assertEquals(61.0, wb.cell(0, 4, 1).number!!, 0.0)
         val saved = wb.save()
         val after = Fx.text(saved, Fx.SHEET1)
-        assertTrue(after.contains("<c r=\"C5\"><f>STDEV(B2:B4)</f><v>10</v></c>"))
+        // v0.5.0 (s27): STDEV is evaluated now, so its cached value follows B2 (11, 20, 30)
+        assertTrue(after, after.contains("<c r=\"C5\"><f>STDEV(B2:B4)</f><v>9.50438"))
         assertTrue(after.contains("<c r=\"B5\"><f>SUM(B2:B4)</f><v>61</v></c>"))
-        assertEquals(setOf("B2", "D2", "B5", "D5", "A7"), Fx.changedCells(Fx.text(src, Fx.SHEET1), after))
+        assertEquals(setOf("B2", "D2", "B5", "C5", "D5", "A7"), Fx.changedCells(Fx.text(src, Fx.SHEET1), after))
         // the other sheet depends on B5; the formula with a defined name keeps its cached value
         assertEquals(setOf("A1", "A2"), Fx.changedCells(Fx.text(src, Fx.SHEET2), Fx.text(saved, Fx.SHEET2)))
         // the calculation chain is still valid (no formula was removed), so it stays
@@ -403,13 +404,13 @@ class XlsxEditTest {
         assertEquals(setOf(Fx.SHEET1, Fx.SHEET2), Fx.changedParts(src, saved))
 
         // a formula the evaluator does not know can be entered; it is stored as a formula without a cached value
-        wb.setCell(0, 8, 0, "=index(A1:B4,2,1)")
-        assertEquals("=INDEX(A1:B4,2,1)", wb.cell(0, 8, 0).input)
+        wb.setCell(0, 8, 0, "=offset(A1:B4,2,1)")
+        assertEquals("=OFFSET(A1:B4,2,1)", wb.cell(0, 8, 0).input)
         assertEquals(CellKind.ERROR, wb.cell(0, 8, 0).kind)
         assertEquals("#NAME?", wb.cell(0, 8, 0).display)
         val again = Fx.out("xlsx-cached-unknown-fn.xlsx", wb.save())
-        assertTrue(Fx.text(again, Fx.SHEET1).contains("<row r=\"9\"><c r=\"A9\"><f>INDEX(A1:B4,2,1)</f></c></row>"))
-        assertEquals("=INDEX(A1:B4,2,1)", XlsxWorkbook.open(again).cell(0, 8, 0).input)
+        assertTrue(Fx.text(again, Fx.SHEET1).contains("<row r=\"9\"><c r=\"A9\"><f>OFFSET(A1:B4,2,1)</f></c></row>"))
+        assertEquals("=OFFSET(A1:B4,2,1)", XlsxWorkbook.open(again).cell(0, 8, 0).input)
     }
 
     @Test fun replacingAFormulaDropsTheCalculationChainAndUnsharesFormulas() {

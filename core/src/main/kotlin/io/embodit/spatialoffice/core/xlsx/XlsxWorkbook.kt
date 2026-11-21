@@ -85,6 +85,9 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         var pendingDrawingRid: String? = null
         var usedRows = -1
         var usedCols = -1
+        /** v0.5.0 (s25): merged ranges once merged / unmerged here (null = as in the file, after [ops]); written on save when [mergesChanged]. */
+        var merges: ArrayList<IntArray>? = null
+        var mergesChanged = false
     }
 
     private class Area(val sheet: Int, val r1: Int, val c1: Int, val r2: Int, val c2: Int)
@@ -125,6 +128,8 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
 
         override fun used(sheet: Int): IntArray =
             if (sheet in sheets.indices) intArrayOf(rows(sheet), cols(sheet)) else intArrayOf(0, 0)
+
+        override fun date1904(): Boolean = this@XlsxWorkbook.date1904
 
         override fun rangeValues(sheet: Int, r1: Int, c1: Int, r2: Int, c2: Int): List<Any?> {
             val out = ArrayList<Any?>()
@@ -479,7 +484,7 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             is ErrVal -> { kind = CellKind.ERROR; display = v.code; input = display }
             else -> { kind = CellKind.TEXT; display = v.toString(); input = display }
         }
-        if (formula != null) input = "=$formula"
+        if (formula != null) input = "=" + Formula.display(formula)
         val (h, wrap) = styles?.alignment(c.style) ?: Pair(null, false)
         val font = styles?.font(c.style)
         return Cell(input, display, kind, number, formula != null, bold, fmt.kind, h, wrap,
@@ -766,6 +771,7 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         }
         s.structural = true
         s.ops.add(intArrayOf(if (cols) 1 else 0, at, delta))
+        s.merges?.let { list -> val op = listOf(intArrayOf(if (cols) 1 else 0, at, delta)); s.merges = ArrayList(list.mapNotNull { applyOps(it, op) }) }
         for (r in s.rows.values) for (c in r.cells.values) {
             if (c.sharedSi >= 0) { c.sharedSi = -1; c.sharedMaster = false; if (c.formula != null) c.contentChanged = true }
             if (c.forcedOpaque && (c.row != c.origRow || c.col != c.origCol)) note("$what:array-formula")
@@ -928,6 +934,141 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         val next = Decimals.adjust(code, delta, v)
         if (next == code) return
         restyle(sheet, row, col) { st, style -> st.withNumFmt(style, next) }
+    }
+
+    // ---- borders, merged cells, fill (M3) ----
+
+    /** s26: sides of a cell that have a border line ([Styles.LEFT] / RIGHT / TOP / BOTTOM bits). */
+    fun borderMask(sheet: Int, row: Int, col: Int): Int {
+        val s = sheetAt(sheet)
+        return styles?.borderMask(s.rows[row]?.cells?.get(col)?.style ?: inheritedStyle(s, row, col)) ?: 0
+    }
+
+    /** s26: thin lines on exactly the sides in [mask] (0 removes the border). */
+    fun setBorders(sheet: Int, row: Int, col: Int, mask: Int) {
+        if (mask == 0 && styles == null) return
+        if (borderMask(sheet, row, col) == mask) return
+        restyle(sheet, row, col) { st, style -> st.withBorders(style, mask) }
+    }
+
+    /** Sheet's merged ranges [r1, c1, r2, c2] as they are now (after this session's row / column edits and merges). */
+    fun merges(sheet: Int): List<IntArray> {
+        val s = sheetAt(sheet)
+        return (s.merges ?: mergedRanges(s)).map { it.copyOf() }
+    }
+
+    /** The merged range that covers ([row], [col]), or null. */
+    fun mergeAt(sheet: Int, row: Int, col: Int): IntArray? = merges(sheet).firstOrNull { row in it[0]..it[2] && col in it[1]..it[3] }
+
+    private fun overlaps(m: IntArray, r1: Int, c1: Int, r2: Int, c2: Int) = m[0] <= r2 && m[2] >= r1 && m[1] <= c2 && m[3] >= c1
+
+    /**
+     * s25: merges the rectangle into one cell. Merged ranges it touches are taken in (the result covers them all);
+     * every cell but the top-left one is emptied (its value stays, as in every spreadsheet). False for a single cell.
+     */
+    fun mergeCells(sheet: Int, r1: Int, c1: Int, r2: Int, c2: Int): Boolean {
+        val s = sheetAt(sheet)
+        var a = intArrayOf(minOf(r1, r2), minOf(c1, c2), maxOf(r1, r2), maxOf(c1, c2))
+        val cur = ArrayList(merges(sheet))
+        var grew = true
+        while (grew) {
+            grew = false
+            for (m in cur) if (overlaps(m, a[0], a[1], a[2], a[3]) && !(m[0] >= a[0] && m[1] >= a[1] && m[2] <= a[2] && m[3] <= a[3])) {
+                a = intArrayOf(minOf(a[0], m[0]), minOf(a[1], m[1]), maxOf(a[2], m[2]), maxOf(a[3], m[3])); grew = true
+            }
+        }
+        if (a[0] == a[2] && a[1] == a[3]) return false
+        val keep = cur.filter { !overlaps(it, a[0], a[1], a[2], a[3]) }
+        for (r in ArrayList(s.rows.subMap(a[0], true, a[2], true).values)) for (c in ArrayList(r.cells.subMap(a[1], true, a[3], true).values)) {
+            if (r.index == a[0] && c.col == a[1]) continue
+            if (c.value != null || c.formula != null) setCell(sheet, r.index, c.col, "")
+        }
+        s.merges = ArrayList(keep + listOf(a))
+        s.mergesChanged = true
+        dirty = true
+        return true
+    }
+
+    /** s25: splits every merged range that touches the rectangle; false when there was none. */
+    fun unmergeCells(sheet: Int, r1: Int, c1: Int, r2: Int, c2: Int): Boolean {
+        val s = sheetAt(sheet)
+        val cur = merges(sheet)
+        val keep = cur.filter { !overlaps(it, minOf(r1, r2), minOf(c1, c2), maxOf(r1, r2), maxOf(c1, c2)) }
+        if (keep.size == cur.size) return false
+        s.merges = ArrayList(keep)
+        s.mergesChanged = true
+        dirty = true
+        return true
+    }
+
+    /**
+     * s24 Ctrl+D / Ctrl+R: the first row (down) or first column (right) of the rectangle is copied into the rest of it,
+     * formulas moved like a paste, styles copied. A rectangle one row high (down) / one column wide (right) takes the
+     * row above / column to the left instead, as every spreadsheet does. Returns the number of cells written.
+     */
+    fun fill(sheet: Int, r1: Int, c1: Int, r2: Int, c2: Int, down: Boolean): Int {
+        var ra = minOf(r1, r2); val rb = maxOf(r1, r2); var ca = minOf(c1, c2); val cb = maxOf(c1, c2)
+        if (down && ra == rb) { if (ra == 0) return 0; ra-- }
+        if (!down && ca == cb) { if (ca == 0) return 0; ca-- }
+        var n = 0
+        if (down) {
+            val src = copyRange(sheet, ra, ca, ra, cb)
+            for (r in ra + 1..rb) { pasteRange(sheet, r, ca, src, r - ra, 0); n += cb - ca + 1 }
+        } else {
+            val src = copyRange(sheet, ra, ca, rb, ca)
+            for (c in ca + 1..cb) { pasteRange(sheet, ra, c, src, 0, c - ca); n += rb - ra + 1 }
+        }
+        return n
+    }
+
+    /**
+     * s24 Fill series: in each column (down) / row (right) of the rectangle the leading filled cells are the seed: one
+     * number (dates are numbers) counts up by 1 (a day), two or more continue their step; text ending in a number
+     * ("Q1", "第 3 周") counts that number up; anything else (and formulas) is copied as [fill] does. The seed's
+     * format goes with it. Returns the number of cells written.
+     */
+    fun fillSeries(sheet: Int, r1: Int, c1: Int, r2: Int, c2: Int, down: Boolean): Int {
+        val s = sheetAt(sheet)
+        val ra = minOf(r1, r2); val rb = maxOf(r1, r2); val ca = minOf(c1, c2); val cb = maxOf(c1, c2)
+        var n = 0
+        val lines = if (down) ca..cb else ra..rb
+        val len = if (down) rb - ra + 1 else cb - ca + 1
+        for (line in lines) {
+            fun at(k: Int): Pair<Int, Int> = if (down) Pair(ra + k, line) else Pair(line, ca + k)
+            var seed = 0
+            while (seed < len) { val (r, c) = at(seed); if (cell(sheet, r, c).input.isEmpty()) break; seed++ }
+            if (seed == 0 || seed == len) continue
+            val cells = (0 until seed).map { k -> at(k).let { (r, c) -> cell(sheet, r, c) } }
+            val (lr, lc) = at(seed - 1)
+            val style = s.rows[lr]?.cells?.get(lc)?.style ?: inheritedStyle(s, lr, lc)
+            val nums = cells.map { if (!it.isFormula && it.kind == CellKind.NUMBER) it.number else null }
+            val textNum = cells.map { if (!it.isFormula && it.kind == CellKind.TEXT) TRAILING_NUM.matchEntire(it.input) else null }
+            for (k in seed until len) {
+                val (r, c) = at(k)
+                val input: String = when {
+                    nums.all { it != null } -> {
+                        val step = if (seed == 1) 1.0 else (nums[seed - 1]!! - nums[0]!!) / (seed - 1)
+                        Num.input(BigDecimal((nums[seed - 1]!!).toString()).add(BigDecimal(step.toString()).multiply(BigDecimal(k - seed + 1))).toDouble())
+                    }
+                    textNum.all { it != null } && textNum.map { it!!.groupValues[1] }.distinct().size == 1 -> {
+                        val vals = textNum.map { it!!.groupValues[2].toLong() }
+                        val step = if (seed == 1) 1L else (vals[seed - 1] - vals[0]) / (seed - 1)
+                        textNum[0]!!.groupValues[1] + (vals[seed - 1] + step * (k - seed + 1)).toString().padStart(textNum[seed - 1]!!.groupValues[2].length, '0') + textNum[0]!!.groupValues[3]
+                    }
+                    else -> {
+                        val srcK = (k - seed) % seed
+                        val (sr, sc) = at(srcK)
+                        val inp = cell(sheet, sr, sc).input
+                        if (inp.length > 1 && inp[0] == '=' && Formula.parse(inp.substring(1)).root != null) Formula.offset(inp, r - sr, c - sc) else inp
+                    }
+                }
+                setCell(sheet, r, c, input)
+                val rec = s.rows[r]?.cells?.get(c) ?: if (style != 0) createCell(s, r, c) else null
+                if (rec != null && rec.style != style) { rec.style = style; rec.styleChanged = true; dirty = true }
+                n++
+            }
+        }
+        return n
     }
 
     // ---- ranges: copy, paste, clear (M1) ----
@@ -1594,7 +1735,6 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         fun add(m: MutableMap<String, Int>, code: String, n: Int) { if (n > 0) m[code] = (m[code] ?: 0) + n }
         for (s in sheets) {
             for (k in s.rootKids) when (Xml.local(k.name)) {
-                "mergeCells" -> add(ro, "merged-cells", XmlX.kids(s.xml, k, "mergeCell").size)
                 "conditionalFormatting" -> add(ro, "conditional-format", 1)
                 "dataValidations" -> add(ro, "data-validation", XmlX.kids(s.xml, k, "dataValidation").size)
                 "tableParts" -> add(ro, "table", Xml.children(s.xml, k).size)
@@ -1820,7 +1960,7 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
                 val new = if (maxR < 0) "A1" else A1.rangeName(minR, minC, maxR, maxC)
                 if (new != xml.substring(span.first, span.second)) edits.add(Triple(span.first, span.second, new))
             }
-            "mergeCells" -> for (m in Xml.children(xml, k)) shiftAttr(m, "ref")
+            "mergeCells" -> if (!s.mergesChanged) for (m in Xml.children(xml, k)) shiftAttr(m, "ref")
             "conditionalFormatting" -> shiftAttr(k, "sqref")
             "dataValidations" -> for (m in Xml.children(xml, k)) shiftAttr(m, "sqref")
             "cols" -> if (colOps.isNotEmpty() && !s.colsChanged) for (m in Xml.children(xml, k)) {
@@ -1839,6 +1979,7 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         if (s.structural) structuralEdits(s, edits) else inPlaceEdits(s, edits)
         if (s.freezeSet) freezeEdits(s, edits)
         if (s.colsChanged) colsEdits(s, edits)
+        if (s.mergesChanged) mergeEdits(s, edits)
         val rid = s.pendingDrawingRid
         val root = s.root
         if (rid != null && root != null) {
@@ -1865,6 +2006,20 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             val pos = s.sheetData?.start ?: s.root?.closeStart ?: return
             edits.add(Triple(pos, pos, block))
         }
+    }
+
+    /** s25: rewrites `<mergeCells>` from [Sheet.merges] (put in its schema place when the sheet had none; removed when empty). */
+    private fun mergeEdits(s: Sheet, edits: MutableList<Triple<Int, Int, String>>) {
+        val p = s.pfx
+        val list = s.merges ?: return
+        val old = s.rootKids.firstOrNull { Xml.local(it.name) == "mergeCells" }
+        val block = if (list.isEmpty()) "" else list.joinToString("", "<${p}mergeCells count=\"${list.size}\">", "</${p}mergeCells>") {
+            "<${p}mergeCell ref=\"" + A1.rangeName(it[0], it[1], it[2], it[3]) + "\"/>"
+        }
+        if (old != null) { edits.add(Triple(old.start, old.end, block)); return }
+        if (block.isEmpty()) return
+        val pos = s.rootKids.firstOrNull { Xml.local(it.name) in AFTER_MERGE }?.start ?: s.root?.closeStart ?: return
+        edits.add(Triple(pos, pos, block))
     }
 
     /** Writes the frozen-rows pane into the first sheet view, creating the view list when the sheet has none. */
@@ -1951,6 +2106,12 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
 
         private val EMPTY_CELL = Cell("", "", CellKind.EMPTY, null, false, false, NumFmt.GENERAL)
         private val AFTER_VIEWS = setOf("sheetFormatPr", "cols", "sheetData")
+        private val AFTER_MERGE = setOf(
+            "phoneticPr", "conditionalFormatting", "dataValidations", "hyperlinks", "printOptions", "pageMargins", "pageSetup",
+            "headerFooter", "rowBreaks", "colBreaks", "customProperties", "cellWatches", "ignoredErrors", "smartTags", "drawing",
+            "legacyDrawing", "legacyDrawingHF", "drawingHF", "picture", "oleObjects", "controls", "webPublishItems", "tableParts", "extLst",
+        )
+        private val TRAILING_NUM = Regex("(.*?)([0-9]+)([^0-9]*)", RegexOption.DOT_MATCHES_ALL)
         private val AFTER_DRAWING = setOf("legacyDrawing", "legacyDrawingHF", "drawingHF", "picture", "oleObjects", "controls", "webPublishItems", "tableParts", "extLst")
         private val NUMBER_INPUT = Regex("([+-]?)([\\$¥€£￥₩₹]?)([+-]?)((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\\.[0-9]*)?|\\.[0-9]+)([eE][+-]?[0-9]+)?\\s*(%?)")
         private val DATE_INPUT = Regex("([0-9]{4})[-/]([0-9]{1,2})[-/]([0-9]{1,2})(?:[ T]([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?)?")

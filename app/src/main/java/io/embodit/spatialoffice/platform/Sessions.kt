@@ -79,6 +79,9 @@ data class FindHit(val a: Int, val b: Int = 0, val c: Int = 0, val start: Int, v
 /** The character a page break is held as in paragraph text (`w:br w:type="page"`). */
 const val PAGE_BREAK = '\u000C'
 
+/** v0.5.0: the zoom levels Ctrl+= / Ctrl+- step through. */
+val ZOOM_STEPS = listOf(50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200)
+
 /** d17: one step of [Increase indent] for a paragraph that is not a list item: 420 twips (two characters of 10.5 pt). */
 const val INDENT_STEP_TW = 420
 
@@ -96,6 +99,23 @@ abstract class Session(ref: FileRef, val kind: FileKind) {
     /** Google's own documents (exported) and other cloud items that cannot be written back open read-only. */
     open val readOnly: Boolean get() = (ref as? FileRef.Cloud)?.readOnlyCloud == true
     val editor: FileKind get() = kind.editor
+
+    /**
+     * v0.5.0 (d43 / s41 / p41): view zoom in percent, display only (never written to the file). 100 = the editor's
+     * normal view: the document fits the window's width, the sheet at 100 %, the slide fits the window.
+     */
+    var zoom by mutableIntStateOf(100)
+        private set
+
+    /** Ctrl+= / Ctrl+- one step along [ZOOM_STEPS]; [reset] (Ctrl+0) back to 100. */
+    fun zoomBy(steps: Int) {
+        zoom = if (steps > 0) ZOOM_STEPS.firstOrNull { it > zoom } ?: ZOOM_STEPS.last() else ZOOM_STEPS.lastOrNull { it < zoom } ?: ZOOM_STEPS.first()
+        android.util.Log.i(TAG, "ZOOM ${kind.name} -> $zoom%")
+    }
+
+    fun setZoomPct(pct: Int) { zoom = pct.coerceIn(ZOOM_STEPS.first(), ZOOM_STEPS.last()); android.util.Log.i(TAG, "ZOOM ${kind.name} -> $zoom%") }
+
+    fun zoomReset() = setZoomPct(100)
 
     private val undoStack = ArrayDeque<ByteArray>()
     private val redoStack = ArrayDeque<ByteArray>()
@@ -800,6 +820,75 @@ class SheetSession(ref: FileRef, kind: FileKind, bytes: ByteArray) : Session(ref
     fun setHAlign(align: String?) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setHAlign(sheet, r, c, align) }; changed() }
     fun setWrap(wrap: Boolean) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setWrap(sheet, r, c, wrap) }; changed() }
     fun adjustDecimals(delta: Int) { if (isCsv) return; mark(""); eachSelected { r, c -> book.adjustDecimals(sheet, r, c, delta) }; changed() }
+
+    // ---- M3 (v0.5.0): s24 fill, s25 merge, s26 borders
+
+    /** s24 Ctrl+D / Ctrl+R: first row / column of the selection into the rest (one row / column: from above / the left). */
+    fun fill(down: Boolean): Int {
+        mark("")
+        val r = selection
+        val n = book.fill(sheet, r.r1, r.c1, r.r2, r.c2, down)
+        android.util.Log.i(TAG, "FILL ${if (down) "down" else "right"} ${r.name()} cells=$n")
+        if (n > 0) { csvEdits++; changed() }
+        return n
+    }
+
+    /** s24 Fill series: 1, 2 → 3, 4…; a date counts on by days; "Q1" → "Q2". */
+    fun fillSeries(down: Boolean): Int {
+        mark("")
+        val r = selection
+        val n = book.fillSeries(sheet, r.r1, r.c1, r.r2, r.c2, down)
+        android.util.Log.i(TAG, "FILL series-${if (down) "down" else "right"} ${r.name()} cells=$n")
+        if (n > 0) { csvEdits++; changed() }
+        return n
+    }
+
+    /** s25: the merged range under the active cell, or null. */
+    fun mergeHere(): IntArray? = if (isCsv) null else book.mergeAt(sheet, row, col)
+
+    /** s25 [Rows & columns ▸ Merge cells]: false for one cell. The selection becomes the merged cell. */
+    fun merge(): Boolean {
+        if (isCsv) return false
+        val r = selection
+        if (r.size < 2) return false
+        mark("")
+        val ok = book.mergeCells(sheet, r.r1, r.c1, r.r2, r.c2)
+        android.util.Log.i(TAG, "MERGE ${r.name()} ok=$ok merges=${book.merges(sheet).joinToString(",") { io.embodit.spatialoffice.core.xlsx.A1.rangeName(it[0], it[1], it[2], it[3]) }}")
+        if (ok) { book.mergeAt(sheet, r.r1, r.c1)?.let { m -> select(m[0], m[1]); extendTo(m[2], m[3]) }; changed() }
+        return ok
+    }
+
+    fun unmerge(): Boolean {
+        if (isCsv) return false
+        val r = selection
+        mark("")
+        val ok = book.unmergeCells(sheet, r.r1, r.c1, r.r2, r.c2)
+        android.util.Log.i(TAG, "MERGE split ${r.name()} ok=$ok")
+        if (ok) changed()
+        return ok
+    }
+
+    /** s26 [Colour ▾ ▸ Borders]: "all" every side of every cell, "outline" the edge of the selection, "bottom" its bottom edge, "none" removes all. */
+    fun setBorders(kind: String) {
+        if (isCsv) return
+        val r = selection
+        mark("")
+        val L = io.embodit.spatialoffice.core.xlsx.Borders.LEFT; val R = io.embodit.spatialoffice.core.xlsx.Borders.RIGHT
+        val T = io.embodit.spatialoffice.core.xlsx.Borders.TOP; val B = io.embodit.spatialoffice.core.xlsx.Borders.BOTTOM
+        eachSelected { rr, cc ->
+            val cur = book.borderMask(sheet, rr, cc)
+            val edge = (if (cc == r.c1) L else 0) or (if (cc == r.c2) R else 0) or (if (rr == r.r1) T else 0) or (if (rr == r.r2) B else 0)
+            val m = when (kind) {
+                "all" -> L or R or T or B
+                "outline" -> cur or edge
+                "bottom" -> if (rr == r.r2) cur or B else cur
+                else -> 0
+            }
+            book.setBorders(sheet, rr, cc, m)
+        }
+        android.util.Log.i(TAG, "BORDER $kind ${r.name()}")
+        changed()
+    }
 
     // ---- s20 column widths / row heights (the selected columns / rows)
     fun widen(deltaChars: Float) {

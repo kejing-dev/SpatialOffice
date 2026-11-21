@@ -638,3 +638,25 @@ stable_col_del	删掉这一列	Delete column
 stable_merge_right	和右边合并	Merge with right
 stable_merge_down	和下面合并	Merge with below
 stable_merge_no	旁边那格高矮或宽窄不一样，合并不了。	That neighbour spans different rows or columns, so they can't merge.
+# M3 sheets + zoom
+fill_down	向下填充 Ctrl+D	Fill down Ctrl+D
+fill_right	向右填充 Ctrl+R	Fill right Ctrl+R
+fill_series	填充序列	Fill series
+fill_nothing	没有可以填的格子。选几格再试，第一行或第一列是要复制的内容。	Nothing to fill. Select a few cells; the first row or column is what gets copied.
+fill_done	填好了 %1$d 格	Filled %1$d cells
+series_nothing	选区里先写一两个开头，比如 1、2，或者一个日期。	Start the selection with one or two values, like 1, 2 or a date.
+menu_borders	边框	Borders
+border_all	全部框线	All borders
+border_outline	外框	Outside border
+border_bottom	下框线	Bottom border
+border_none	无框线	No border
+merge_cells	合并单元格	Merge cells
+unmerge_cells	取消合并	Unmerge cells
+merge_refused	选两格以上才能合并。	Select two or more cells to merge.
+merged	合并了 %1$s，只留左上角的内容	Merged %1$s; only the top-left value stays
+zoom_menu	缩放	Zoom
+zoom_in	放大 Ctrl+=	Zoom in Ctrl+=
+zoom_out	缩小 Ctrl+-	Zoom out Ctrl+-
+zoom_fit_width	适合宽度 Ctrl+0	Fit width Ctrl+0
+zoom_100	100% Ctrl+0	100% Ctrl+0
+zoom_fit_window	适合窗口 Ctrl+0	Fit window Ctrl+0

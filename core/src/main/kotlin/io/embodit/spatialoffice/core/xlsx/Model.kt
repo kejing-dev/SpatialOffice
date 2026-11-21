@@ -107,3 +107,11 @@ object A1 {
     fun rangeName(r1: Int, c1: Int, r2: Int, c2: Int): String =
         if (r1 == r2 && c1 == c2) name(r1, c1) else name(r1, c1) + ":" + name(r2, c2)
 }
+
+/** v0.5.0 (s26): sides of a cell border, as bits. */
+object Borders {
+    const val LEFT = 1
+    const val RIGHT = 2
+    const val TOP = 4
+    const val BOTTOM = 8
+}

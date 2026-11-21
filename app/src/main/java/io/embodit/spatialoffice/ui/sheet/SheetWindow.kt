@@ -147,7 +147,8 @@ fun SheetWindow(tag: String? = null) {
             Column(Modifier.fillMaxWidth().weight(1f).padding(start = 32.dp, end = 32.dp, bottom = 52.dp)) {
                 FormulaBar(s, edit, Modifier.fillMaxWidth())
                 Box(Modifier.height(10.dp))
-                SheetGrid(s, edit, 0, null, Modifier.fillMaxWidth().weight(1f))
+                // v0.5.0 (s41): the grid at the window's zoom (frozen rows, headers and hit-testing scale with it)
+                Box(Modifier.fillMaxWidth().weight(1f)) { io.embodit.spatialoffice.ui.Zoomed(s) { SheetGrid(s, edit, 0, null, Modifier.fillMaxSize()) } }
                 Box(Modifier.height(10.dp))
                 SheetPicker(graph, s, edit)
             }
@@ -176,6 +177,8 @@ fun sheetKeys(graph: Graph, s: SheetSession, edit: CellEdit, e: KeyEvent): Boole
         e.isCtrlPressed && !edit.editing && e.key == Key.X -> { copyCells(graph, s, cut = true); true }
         e.isCtrlPressed && !edit.editing && e.key == Key.V -> { pasteCells(graph, s); edit.load(s); true }
         e.isCtrlPressed && !edit.editing && e.key == Key.A -> { s.selectAll(); edit.load(s); true }
+        // v0.5.0 (s24): Ctrl+D fill down, Ctrl+R fill right ([Edit ▾ ▸ Fill ›] has both)
+        e.isCtrlPressed && !edit.editing && (e.key == Key.D || e.key == Key.R) -> { fillCells(graph, s, e.key == Key.D); edit.load(s); true }
         e.isCtrlPressed && !edit.editing && arrow != null -> { edit.commit(s); s.jump(arrow.first, arrow.second, e.isShiftPressed); edit.load(s); true }
         e.isCtrlPressed || e.isAltPressed -> false
         e.key == Key.Enter || e.key == Key.NumPadEnter -> { move(if (e.isShiftPressed) -1 else 1, 0); true }
@@ -324,24 +327,50 @@ private fun GridRow(s: SheetSession, edit: CellEdit?, r: Int, cols: List<Int>, r
     val h = rowHeight(s, r)
     Row(modifier.height(h)) {
         HeadCell((r + 1).toString(), HEAD_W, h, r in sel.r1..sel.r2, "row-${r + 1}") { edit?.commit(s); s.selectRow(r); edit?.load(s) }
+        // v0.5.0 (s25): a merged range is one box across its columns (drawn at its first column in view); its value is
+        // the top-left cell's and shows in its top row; the rows below continue the box without inner lines
+        val merges = remember(s.version, s.sheet) { if (s.isCsv) emptyList() else runCatching { book.merges(s.sheet) }.getOrDefault(emptyList()) }
+        val segs = remember(r, cols, merges) {
+            val out = ArrayList<Pair<List<Int>, IntArray?>>()
+            var i = 0
+            while (i < cols.size) {
+                val c = cols[i]
+                val m = merges.firstOrNull { r in it[0]..it[2] && c in it[1]..it[3] }
+                val span = if (m == null) listOf(c) else cols.subList(i, cols.size).takeWhile { it <= m[3] }
+                out.add(span to m)
+                i += span.size
+            }
+            out
+        }
         Row(scroll) {
-            cols.forEach { c ->
-                val cell = book.cell(s.sheet, r, c)
-                val active = r == s.row && c == s.col
-                val inSel = sel.contains(r, c)
+            segs.forEach { (span, m) ->
+                val c = span.first()
+                val tRow = m?.get(0) ?: r
+                val tCol = m?.get(1) ?: c
+                val cell = book.cell(s.sheet, tRow, tCol)
+                val active = if (m != null) s.row in m[0]..m[2] && s.col in m[1]..m[3] else r == s.row && c == s.col
+                val inSel = sel.contains(r, c) || (m != null && span.any { sel.contains(r, it) })
                 val inRange = range != null && r >= range[0] && r <= range[2] && c >= range[1] && c <= range[3]
-                val fill = if (s.isCsv) null else book.fillRgb(s.sheet, r, c)
+                val fill = if (s.isCsv) null else book.fillRgb(s.sheet, tRow, tCol)
                 val base = if (fill != null) Color(0xFF000000 or fill.toLong()) else if (inRange) Ink.Range else Color.Transparent
-                val edges = if (inSel && s.isRange) booleanArrayOf(r == sel.r1, c == sel.c2, r == sel.r2, c == sel.c1) else null
+                val last = span.last()
+                val edges = if (inSel && s.isRange) booleanArrayOf(r == sel.r1, last >= sel.c2, r == sel.r2, c <= sel.c1) else null
                 val alignEnd = when (cell.hAlign) { "right" -> true; "left", "center" -> false; else -> cell.kind == CellKind.NUMBER }
+                val lines = if (m == null) null else booleanArrayOf(r == m[0], true, r == m[2], true)
+                val ruled = if (s.isCsv) 0 else (book.borderMask(s.sheet, r, c) and (io.embodit.spatialoffice.core.xlsx.Borders.LEFT or io.embodit.spatialoffice.core.xlsx.Borders.TOP or io.embodit.spatialoffice.core.xlsx.Borders.BOTTOM)) or
+                    (book.borderMask(s.sheet, r, last) and io.embodit.spatialoffice.core.xlsx.Borders.RIGHT)
+                val showText = m == null || r == m[0]
                 Box(
-                    Modifier.width(colWidth(s, c)).height(h)
+                    Modifier.width(span.fold(0.dp) { acc, cc -> acc + colWidth(s, cc) }).height(h)
                         .background(base)
                         .background(if (inSel && (s.isRange || active)) Ink.SelectFill else Color.Transparent)
-                        .border(if (active) 2.dp else 0.5.dp, if (active) Ink.Select else Ink.Line)
+                        .then(if (lines == null || active) Modifier.border(if (active) 2.dp else 0.5.dp, if (active) Ink.Select else Ink.Line) else Modifier.gridLines(lines))
+                        .fileBorders(ruled)
                         .rangeEdges(edges)
                         .noKeyFocus().clickable {
-                            edit?.commit(s); s.select(r, c); edit?.load(s)
+                            edit?.commit(s)
+                            if (m != null) { s.select(m[0], m[1]); s.extendTo(m[2], m[3]) } else s.select(r, c)
+                            edit?.load(s)
                             runCatching { edit?.focus?.requestFocus() }
                         }
                         .semantics { contentDescription = "cell-" + A1.name(r, c) }
@@ -349,7 +378,7 @@ private fun GridRow(s: SheetSession, edit: CellEdit?, r: Int, cols: List<Int>, r
                     contentAlignment = when { cell.hAlign == "center" -> Alignment.Center; alignEnd -> Alignment.CenterEnd; else -> Alignment.CenterStart },
                 ) {
                     // a cell shows what fits, like every spreadsheet; the full value is in the formula bar (wrapped cells: as many lines as the row holds)
-                    Text(
+                    if (showText) Text(
                         if (active && edit?.editing == true) edit.value.text else cell.display,
                         style = cellTextStyle(cell, s.book.defaultFontPt()),
                         maxLines = if (cell.wrap) 20 else 1, softWrap = cell.wrap,
@@ -376,6 +405,29 @@ fun cellTextStyle(cell: io.embodit.spatialoffice.core.xlsx.Cell, defaultPt: Floa
             else -> null
         },
     )
+}
+
+/** The thin grid line of a merged box: only the sides that are its outer edge (top, right, bottom, left). */
+private fun Modifier.gridLines(sides: BooleanArray): Modifier = drawWithContent {
+    drawContent()
+    val w = 0.5.dp.toPx()
+    val c = Ink.Line
+    if (sides[0]) drawRect(c, size = androidx.compose.ui.geometry.Size(size.width, w))
+    if (sides[1]) drawRect(c, topLeft = androidx.compose.ui.geometry.Offset(size.width - w, 0f), size = androidx.compose.ui.geometry.Size(w, size.height))
+    if (sides[2]) drawRect(c, topLeft = androidx.compose.ui.geometry.Offset(0f, size.height - w), size = androidx.compose.ui.geometry.Size(size.width, w))
+    if (sides[3]) drawRect(c, size = androidx.compose.ui.geometry.Size(w, size.height))
+}
+
+/** s26: the file's own cell borders, drawn as dark 1.5 dp lines on the sides in [mask] ([io.embodit.spatialoffice.core.xlsx.Borders] bits). */
+private fun Modifier.fileBorders(mask: Int): Modifier = if (mask == 0) this else drawWithContent {
+    drawContent()
+    val w = 1.5.dp.toPx()
+    val c = Ink.Text
+    val b = io.embodit.spatialoffice.core.xlsx.Borders
+    if (mask and b.TOP != 0) drawRect(c, size = androidx.compose.ui.geometry.Size(size.width, w))
+    if (mask and b.RIGHT != 0) drawRect(c, topLeft = androidx.compose.ui.geometry.Offset(size.width - w, 0f), size = androidx.compose.ui.geometry.Size(w, size.height))
+    if (mask and b.BOTTOM != 0) drawRect(c, topLeft = androidx.compose.ui.geometry.Offset(0f, size.height - w), size = androidx.compose.ui.geometry.Size(size.width, w))
+    if (mask and b.LEFT != 0) drawRect(c, size = androidx.compose.ui.geometry.Size(w, size.height))
 }
 
 /** The 2 dp blue box around a selected range: each cell on its edge draws that side (top, right, bottom, left). */
@@ -448,6 +500,19 @@ fun copyCells(graph: Graph, s: SheetSession, cut: Boolean) {
     }.onFailure { android.util.Log.w(io.embodit.spatialoffice.platform.TAG, "CLIP set failed: $it") }
     android.util.Log.i(io.embodit.spatialoffice.platform.TAG, "CLIP ${if (cut) "cut" else "copy"} ${s.selection.name()} ${text.length} chars")
     graph.say(s, graph.str(if (cut) R.string.cells_cut else R.string.cells_copied, s.selection.name()))
+}
+
+/** s24 Ctrl+D / Ctrl+R / [Edit ▸ Fill ›]: copies the first row / column of the selection into the rest. */
+fun fillCells(graph: Graph, s: SheetSession, down: Boolean) {
+    val n = s.fill(down)
+    graph.say(s, if (n == 0) graph.str(R.string.fill_nothing) else graph.str(R.string.fill_done, n))
+}
+
+/** s24 [Edit ▸ Fill › Series]: down when the selection is taller than wide, else right. */
+fun fillSeries(graph: Graph, s: SheetSession) {
+    val r = s.selection
+    val n = s.fillSeries(down = r.rows >= r.cols)
+    graph.say(s, if (n == 0) graph.str(R.string.series_nothing) else graph.str(R.string.fill_done, n))
 }
 
 /** Ctrl+V / [Edit ▸ Paste]: cells copied here (formulas moved by the offset), or text from another app split at tabs and line breaks. */
@@ -542,6 +607,12 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
                     MenuEntry(tr(R.string.edit_cut), "sheet/cut") { edit.commit(s); copyCells(graph, s, cut = true) },
                     MenuEntry(tr(R.string.edit_paste), "sheet/paste") { run { pasteCells(graph, s) } },
                     MenuEntry(tr(R.string.edit_find), "sheet/find") { edit.commit(s); graph.show(s, Overlay.Find(Win.SHEET)) },
+                    // v0.5.0 (s24): Ctrl+D / Ctrl+R and series fill
+                    io.embodit.spatialoffice.ui.subMenu(tr(R.string.menu_fill), "sheet/fill", listOf(
+                        MenuEntry(tr(R.string.fill_down), "sheet/fill-down") { run { fillCells(graph, s, true) } },
+                        MenuEntry(tr(R.string.fill_right), "sheet/fill-right") { run { fillCells(graph, s, false) } },
+                        MenuEntry(tr(R.string.fill_series), "sheet/fill-series") { run { fillSeries(graph, s) } },
+                    )),
                     MenuEntry(tr(R.string.menu_history), "sheet/history") { edit.commit(s); graph.show(s, Overlay.History(Win.SHEET)) },
                 ))
                 ToolMenu(
@@ -563,7 +634,15 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
                 ToolMenu(tr(R.string.menu_color), "sheet/color", enabled = !s.isCsv, entries =
                     colorEntries("sheet/color", cell.colorRgb, { rgb -> run { s.setFontColor(rgb) } }) + FILLS.map { (label, rgb) ->
                         MenuEntry(if (rgb == null) tr(label) else tr(R.string.fill_color, tr(label)), "sheet/fill-item") { run { s.setFill(rgb) } }
-                    })
+                    } + listOf(
+                        // v0.5.0 (s26): borders in the lower part of the fill menu, no new button
+                        io.embodit.spatialoffice.ui.subMenu(tr(R.string.menu_borders), "sheet/borders", listOf(
+                            MenuEntry(tr(R.string.border_all), "sheet/border-all") { run { s.setBorders("all") } },
+                            MenuEntry(tr(R.string.border_outline), "sheet/border-outline") { run { s.setBorders("outline") } },
+                            MenuEntry(tr(R.string.border_bottom), "sheet/border-bottom") { run { s.setBorders("bottom") } },
+                            MenuEntry(tr(R.string.border_none), "sheet/border-none") { run { s.setBorders("none") } },
+                        )),
+                    ))
                 ToolIcon(R.drawable.ic_sigma, tr(R.string.autosum), onClick = {
                     edit.commit(s); if (s.autoSum() == null) graph.say(s, graph.str(R.string.no_num)); edit.load(s)
                 })
@@ -579,7 +658,11 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
                     MenuEntry(tr(R.string.delete_row), "sheet/delete-row") { run { s.deleteRow() } },
                     MenuEntry(tr(R.string.insert_col), "sheet/insert-col") { run { s.insertColumn() } },
                     MenuEntry(tr(R.string.delete_col), "sheet/delete-col") { run { s.deleteColumn() } },
-                ) + if (s.isCsv) emptyList() else listOf(
+                ) + if (s.isCsv) emptyList() else listOfNotNull(
+                    // v0.5.0 (s25): merge the selection / split the merged cell under it
+                    if (s.isRange) MenuEntry(tr(R.string.merge_cells), "sheet/merge") { run { if (!s.merge()) graph.say(s, graph.str(R.string.merge_refused)) else graph.say(s, graph.str(R.string.merged, s.selection.name())) } } else null,
+                    if (s.mergeHere() != null || (s.isRange && s.book.merges(s.sheet).any { m -> m[0] <= s.selection.r2 && m[2] >= s.selection.r1 && m[1] <= s.selection.c2 && m[3] >= s.selection.c1 }))
+                        MenuEntry(tr(R.string.unmerge_cells), "sheet/unmerge") { run { s.unmerge() } } else null,
                     // s20: widths and heights of the selected columns / rows
                     MenuEntry(tr(R.string.col_wider), "sheet/col-wider") { run { s.widen(2f) } },
                     MenuEntry(tr(R.string.col_narrower), "sheet/col-narrower") { run { s.widen(-2f) } },

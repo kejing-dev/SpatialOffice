@@ -637,4 +637,25 @@
     <string name="stable_merge_right" formatted="false">和右边合并</string>
     <string name="stable_merge_down" formatted="false">和下面合并</string>
     <string name="stable_merge_no" formatted="false">旁边那格高矮或宽窄不一样，合并不了。</string>
+    <string name="fill_down" formatted="false">向下填充 Ctrl+D</string>
+    <string name="fill_right" formatted="false">向右填充 Ctrl+R</string>
+    <string name="fill_series" formatted="false">填充序列</string>
+    <string name="fill_nothing" formatted="false">没有可以填的格子。选几格再试，第一行或第一列是要复制的内容。</string>
+    <string name="fill_done">填好了 %1$d 格</string>
+    <string name="series_nothing" formatted="false">选区里先写一两个开头，比如 1、2，或者一个日期。</string>
+    <string name="menu_borders" formatted="false">边框</string>
+    <string name="border_all" formatted="false">全部框线</string>
+    <string name="border_outline" formatted="false">外框</string>
+    <string name="border_bottom" formatted="false">下框线</string>
+    <string name="border_none" formatted="false">无框线</string>
+    <string name="merge_cells" formatted="false">合并单元格</string>
+    <string name="unmerge_cells" formatted="false">取消合并</string>
+    <string name="merge_refused" formatted="false">选两格以上才能合并。</string>
+    <string name="merged">合并了 %1$s，只留左上角的内容</string>
+    <string name="zoom_menu" formatted="false">缩放</string>
+    <string name="zoom_in" formatted="false">放大 Ctrl+=</string>
+    <string name="zoom_out" formatted="false">缩小 Ctrl+-</string>
+    <string name="zoom_fit_width" formatted="false">适合宽度 Ctrl+0</string>
+    <string name="zoom_100" formatted="false">100% Ctrl+0</string>
+    <string name="zoom_fit_window" formatted="false">适合窗口 Ctrl+0</string>
 </resources>

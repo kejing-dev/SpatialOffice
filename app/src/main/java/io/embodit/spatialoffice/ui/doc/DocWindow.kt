@@ -1,5 +1,8 @@
 package io.embodit.spatialoffice.ui.doc
 
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.layout.onSizeChanged
 import io.embodit.spatialoffice.platform.typingTarget
 import io.embodit.spatialoffice.ui.noKeyFocus
@@ -239,8 +242,18 @@ fun DocWindow(tag: String? = null) {
         val focus = remember(s) { DocFocus() }
         Column(Modifier.fillMaxSize().onPreviewKeyEvent { e -> docKeys(graph, s, focus, e) }) {
             EditorTitleBar(graph, Win.DOC, s)
-            Box(Modifier.fillMaxWidth().weight(1f).padding(start = 32.dp, end = 32.dp, bottom = 56.dp), contentAlignment = Alignment.TopCenter) {
-                Paper(s, focus, Modifier.width(760.dp).fillMaxSize(), graph = graph) { graph.windows.focus(graph.refOf(s)) }
+            // v0.5.0 (d43): the paper at the window's zoom (100 % = fits the window's width); wider than the window scrolls sideways
+            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f).padding(start = 32.dp, end = 32.dp, bottom = 56.dp)) {
+                val paperW = 760.dp * (s.zoom / 100f)
+                val wide = paperW > maxWidth
+                Box(
+                    Modifier.fillMaxSize().then(if (wide) Modifier.horizontalScroll(rememberScrollState()) else Modifier),
+                    contentAlignment = Alignment.TopCenter,
+                ) {
+                    io.embodit.spatialoffice.ui.Zoomed(s) {
+                        Paper(s, focus, Modifier.width(760.dp).fillMaxHeight(), graph = graph) { graph.windows.focus(graph.refOf(s)) }
+                    }
+                }
             }
         }
         DocToolbar(graph, s, focus)

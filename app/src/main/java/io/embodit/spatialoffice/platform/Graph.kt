@@ -793,7 +793,8 @@ class Graph(val app: Application) {
             " open=[" + files.entries.joinToString(",") { e -> "${e.tag}:${e.kind}:${byTag[e.tag]?.ref?.name}:${windows.state[WinRef(winOf(FileKind.valueOf(e.kind)), e.tag)] ?: "-"}" } + "]" +
             " chartOf=$chartTag objBox=${deck?.dragBox} sel=${deck?.selected} docPicked=${doc?.picked}" +
             " range=${sheet?.selection?.name()} sheets=${sheet?.book?.sheetNames} find=${(doc ?: sheet ?: deck)?.findHit} drafts=${drafts.count()} pending=${pendingRecover.size}" +
-            " textSel=${deck?.textSel} rot=${deck?.pickedShape()?.rotation} hist=${listOfNotNull(doc, sheet, deck).joinToString(",") { "${it.kind}:${history.list(it.ref.key).size}" }}"
+            " textSel=${deck?.textSel} rot=${deck?.pickedShape()?.rotation} hist=${listOfNotNull(doc, sheet, deck).joinToString(",") { "${it.kind}:${history.list(it.ref.key).size}" }}" +
+            " zoom=${listOfNotNull(doc, sheet, deck).joinToString(",") { "${it.kind}:${it.zoom}" }} merges=${sheet?.takeIf { !it.isCsv }?.let { s -> runCatching { s.book.merges(s.sheet).joinToString("+") { io.embodit.spatialoffice.core.xlsx.A1.rangeName(it[0], it[1], it[2], it[3]) } }.getOrNull() }}"
 
     companion object {
         fun from(context: Context): Graph = (context.applicationContext as SpatialApplication).graph
