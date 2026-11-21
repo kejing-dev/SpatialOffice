@@ -23,8 +23,11 @@ import io.embodit.spatialoffice.core.files.FileKind
 import io.embodit.spatialoffice.core.pptx.PptxDeck
 import io.embodit.spatialoffice.core.pptx.SlideLayoutKind
 import io.embodit.spatialoffice.core.pptx.TextPara
+import io.embodit.spatialoffice.core.pptx.Shape
+import io.embodit.spatialoffice.core.pptx.ShapeKind
 import io.embodit.spatialoffice.core.text.HtmlText
 import io.embodit.spatialoffice.core.text.PlainDoc
+import io.embodit.spatialoffice.core.text.RichText
 import io.embodit.spatialoffice.core.text.Span
 import io.embodit.spatialoffice.core.xlsx.CellRect
 import io.embodit.spatialoffice.core.xlsx.ClipCell
@@ -38,7 +41,14 @@ import java.io.File
 /** What the document window draws, whatever the file type underneath. */
 sealed class UiBlock {
     abstract val id: Int
-    data class Para(override val id: Int, val style: ParaStyle, val spans: List<Span>, val editable: Boolean, val why: String?, val align: Int = 0) : UiBlock()
+    /**
+     * M2: [level] list level 0–8, [indentTw] left indent (twips), [lineSpacing] 240 = single (null = the file's), [spaceBefore] /
+     * [spaceAfter] twips (null = the file's), [baseSizeHp] the size in half-points of text without a size of its own.
+     */
+    data class Para(
+        override val id: Int, val style: ParaStyle, val spans: List<Span>, val editable: Boolean, val why: String?, val align: Int = 0,
+        val level: Int = 0, val indentTw: Int = 0, val lineSpacing: Int? = null, val spaceBefore: Int? = null, val spaceAfter: Int? = null, val baseSizeHp: Int = 22,
+    ) : UiBlock()
     /** [widthPct]: share of the text width, 10–100. */
     data class Table(override val id: Int, val rows: List<List<String>>, val widthPct: Int = 100) : UiBlock()
     /** [widthEmu] / [heightEmu]: the size the file gives the picture (0 = unknown, shown at the text width). */
@@ -53,6 +63,9 @@ sealed class UiBlock {
  * speaker notes. [start] / [len]: the characters matched in that text.
  */
 data class FindHit(val a: Int, val b: Int = 0, val c: Int = 0, val start: Int, val len: Int)
+
+/** d17: one step of [Increase indent] for a paragraph that is not a list item: 420 twips (two characters of 10.5 pt). */
+const val INDENT_STEP_TW = 420
 
 /** One open file. Edits go through the session so dirty state, undo and recomposition stay in one place. */
 abstract class Session(ref: FileRef, val kind: FileKind) {
@@ -196,7 +209,10 @@ class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File)
         docx?.let { d ->
             return d.blocks.map { b ->
                 when (b) {
-                    is Paragraph -> UiBlock.Para(b.id, b.style, b.runs.map { Span(it.text, it.bold, it.italic, it.underline, it.src, it.strike) }, b.editable, b.readOnlyWhy, b.align)
+                    is Paragraph -> UiBlock.Para(
+                        b.id, b.style, b.runs.map { Span(it.text, it.bold, it.italic, it.underline, it.src, it.strike, it.color, it.highlight, it.size) }, b.editable, b.readOnlyWhy, b.align,
+                        b.level, b.indentTw, b.lineSpacing, b.spaceBefore, b.spaceAfter, b.baseSizeHp,
+                    )
                     is TableBlock -> UiBlock.Table(b.id, b.rows, b.widthPct)
                     is ImageBlock -> UiBlock.Image(b.id, images.getOrPut(b.part) { d.partBytes(b.part)?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() } }, b.widthEmu, b.heightEmu)
                     is OpaqueBlock -> UiBlock.Opaque(b.id, b.kind)
@@ -218,7 +234,60 @@ class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File)
 
     init { counted() }
 
-    private fun runs(spans: List<Span>) = spans.map { Run(it.text, it.bold, it.italic, it.underline, it.src, it.strike) }
+    private fun runs(spans: List<Span>) = spans.map { Run(it.text, it.bold, it.italic, it.underline, it.src, it.strike, it.color, it.highlight, it.size) }
+
+    private fun para(id: Int): Paragraph? = docx?.blocks?.firstOrNull { it.id == id } as? Paragraph
+
+    /** M2: [f] over characters [a, b) of paragraph [id]: the [Text ▾] / [Colour ▾] tools and their debug commands. */
+    fun formatRange(id: Int, a: Int, b: Int, f: (List<Span>, Int, Int, UiBlock.Para) -> List<Span>): Boolean {
+        val p = blocks().firstOrNull { it.id == id } as? UiBlock.Para ?: return false
+        if (!richText || !p.editable || b <= a) return false
+        val next = f(p.spans, a, b, p)
+        if (next == p.spans) return false
+        setParagraph(p.id, next, p.style)
+        android.util.Log.i(TAG, "DOCTEXT format para=${p.id} range=$a..$b")
+        return true
+    }
+
+    /** d17: list level of a bulleted / numbered paragraph (Tab / Shift+Tab, Paragraph ▸ indent). False when nothing changed. */
+    fun setListLevel(id: Int, level: Int): Boolean {
+        val d = docx ?: return false
+        val p = para(id)?.takeIf { it.editable && (it.style == ParaStyle.BULLET || it.style == ParaStyle.NUMBERED) } ?: return false
+        val l = level.coerceIn(0, 8)
+        if (l == p.level) return false
+        mark(""); d.setListLevel(id, l); changed()
+        android.util.Log.i(TAG, "PARA level $id ${p.level}->$l")
+        return true
+    }
+
+    /** d17: [Increase / Decrease indent]: a list item changes level, any other paragraph moves by [INDENT_STEP_TW]. */
+    fun indent(id: Int, more: Boolean): Boolean {
+        val p = para(id)?.takeIf { it.editable } ?: return false
+        if (p.style == ParaStyle.BULLET || p.style == ParaStyle.NUMBERED) return setListLevel(id, p.level + if (more) 1 else -1)
+        val tw = (p.indentTw + if (more) INDENT_STEP_TW else -INDENT_STEP_TW).coerceIn(0, INDENT_STEP_TW * 10)
+        if (tw == p.indentTw) return false
+        mark(""); docx?.setIndent(id, tw); changed()
+        android.util.Log.i(TAG, "PARA indent $id ${p.indentTw}->$tw")
+        return true
+    }
+
+    /** d19: line spacing (240 = single, 360 = 1.5 lines; null = as the style has it). */
+    fun setLineSpacing(id: Int, line: Int?): Boolean {
+        val p = para(id)?.takeIf { it.editable } ?: return false
+        if (p.lineSpacing == line) return false
+        mark(""); docx?.setLineSpacing(id, line); changed()
+        android.util.Log.i(TAG, "PARA line $id ${p.lineSpacing}->$line")
+        return true
+    }
+
+    /** d19: space before and after the paragraph (twips; null = as the style has it). */
+    fun setParaSpacing(id: Int, before: Int?, after: Int?): Boolean {
+        val p = para(id)?.takeIf { it.editable } ?: return false
+        if (p.spaceBefore == before && p.spaceAfter == after) return false
+        mark(""); docx?.setParaSpacing(id, before, after); changed()
+        android.util.Log.i(TAG, "PARA spacing $id $before/$after")
+        return true
+    }
 
     fun setParagraph(id: Int, spans: List<Span>, style: ParaStyle, align: Int? = null) {
         mark("p$id")
@@ -562,6 +631,26 @@ class SheetSession(ref: FileRef, kind: FileKind, bytes: ByteArray) : Session(ref
     // formats act on the whole selection (s17: "fill + bold on B2:D5 reads back on 12 cells")
     fun setBold(bold: Boolean) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setBold(sheet, r, c, bold) }; changed() }
     fun setFill(rgb: Int?) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setFill(sheet, r, c, rgb) }; changed() }
+    // s23 (M2): font of the selection, all from Text ▾ / Colour ▾
+    fun setItalic(on: Boolean) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setItalic(sheet, r, c, on) }; changed() }
+    fun setUnderline(on: Boolean) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setUnderline(sheet, r, c, on) }; changed() }
+    fun setStrike(on: Boolean) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setStrike(sheet, r, c, on) }; changed() }
+    fun setFontColor(rgb: Int?) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setFontColor(sheet, r, c, rgb) }; changed() }
+    fun setFontSize(pt: Float) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setFontSize(sheet, r, c, pt) }; changed() }
+    /** Larger / smaller: every selected cell one place along the size ladder from its own size. */
+    fun stepFontSize(steps: Int) {
+        if (isCsv) return
+        mark("")
+        val base = book.defaultFontPt()
+        eachSelected { r, c ->
+            val hp = Math.round((book.cell(sheet, r, c).fontPt ?: base) * 2)
+            book.setFontSize(sheet, r, c, io.embodit.spatialoffice.core.text.FontSizes.step(hp, steps) / 2f)
+        }
+        changed()
+    }
+    fun clearFont() { if (isCsv) return; mark(""); eachSelected { r, c -> book.clearFont(sheet, r, c) }; changed() }
+    /** True when every selected cell has it (the active cell when one is selected). */
+    fun allSelected(test: (io.embodit.spatialoffice.core.xlsx.Cell) -> Boolean): Boolean { var all = true; eachSelected { r, c -> if (!test(book.cell(sheet, r, c))) all = false }; return all }
     /** s22: "left" / "center" / "right" / null (general). */
     fun setHAlign(align: String?) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setHAlign(sheet, r, c, align) }; changed() }
     fun setWrap(wrap: Boolean) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setWrap(sheet, r, c, wrap) }; changed() }
@@ -775,15 +864,153 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
 
     fun image(part: String): Bitmap? = images.getOrPut(part) { deck.partBytes(part)?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() } }
 
+    /** p17: a text box as one run of spans; every paragraph but the last ends with "\n", carried by its last span. */
+    fun spansOf(sh: Shape): List<Span> {
+        val out = ArrayList<Span>()
+        sh.paras.forEachIndexed { i, p ->
+            val runs = (p.runs ?: listOf(Span(p.text))).filter { it.text.isNotEmpty() }.toMutableList()
+            if (i < sh.paras.size - 1) {
+                if (runs.isEmpty()) runs.add((out.lastOrNull() ?: Span("")).copy(text = "\n"))
+                else runs[runs.size - 1] = runs.last().copy(text = runs.last().text + "\n")
+            }
+            out.addAll(runs)
+        }
+        return out
+    }
+
+    /** Spans back into paragraphs (split at "\n"); paragraph i keeps level / bullet / alignment of the i-th one it replaces. */
+    fun parasFrom(old: Shape, spans: List<Span>): List<TextPara> {
+        val groups = ArrayList<List<Span>>()
+        var cur = ArrayList<Span>()
+        for (sp in spans) {
+            var t = sp.text
+            while (true) {
+                val k = t.indexOf('\n')
+                if (k < 0) { if (t.isNotEmpty()) cur.add(sp.copy(text = t)); break }
+                if (k > 0) cur.add(sp.copy(text = t.substring(0, k)))
+                groups.add(cur); cur = ArrayList(); t = t.substring(k + 1)
+            }
+        }
+        groups.add(cur)
+        return groups.mapIndexed { i, runs ->
+            val o = old.paras.getOrNull(i) ?: old.paras.lastOrNull()
+            TextPara(runs.joinToString("") { it.text }, o?.level ?: 0, o?.bullet ?: false, runs, o?.align)
+        }
+    }
+
     fun setText(slide: Int, shapeId: Int, text: String) {
         val old = deck.slides[slide].shapes.firstOrNull { it.id == shapeId } ?: return
-        val lines = text.split('\n')
-        val paras = lines.mapIndexed { i, t -> TextPara(t, old.paras.getOrNull(i)?.level ?: old.paras.lastOrNull()?.level ?: 0, old.paras.getOrNull(i)?.bullet ?: old.paras.lastOrNull()?.bullet ?: false) }
-        if (paras == old.paras) return
+        val spans = spansOf(old)
+        if (RichText.text(spans) == text) return
         mark("s$slide.$shapeId")
-        deck.setShapeText(slide, shapeId, paras); edits++
+        deck.setShapeText(slide, shapeId, parasFrom(old, RichText.applyEdit(spans, text))); edits++
         changed()
     }
+
+    // ---- p17 / p18 / p22 / p24 (M2)
+
+    /** Characters selected in a slide text box while it is typed into ([end] exclusive). */
+    data class TextSel(val slide: Int, val shape: Int, val start: Int, val end: Int)
+    var textSel by mutableStateOf<TextSel?>(null)
+
+    /** The picked object when it holds editable text. */
+    fun pickedText(): Shape? = deck.slides.getOrNull(current)?.shapes?.firstOrNull {
+        it.id == selected && it.editable && (it.kind == ShapeKind.TITLE || it.kind == ShapeKind.BODY || it.kind == ShapeKind.TEXT)
+    }
+
+    /** What the text tools act on: the characters selected in the picked box, or all of its text when nothing is selected. */
+    fun textRange(sh: Shape): Pair<Int, Int> {
+        val len = RichText.text(spansOf(sh)).length
+        val t = textSel?.takeIf { it.slide == current && it.shape == sh.id }
+        val a = t?.start?.coerceIn(0, len) ?: 0
+        val b = t?.end?.coerceIn(0, len) ?: 0
+        return if (b > a) a to b else 0 to len
+    }
+
+    /** p17: [f] over the selected characters of the picked text box; one undo step. */
+    fun formatText(f: (List<Span>, Int, Int) -> List<Span>): Boolean {
+        val sh = pickedText() ?: return false
+        val spans = spansOf(sh)
+        val (a, b) = textRange(sh)
+        if (b <= a) return false
+        val next = f(spans, a, b)
+        if (next == spans) return false
+        mark(""); deck.setShapeText(current, sh.id, parasFrom(sh, next)); edits++; changed()
+        android.util.Log.i(TAG, "SLIDETEXT format slide=$current id=${sh.id} range=$a..$b")
+        return true
+    }
+
+    /** Value shared by all selected characters (null when they differ or nothing is picked). */
+    fun <T> textCommon(get: (Span) -> T?): T? {
+        val sh = pickedText() ?: return null
+        val (a, b) = textRange(sh)
+        return RichText.common(spansOf(sh), a, b, get)
+    }
+
+    /** Size of the selected characters in half-points (what Larger / Smaller start from). */
+    fun textBaseSize(): Int = textCommon { it.size } ?: pickedText()?.fontPt?.let { Math.round(it * 2) } ?: 36
+
+    /** Indices of the paragraphs the selection touches (all of them with nothing selected). */
+    private fun selParas(sh: Shape): IntRange {
+        val text = RichText.text(spansOf(sh))
+        val (a, b) = textRange(sh)
+        val first = text.substring(0, a).count { it == '\n' }
+        val last = text.substring(0, (b - 1).coerceAtLeast(a)).count { it == '\n' }
+        return first..maxOf(first, last)
+    }
+
+    private fun touched(sh: Shape): List<TextPara> { val r = selParas(sh); return sh.paras.filterIndexed { i, _ -> i in r } }
+
+    /** p18: alignment (0 left, 1 centre, 2 right) and / or bullets of the paragraphs the selection touches. */
+    fun setParaFormat(align: Int? = null, bullet: Boolean? = null): Boolean {
+        val sh = pickedText() ?: return false
+        val range = selParas(sh)
+        val paras = parasFrom(sh, spansOf(sh)).mapIndexed { i, p -> if (i in range) p.copy(align = align ?: p.align, bullet = bullet ?: p.bullet) else p }
+        if (paras.map { it.align to it.bullet } == sh.paras.map { it.align to it.bullet }) return false
+        mark(""); deck.setShapeText(current, sh.id, paras); edits++; changed()
+        android.util.Log.i(TAG, "SLIDETEXT para slide=$current id=${sh.id} paras=$range align=$align bullet=$bullet")
+        return true
+    }
+
+    /** Alignment shared by the touched paragraphs (null when they differ). */
+    fun paraAlign(): Int? = pickedText()?.let { sh -> touched(sh).map { it.align ?: sh.align }.distinct().singleOrNull() }
+    fun paraBullets(): Boolean = pickedText()?.let { sh -> touched(sh).let { t -> t.isNotEmpty() && t.all { it.bullet } } } ?: false
+
+    fun pickedShape(): Shape? = deck.slides.getOrNull(current)?.shapes?.firstOrNull { it.id == selected }
+
+    /** p22: fill of the picked drawn shape or text box (null = no fill). */
+    fun setFill(rgb: Int?): Boolean = shapeEdit("fill $rgb") { deck.setShapeFill(current, it.id, rgb) }
+    /** p22: outline colour (null = none) and width of the picked object. */
+    fun setLine(rgb: Int?, widthEmu: Long?): Boolean = shapeEdit("line $rgb $widthEmu") { deck.setShapeLine(current, it.id, rgb, widthEmu) }
+    /** p24: turn the picked object by [deg] (90° steps from the menu). */
+    fun rotateBy(deg: Int): Boolean = pickedShape()?.let { setRotation(it.rotation + deg) } ?: false
+    fun setRotation(deg: Int): Boolean {
+        val sh = pickedShape() ?: return false
+        val d = io.embodit.spatialoffice.core.layout.Rotation.norm(deg)
+        if (d == sh.rotation) return false
+        return shapeEdit("rotate $d") { deck.setShapeRotation(current, it.id, d) }
+    }
+
+    private fun shapeEdit(what: String, f: (Shape) -> Unit): Boolean {
+        val sh = pickedShape() ?: return false
+        val before = runCatching { serialize() }.getOrNull() ?: return false
+        val ok = runCatching { f(sh) }.onFailure { android.util.Log.i(TAG, "OBJSTYLE $what refused: ${it.message}") }.isSuccess
+        if (!ok) return false
+        pushUndo(before); edits++; changed()
+        android.util.Log.i(TAG, "OBJSTYLE $what slide=$current id=${sh.id}")
+        return true
+    }
+
+    /** While the rotation handle is held: the object id and the angle it is drawn at (written once on release). */
+    var dragRot by mutableStateOf<Pair<Int, Int>?>(null)
+    fun rotationOf(sh: Shape): Int = dragRot?.takeIf { it.first == sh.id }?.second ?: sh.rotation
+    fun beginRotate(id: Int): Boolean {
+        val sh = deck.slides.getOrNull(current)?.shapes?.firstOrNull { it.id == id } ?: return false
+        selected = id; dragRot = id to sh.rotation; return true
+    }
+    fun rotateTo(deg: Int) { dragRot = dragRot?.let { it.first to io.embodit.spatialoffice.core.layout.Rotation.norm(deg) } }
+    fun endRotate(): Boolean { val d = dragRot ?: return false; dragRot = null; return setRotation(d.second) }
+    fun cancelRotate() { dragRot = null }
 
     fun setNotes(slide: Int, text: String) {
         if (deck.slides[slide].notes == text) return
@@ -1013,9 +1240,8 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
         super.showHit(h)
     }
 
-    private fun parasFor(old: io.embodit.spatialoffice.core.pptx.Shape, text: String): List<TextPara> = text.split('\n').mapIndexed { i, t ->
-        TextPara(t, old.paras.getOrNull(i)?.level ?: old.paras.lastOrNull()?.level ?: 0, old.paras.getOrNull(i)?.bullet ?: old.paras.lastOrNull()?.bullet ?: false)
-    }
+    /** Find / replace keeps each run's format (M2): the edit goes through the same span model as typing. */
+    private fun parasFor(old: Shape, text: String): List<TextPara> = parasFrom(old, RichText.applyEdit(spansOf(old), text))
 
     override fun replaceHit(h: FindHit, q: String, repl: String, matchCase: Boolean): Boolean {
         val sl = deck.slides.getOrNull(h.a) ?: return false
@@ -1037,7 +1263,7 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
         for ((slide, shapeId) in hits.map { it.a to it.b }.distinct()) {
             val sl = deck.slides[slide]
             if (shapeId < 0) deck.setNotes(slide, sl.notes.replace(q, repl, ignoreCase = !matchCase))
-            else sl.shapes.firstOrNull { it.id == shapeId }?.let { sh -> deck.setShapeText(slide, sh.id, parasFor(sh, shapeText(sh).replace(q, repl, ignoreCase = !matchCase))) }
+            else sl.shapes.firstOrNull { it.id == shapeId }?.let { sh -> deck.setShapeText(slide, sh.id, parasFrom(sh, RichText.replaceAll(spansOf(sh), q, repl, !matchCase).first)) }
         }
         edits++; outsideEdits++; changed()
         return hits.size

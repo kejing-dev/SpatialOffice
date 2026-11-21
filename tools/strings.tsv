@@ -400,7 +400,7 @@ wc_paras	段落：%1$d	Paragraphs: %1$d
 wc_words	字数：%1$d	Words: %1$d
 word_count	字数统计	Word count
 how_to_format	排版和插入	Format and insert
-how_to_format_keys	Ctrl+B / I / U；底部工具条 [段落] [插入] [更多] 里有列表、对齐、图片、表格、删除线	Ctrl+B / I / U; the bottom toolbar's Paragraph, Insert and More hold lists, alignment, pictures, tables, strikethrough
+how_to_format_keys	Ctrl+B / I / U；选中文字后 [文字] 改字号、删除线，[颜色] 改颜色和高亮；列表里 Tab / Shift+Tab 换级别	Ctrl+B / I / U; select text, then Text sets size and strikethrough, Colour sets colour and highlight; Tab / Shift+Tab change a list item's level
 how_to_format_hand	捏住选中文字，再捏工具条上的按钮或菜单项	Pinch to select text, then pinch a toolbar button or menu item
 how_to_format_ctrl	扳机拖选文字，再扳机点工具条上的按钮或菜单项	Trigger-drag to select text, then trigger on a toolbar button or menu item
 how_to_find	查找替换、字数	Find, replace, word count
@@ -553,3 +553,43 @@ z_backward	下移一层	Send backward
 z_back	置于底层	Send to back
 find_slide_n	第 %1$d 页	Slide %1$d
 notes_short	备注	notes
+menu_text	文字	Text
+menu_color	颜色	Colour
+size_up	加大字号	Larger text
+size_down	减小字号	Smaller text
+size_pt	字号 %1$d 磅	Size %1$d pt
+clear_format	清除格式	Clear formatting
+text_color	文字 · %1$s	Text · %1$s
+hl_color	高亮 · %1$s	Highlight · %1$s
+color_clear	清除颜色	Clear colour
+cname_red	红	Red
+cname_orange	橙	Orange
+cname_green	绿	Green
+cname_blue	蓝	Blue
+cname_purple	紫	Purple
+cname_gray	灰	Grey
+cname_yellow	黄	Yellow
+cname_cyan	青	Cyan
+cname_white	白	White
+cname_black	黑	Black
+indent_more	增加缩进 Tab	Increase indent Tab
+indent_less	减少缩进 Shift+Tab	Decrease indent Shift+Tab
+line_spacing	行距 %1$s	Line spacing %1$s
+para_space	段前段后各 6 磅	6 pt before and after
+fill_color	填充 · %1$s	Fill · %1$s
+line_color	线条 · %1$s	Line · %1$s
+line_none	无线条	No line
+line_width	线宽 %1$s 磅	Line width %1$s pt
+rot_right	向右转 90°	Rotate right 90°
+rot_left	向左转 90°	Rotate left 90°
+rot_reset	转回正	Straighten
+obj_rotate	拖动旋转，15° 一档	Drag to rotate, 15° steps
+menu_history	历史版本…	Version history…
+hist_title	历史版本 · %1$s	Version history · %1$s
+hist_note	每次保存留一版，最多 %1$d 版，只存在这台设备上。	Every save keeps a version, up to %1$d, on this device only.
+hist_empty	还没有保存过的版本。保存一次，这里就有一条。	No saved versions yet. Save once and one shows up here.
+hist_newest	 · 最新	 · newest
+hist_kind_save	保存的版本 · %1$s	Saved · %1$s
+hist_kind_restore	恢复前的内容 · %1$s	Before a restore · %1$s
+hist_restore	恢复	Restore
+hist_restored	这一版回来了。保存后才写进文件，撤销能退回。	That version is back. Save to write it to the file; Undo takes it back.

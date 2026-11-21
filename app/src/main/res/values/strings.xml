@@ -403,7 +403,7 @@
     <string name="wc_words">字数：%1$d</string>
     <string name="word_count" formatted="false">字数统计</string>
     <string name="how_to_format" formatted="false">排版和插入</string>
-    <string name="how_to_format_keys" formatted="false">Ctrl+B / I / U；底部工具条 [段落] [插入] [更多] 里有列表、对齐、图片、表格、删除线</string>
+    <string name="how_to_format_keys" formatted="false">Ctrl+B / I / U；选中文字后 [文字] 改字号、删除线，[颜色] 改颜色和高亮；列表里 Tab / Shift+Tab 换级别</string>
     <string name="how_to_format_hand" formatted="false">捏住选中文字，再捏工具条上的按钮或菜单项</string>
     <string name="how_to_format_ctrl" formatted="false">扳机拖选文字，再扳机点工具条上的按钮或菜单项</string>
     <string name="how_to_find" formatted="false">查找替换、字数</string>
@@ -554,4 +554,44 @@
     <string name="z_back" formatted="false">置于底层</string>
     <string name="find_slide_n">第 %1$d 页</string>
     <string name="notes_short" formatted="false">备注</string>
+    <string name="menu_text" formatted="false">文字</string>
+    <string name="menu_color" formatted="false">颜色</string>
+    <string name="size_up" formatted="false">加大字号</string>
+    <string name="size_down" formatted="false">减小字号</string>
+    <string name="size_pt">字号 %1$d 磅</string>
+    <string name="clear_format" formatted="false">清除格式</string>
+    <string name="text_color">文字 · %1$s</string>
+    <string name="hl_color">高亮 · %1$s</string>
+    <string name="color_clear" formatted="false">清除颜色</string>
+    <string name="cname_red" formatted="false">红</string>
+    <string name="cname_orange" formatted="false">橙</string>
+    <string name="cname_green" formatted="false">绿</string>
+    <string name="cname_blue" formatted="false">蓝</string>
+    <string name="cname_purple" formatted="false">紫</string>
+    <string name="cname_gray" formatted="false">灰</string>
+    <string name="cname_yellow" formatted="false">黄</string>
+    <string name="cname_cyan" formatted="false">青</string>
+    <string name="cname_white" formatted="false">白</string>
+    <string name="cname_black" formatted="false">黑</string>
+    <string name="indent_more" formatted="false">增加缩进 Tab</string>
+    <string name="indent_less" formatted="false">减少缩进 Shift+Tab</string>
+    <string name="line_spacing">行距 %1$s</string>
+    <string name="para_space" formatted="false">段前段后各 6 磅</string>
+    <string name="fill_color">填充 · %1$s</string>
+    <string name="line_color">线条 · %1$s</string>
+    <string name="line_none" formatted="false">无线条</string>
+    <string name="line_width">线宽 %1$s 磅</string>
+    <string name="rot_right" formatted="false">向右转 90°</string>
+    <string name="rot_left" formatted="false">向左转 90°</string>
+    <string name="rot_reset" formatted="false">转回正</string>
+    <string name="obj_rotate" formatted="false">拖动旋转，15° 一档</string>
+    <string name="menu_history" formatted="false">历史版本…</string>
+    <string name="hist_title">历史版本 · %1$s</string>
+    <string name="hist_note">每次保存留一版，最多 %1$d 版，只存在这台设备上。</string>
+    <string name="hist_empty" formatted="false">还没有保存过的版本。保存一次，这里就有一条。</string>
+    <string name="hist_newest" formatted="false"> · 最新</string>
+    <string name="hist_kind_save">保存的版本 · %1$s</string>
+    <string name="hist_kind_restore">恢复前的内容 · %1$s</string>
+    <string name="hist_restore" formatted="false">恢复</string>
+    <string name="hist_restored" formatted="false">这一版回来了。保存后才写进文件，撤销能退回。</string>
 </resources>

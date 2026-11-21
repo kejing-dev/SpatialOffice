@@ -297,7 +297,10 @@ fun Tag(text: String, tag: String, color: Color = PicoTheme.colorScheme.fillSeco
 }
 
 /** One entry of a toolbar drop-down. [checked] adds a tick in front; disabled entries are left out by the caller. */
-data class MenuEntry(val label: String, val tag: String, val checked: Boolean = false, val onClick: () -> Unit)
+data class MenuEntry(val label: String, val tag: String, val checked: Boolean = false, val sub: List<MenuEntry>? = null, val onClick: () -> Unit = {})
+
+/** An entry that opens a second page of the same menu (M2: [Object ▸ Fill ›], [Line spacing ›]); the page starts with [‹ back]. */
+fun subMenu(label: String, tag: String, entries: List<MenuEntry>): MenuEntry = MenuEntry("$label  ›", tag, sub = entries)
 
 /**
  * Toolbar button that opens a menu of related tools (B31: keep a toolbar to a handful of groups, the rest behind
@@ -306,21 +309,28 @@ data class MenuEntry(val label: String, val tag: String, val checked: Boolean = 
 @Composable
 fun ToolMenu(label: String, tag: String, entries: List<MenuEntry>, enabled: Boolean = true, icon: Int? = null, above: Boolean = true, width: Dp? = null) {
     var open by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var page by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<MenuEntry?>(null) }
     Box {
-        ToolButton(label, tag, onClick = { open = !open }, enabled = enabled && entries.isNotEmpty(), icon = icon, width = width)
+        ToolButton(label, tag, onClick = { open = !open; page = null }, enabled = enabled && entries.isNotEmpty(), icon = icon, width = width)
         if (open) {
+            // the open page follows the entries as they are now (a tick moves after a pick)
+            val sub = page?.let { p -> entries.firstOrNull { it.tag == p.tag && it.sub != null }?.sub ?: p.sub }
             com.pico.spatial.ui.design.menu.Menu(
-                onDismissRequest = { open = false },
+                onDismissRequest = { open = false; page = null },
                 positionProvider = com.pico.spatial.ui.design.menu.rememberMenuPositionProvider(
                     horizontalPlacement = com.pico.spatial.ui.design.windows.popup.HorizontalPlacement.alignStart(),
                     verticalPlacement = if (above) com.pico.spatial.ui.design.windows.popup.VerticalPlacement.above(offset = (-12).dp)
                     else com.pico.spatial.ui.design.windows.popup.VerticalPlacement.below(offset = 8.dp),
                 ),
             ) {
-                entries.forEach { e ->
+                if (sub != null) com.pico.spatial.ui.design.menu.MenuItem(
+                    title = { Txt("‹  " + page!!.label.removeSuffix("  ›"), "$tag/back") },
+                    onClick = { page = null },
+                )
+                (sub ?: entries).forEach { e ->
                     com.pico.spatial.ui.design.menu.MenuItem(
                         title = { Txt((if (e.checked) "✓ " else "") + e.label, "$tag/item") },
-                        onClick = { open = false; e.onClick() },
+                        onClick = { if (e.sub != null) page = e else { open = false; page = null; e.onClick() } },
                     )
                 }
             }

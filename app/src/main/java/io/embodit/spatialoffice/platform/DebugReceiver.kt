@@ -2,6 +2,8 @@ package io.embodit.spatialoffice.platform
 
 import io.embodit.spatialoffice.core.xlsx.A1
 import io.embodit.spatialoffice.core.pptx.SlideLayoutKind
+import io.embodit.spatialoffice.core.text.Attr
+import io.embodit.spatialoffice.core.text.RichText
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -216,6 +218,77 @@ object DebugReceiver {
             "back" -> g.onBack("debug")
             // notes <text>: the current slide's speaker notes, as typed into the notes field
             "notes" -> g.deck?.let { it.setNotes(it.current, arg) }
+            // ---- v0.4.0 (M2): each command calls the function its menu entry / key calls
+            // docfmt <i> <a>-<b>|all <op> [v]: on the i-th editable paragraph's characters a..b; op = color RRGGBB|none,
+            // highlight yellow|green|cyan|none, size-up, size-down, size <pt>, clear, strike|bold|italic|underline 1|0
+            "docfmt" -> g.doc?.let { d ->
+                val p = arg.split(" ")
+                val para = d.blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }[p[0].toInt()]
+                val len = RichText.text(para.spans).length
+                val (a, b) = if (p[1] == "all") 0 to len else p[1].split("-").map { it.toInt().coerceIn(0, len) }.let { it[0] to it[1] }
+                val v = p.getOrNull(3)
+                fun attr(x: Attr) = d.formatRange(para.id, a, b) { sp, x0, x1, _ -> RichText.setAttr(sp, x0, x1, x, v != "0") }
+                val ok = when (p[2]) {
+                    "color" -> d.formatRange(para.id, a, b) { sp, x0, x1, _ -> RichText.setColor(sp, x0, x1, v?.takeIf { it != "none" }?.toInt(16)) }
+                    "highlight" -> d.formatRange(para.id, a, b) { sp, x0, x1, _ -> RichText.setHighlight(sp, x0, x1, v?.takeIf { it != "none" }) }
+                    "size-up" -> d.formatRange(para.id, a, b) { sp, x0, x1, pp -> RichText.stepSize(sp, x0, x1, 1, pp.baseSizeHp) }
+                    "size-down" -> d.formatRange(para.id, a, b) { sp, x0, x1, pp -> RichText.stepSize(sp, x0, x1, -1, pp.baseSizeHp) }
+                    "size" -> d.formatRange(para.id, a, b) { sp, x0, x1, _ -> RichText.setSize(sp, x0, x1, (v!!.toFloat() * 2).toInt()) }
+                    "clear" -> d.formatRange(para.id, a, b) { sp, x0, x1, _ -> RichText.clearFormat(sp, x0, x1) }
+                    "strike" -> attr(Attr.STRIKE)
+                    "bold" -> attr(Attr.BOLD)
+                    "italic" -> attr(Attr.ITALIC)
+                    "underline" -> attr(Attr.UNDERLINE)
+                    else -> false
+                }
+                val after = d.blocks().firstOrNull { it.id == para.id } as? UiBlock.Para
+                Log.i(TAG, "DOCTEXT debug ${p[2]} ok=$ok spans=" + after?.spans?.joinToString("|") { sp -> sp.text.take(12) + ":c=" + (sp.color?.let { c -> String.format("%06X", c) }) + ":h=" + sp.highlight + ":sz=" + sp.size + ":b=" + sp.bold + ":s=" + sp.strike })
+            }
+            // doclevel <i> tab|shift-tab (what the keys do in a list item), docindent <i> more|less, docline <i> <240|276|360|480|none>, docspace <i> <before>,<after>|none
+            "doclevel" -> g.doc?.let { d -> val (i, k) = arg.split(" "); val p = d.blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }[i.toInt()]; d.setListLevel(p.id, p.level + if (k == "shift-tab") -1 else 1) }
+            "docindent" -> g.doc?.let { d -> val (i, k) = arg.split(" "); val p = d.blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }[i.toInt()]; d.indent(p.id, k != "less") }
+            "docline" -> g.doc?.let { d -> val (i, k) = arg.split(" "); val p = d.blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }[i.toInt()]; d.setLineSpacing(p.id, k.toIntOrNull()) }
+            "docspace" -> g.doc?.let { d ->
+                val (i, k) = arg.split(" "); val p = d.blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }[i.toInt()]
+                val v = k.split(",").map { it.toIntOrNull() }; d.setParaSpacing(p.id, v.getOrNull(0), v.getOrNull(1))
+            }
+            // history doc|sheet|slides: the version list; hist-restore <win> <n>: [Restore] on the n-th version counted from the oldest (1 = first)
+            "history" -> g.session(win(arg))?.let { g.show(it, Overlay.History(win(arg))) }
+            "hist-restore" -> { val (w, n) = arg.split(" "); g.session(win(w))?.let { s -> g.versions(s).reversed().getOrNull(n.toInt() - 1)?.let { v -> g.restoreVersion(s, v) } } }
+            // font italic|underline|strike|bold 1|0, font-color RRGGBB|none, font-size <pt>|up|down, font-clear: Text / Colour menus on the selected cells
+            "font" -> g.sheet?.let { s -> val (k, v) = arg.split(" "); val on = v != "0"; when (k) { "italic" -> s.setItalic(on); "underline" -> s.setUnderline(on); "strike" -> s.setStrike(on); else -> s.setBold(on) } }
+            "font-color" -> g.sheet?.setFontColor(arg.takeIf { it.isNotEmpty() && it != "none" }?.toInt(16))
+            "font-size" -> g.sheet?.let { s -> when (arg) { "up" -> s.stepFontSize(1); "down" -> s.stepFontSize(-1); else -> s.setFontSize(arg.toFloat()) } }
+            "font-clear" -> g.sheet?.clearFont()
+            // stext-sel <a>,<b>: select characters a..b of the picked slide text box (as the text field reports it)
+            "stext-sel" -> g.deck?.let { d -> val (a, b) = arg.split(",").map { it.toInt() }; d.textSel = DeckSession.TextSel(d.current, d.selected, a, b) }
+            // stext bold|italic|underline|strike | color RRGGBB|none | size up|down|<pt> | align 0|1|2 | bullet 1|0 | clear (Text / Colour menus on the picked text box)
+            "stext" -> g.deck?.let { d ->
+                val p = arg.split(" "); val v = p.getOrNull(1)
+                val ok = when (p[0]) {
+                    "bold" -> io.embodit.spatialoffice.ui.slides.slideToggle(d, Attr.BOLD)
+                    "italic" -> io.embodit.spatialoffice.ui.slides.slideToggle(d, Attr.ITALIC)
+                    "underline" -> io.embodit.spatialoffice.ui.slides.slideToggle(d, Attr.UNDERLINE)
+                    "strike" -> io.embodit.spatialoffice.ui.slides.slideToggle(d, Attr.STRIKE)
+                    "color" -> d.formatText { sp, a, b -> RichText.setColor(sp, a, b, v?.takeIf { it != "none" }?.toInt(16)) }
+                    "size" -> when (v) {
+                        "up", "down" -> { val base = d.textBaseSize(); d.formatText { sp, a, b -> RichText.stepSize(sp, a, b, if (v == "up") 1 else -1, base) } }
+                        else -> d.formatText { sp, a, b -> RichText.setSize(sp, a, b, (v!!.toFloat() * 2).toInt()) }
+                    }
+                    "align" -> d.setParaFormat(align = v!!.toInt())
+                    "bullet" -> d.setParaFormat(bullet = v != "0")
+                    "clear" -> d.formatText { sp, a, b -> RichText.clearFormat(sp, a, b) }
+                    else -> false
+                }
+                val sh = d.pickedText()
+                Log.i(TAG, "SLIDETEXT debug ${p[0]} ok=$ok runs=" + sh?.let { d.spansOf(it).joinToString("|") { sp -> sp.text.take(12) + ":c=" + (sp.color?.let { c -> String.format("%06X", c) }) + ":sz=" + sp.size + ":b=" + sp.bold + ":src=" + sp.src } } + " paras=" + sh?.paras?.joinToString { "a=" + it.align + ",bu=" + it.bullet })
+            }
+            // obj-fill RRGGBB|none, obj-line RRGGBB|none [pt], obj-rot <deg> (absolute), obj-rotby <deg>, rotdrag <deg> (the handle: press, drag to the angle, release)
+            "obj-fill" -> g.deck?.setFill(arg.takeIf { it.isNotEmpty() && it != "none" }?.toInt(16))
+            "obj-line" -> g.deck?.let { d -> val p = arg.split(" "); d.setLine(p[0].takeIf { it != "none" }?.toInt(16), p.getOrNull(1)?.toFloat()?.let { Math.round(it * 12700f).toLong() }) }
+            "obj-rot" -> g.deck?.setRotation(arg.toInt())
+            "obj-rotby" -> g.deck?.rotateBy(arg.toInt())
+            "rotdrag" -> g.deck?.let { d -> if (d.beginRotate(d.selected)) { d.rotateTo(io.embodit.spatialoffice.core.layout.Rotation.snap(arg.toFloat())); Log.i(TAG, "ROTATE debug ${d.selected} -> ${d.dragRot} changed=${d.endRotate()}") } }
             "dump" -> {}
             // v0.2.4 (q4-1): longest main-thread frame gap over <arg> seconds (baseline of the emulator's own load)
             "mainwatch" -> { val w = io.embodit.spatialoffice.ui.chart.MainWatch("baseline"); w.start(); android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ w.stop() }, (arg?.toLongOrNull() ?: 10L) * 1000) }

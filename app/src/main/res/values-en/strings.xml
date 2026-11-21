@@ -403,7 +403,7 @@
     <string name="wc_words">Words: %1$d</string>
     <string name="word_count" formatted="false">Word count</string>
     <string name="how_to_format" formatted="false">Format and insert</string>
-    <string name="how_to_format_keys" formatted="false">Ctrl+B / I / U; the bottom toolbar\'s Paragraph, Insert and More hold lists, alignment, pictures, tables, strikethrough</string>
+    <string name="how_to_format_keys" formatted="false">Ctrl+B / I / U; select text, then Text sets size and strikethrough, Colour sets colour and highlight; Tab / Shift+Tab change a list item\'s level</string>
     <string name="how_to_format_hand" formatted="false">Pinch to select text, then pinch a toolbar button or menu item</string>
     <string name="how_to_format_ctrl" formatted="false">Trigger-drag to select text, then trigger on a toolbar button or menu item</string>
     <string name="how_to_find" formatted="false">Find, replace, word count</string>
@@ -554,4 +554,44 @@
     <string name="z_back" formatted="false">Send to back</string>
     <string name="find_slide_n">Slide %1$d</string>
     <string name="notes_short" formatted="false">notes</string>
+    <string name="menu_text" formatted="false">Text</string>
+    <string name="menu_color" formatted="false">Colour</string>
+    <string name="size_up" formatted="false">Larger text</string>
+    <string name="size_down" formatted="false">Smaller text</string>
+    <string name="size_pt">Size %1$d pt</string>
+    <string name="clear_format" formatted="false">Clear formatting</string>
+    <string name="text_color">Text · %1$s</string>
+    <string name="hl_color">Highlight · %1$s</string>
+    <string name="color_clear" formatted="false">Clear colour</string>
+    <string name="cname_red" formatted="false">Red</string>
+    <string name="cname_orange" formatted="false">Orange</string>
+    <string name="cname_green" formatted="false">Green</string>
+    <string name="cname_blue" formatted="false">Blue</string>
+    <string name="cname_purple" formatted="false">Purple</string>
+    <string name="cname_gray" formatted="false">Grey</string>
+    <string name="cname_yellow" formatted="false">Yellow</string>
+    <string name="cname_cyan" formatted="false">Cyan</string>
+    <string name="cname_white" formatted="false">White</string>
+    <string name="cname_black" formatted="false">Black</string>
+    <string name="indent_more" formatted="false">Increase indent Tab</string>
+    <string name="indent_less" formatted="false">Decrease indent Shift+Tab</string>
+    <string name="line_spacing">Line spacing %1$s</string>
+    <string name="para_space" formatted="false">6 pt before and after</string>
+    <string name="fill_color">Fill · %1$s</string>
+    <string name="line_color">Line · %1$s</string>
+    <string name="line_none" formatted="false">No line</string>
+    <string name="line_width">Line width %1$s pt</string>
+    <string name="rot_right" formatted="false">Rotate right 90°</string>
+    <string name="rot_left" formatted="false">Rotate left 90°</string>
+    <string name="rot_reset" formatted="false">Straighten</string>
+    <string name="obj_rotate" formatted="false">Drag to rotate, 15° steps</string>
+    <string name="menu_history" formatted="false">Version history…</string>
+    <string name="hist_title">Version history · %1$s</string>
+    <string name="hist_note">Every save keeps a version, up to %1$d, on this device only.</string>
+    <string name="hist_empty" formatted="false">No saved versions yet. Save once and one shows up here.</string>
+    <string name="hist_newest" formatted="false"> · newest</string>
+    <string name="hist_kind_save">Saved · %1$s</string>
+    <string name="hist_kind_restore">Before a restore · %1$s</string>
+    <string name="hist_restore" formatted="false">Restore</string>
+    <string name="hist_restored" formatted="false">That version is back. Save to write it to the file; Undo takes it back.</string>
 </resources>

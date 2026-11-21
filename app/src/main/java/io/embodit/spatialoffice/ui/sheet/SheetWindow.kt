@@ -93,6 +93,8 @@ import io.embodit.spatialoffice.ui.ToolRow
 import io.embodit.spatialoffice.ui.ToolToggle
 import io.embodit.spatialoffice.ui.Txt
 import io.embodit.spatialoffice.ui.UndoRedo
+import io.embodit.spatialoffice.ui.colorEntries
+import io.embodit.spatialoffice.ui.sizeEntries
 import io.embodit.spatialoffice.ui.WindowFrame
 import io.embodit.spatialoffice.ui.commonKeys
 
@@ -165,6 +167,8 @@ fun sheetKeys(graph: Graph, s: SheetSession, edit: CellEdit, e: KeyEvent): Boole
     return when {
         e.isAltPressed && e.key == Key.Equals -> { edit.commit(s); if (s.autoSum() == null) graph.say(s, graph.str(R.string.no_num)); edit.load(s); true }
         e.isCtrlPressed && e.key == Key.B -> { s.setBold(!s.book.cell(s.sheet, s.row, s.col).bold); true }
+        e.isCtrlPressed && e.key == Key.I -> { s.setItalic(!s.book.cell(s.sheet, s.row, s.col).italic); true }
+        e.isCtrlPressed && e.key == Key.U -> { s.setUnderline(!s.book.cell(s.sheet, s.row, s.col).underline); true }
         e.isCtrlPressed && (e.key == Key.F || e.key == Key.H) -> { edit.commit(s); graph.show(s, Overlay.Find(Win.SHEET)); true }
         e.isCtrlPressed && !edit.editing && e.key == Key.C -> { copyCells(graph, s, cut = false); true }
         e.isCtrlPressed && !edit.editing && e.key == Key.X -> { copyCells(graph, s, cut = true); true }
@@ -345,7 +349,7 @@ private fun GridRow(s: SheetSession, edit: CellEdit?, r: Int, cols: List<Int>, r
                     // a cell shows what fits, like every spreadsheet; the full value is in the formula bar (wrapped cells: as many lines as the row holds)
                     Text(
                         if (active && edit?.editing == true) edit.value.text else cell.display,
-                        style = TextStyle(fontSize = 15.sp, lineHeight = 19.sp, color = if (cell.kind == CellKind.ERROR) Color(0xFFB3261E) else Ink.Text, fontWeight = if (cell.bold) FontWeight.Bold else null),
+                        style = cellTextStyle(cell, s.book.defaultFontPt()),
                         maxLines = if (cell.wrap) 20 else 1, softWrap = cell.wrap,
                         textAlign = when { cell.hAlign == "center" -> TextAlign.Center; alignEnd -> TextAlign.End; else -> TextAlign.Start },
                     )
@@ -353,6 +357,23 @@ private fun GridRow(s: SheetSession, edit: CellEdit?, r: Int, cols: List<Int>, r
             }
         }
     }
+}
+
+/** A cell's text (s23): bold, italic, underline, strikethrough, its font colour, its size relative to the workbook's default (15 sp). */
+fun cellTextStyle(cell: io.embodit.spatialoffice.core.xlsx.Cell, defaultPt: Float): TextStyle {
+    val scale = ((cell.fontPt ?: defaultPt) / defaultPt.coerceAtLeast(1f)).coerceIn(0.5f, 4f)
+    return TextStyle(
+        fontSize = (15f * scale).sp, lineHeight = (19f * scale).sp,
+        color = if (cell.kind == CellKind.ERROR) Color(0xFFB3261E) else cell.colorRgb?.let { io.embodit.spatialoffice.ui.TextPalette.rgb(it) } ?: Ink.Text,
+        fontWeight = if (cell.bold) FontWeight.Bold else null,
+        fontStyle = if (cell.italic) androidx.compose.ui.text.font.FontStyle.Italic else null,
+        textDecoration = when {
+            cell.underline && cell.strike -> androidx.compose.ui.text.style.TextDecoration.combine(listOf(androidx.compose.ui.text.style.TextDecoration.Underline, androidx.compose.ui.text.style.TextDecoration.LineThrough))
+            cell.underline -> androidx.compose.ui.text.style.TextDecoration.Underline
+            cell.strike -> androidx.compose.ui.text.style.TextDecoration.LineThrough
+            else -> null
+        },
+    )
 }
 
 /** The 2 dp blue box around a selected range: each cell on its edge draws that side (top, right, bottom, left). */
@@ -504,13 +525,22 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
         content = {
             Box(Modifier.focusRequester(keys).onPreviewKeyEvent { e -> commonKeys(graph, s, e) || sheetKeys(graph, s, edit, e) || typeIntoCell(s, edit, e) }.focusable()) {
             ToolRow {
-                ToolToggle(R.drawable.ic_text_bold, tr(R.string.bold), cell.bold, { on -> edit.commit(s); s.setBold(on) }, enabled = !s.isCsv)
+                // M2 s23: [Text ▾] takes the B button's place (B / I / U / strikethrough, sizes, clear formatting); the groups stay 8
+                ToolMenu(tr(R.string.menu_text), "sheet/text", enabled = !s.isCsv, entries = listOf(
+                    MenuEntry(tr(R.string.bold), "sheet/bold", checked = cell.bold) { run { s.setBold(!s.allSelected { it.bold }) } },
+                    MenuEntry(tr(R.string.italic), "sheet/italic", checked = cell.italic) { run { s.setItalic(!s.allSelected { it.italic }) } },
+                    MenuEntry(tr(R.string.underline), "sheet/underline", checked = cell.underline) { run { s.setUnderline(!s.allSelected { it.underline }) } },
+                    MenuEntry(tr(R.string.strike), "sheet/strike", checked = cell.strike) { run { s.setStrike(!s.allSelected { it.strike }) } },
+                ) + sizeEntries("sheet/text", Math.round((cell.fontPt ?: s.book.defaultFontPt()) * 2), { n -> run { s.stepFontSize(n) } }, { hp -> run { s.setFontSize(hp / 2f) } }) + listOf(
+                    MenuEntry(tr(R.string.clear_format), "sheet/clear-format") { run { s.clearFont() } },
+                ))
                 // v0.3.0: [Edit ▾] copy / cut / paste / find (each shortcut has its entry here)
                 ToolMenu(tr(R.string.menu_edit), "sheet/edit", entries = listOf(
                     MenuEntry(tr(R.string.edit_copy), "sheet/copy") { edit.commit(s); copyCells(graph, s, cut = false) },
                     MenuEntry(tr(R.string.edit_cut), "sheet/cut") { edit.commit(s); copyCells(graph, s, cut = true) },
                     MenuEntry(tr(R.string.edit_paste), "sheet/paste") { run { pasteCells(graph, s) } },
                     MenuEntry(tr(R.string.edit_find), "sheet/find") { edit.commit(s); graph.show(s, Overlay.Find(Win.SHEET)) },
+                    MenuEntry(tr(R.string.menu_history), "sheet/history") { edit.commit(s); graph.show(s, Overlay.History(Win.SHEET)) },
                 ))
                 ToolMenu(
                     tr(when (cell.fmt) { NumFmt.CURRENCY -> R.string.fmt_currency; NumFmt.PERCENT -> R.string.fmt_percent; NumFmt.DATE -> R.string.fmt_date; NumFmt.OTHER -> R.string.fmt_number; else -> R.string.fmt_general }),
@@ -527,9 +557,11 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
                         MenuEntry(tr(R.string.dec_less), "sheet/dec-less") { run { s.adjustDecimals(-1) } },
                     ),
                 )
-                ToolMenu(tr(R.string.menu_fill), "sheet/fill", enabled = !s.isCsv, entries = FILLS.map { (label, rgb) ->
-                    MenuEntry(tr(label), "sheet/fill-item") { run { s.setFill(rgb) } }
-                })
+                // M2: [Colour ▾] = text colours (s23) and the cell fills that were [Fill ▾]
+                ToolMenu(tr(R.string.menu_color), "sheet/color", enabled = !s.isCsv, entries =
+                    colorEntries("sheet/color", cell.colorRgb, { rgb -> run { s.setFontColor(rgb) } }) + FILLS.map { (label, rgb) ->
+                        MenuEntry(if (rgb == null) tr(label) else tr(R.string.fill_color, tr(label)), "sheet/fill-item") { run { s.setFill(rgb) } }
+                    })
                 ToolIcon(R.drawable.ic_sigma, tr(R.string.autosum), onClick = {
                     edit.commit(s); if (s.autoSum() == null) graph.say(s, graph.str(R.string.no_num)); edit.load(s)
                 })

@@ -67,6 +67,7 @@ fun SharedOverlays(graph: Graph, win: Win, tag: String? = null) {
         is Overlay.Compat -> if (s != null) CompatPanel(graph, s)
         is Overlay.Find -> if (s != null) FindSheet(graph, s)
         is Overlay.Recover -> if (s != null) RecoverDialog(graph, s)
+        is Overlay.History -> if (s != null) HistorySheet(graph, s)
         is Overlay.SheetRename -> (s as? SheetSession)?.let { SheetRenameSheet(graph, it) }
         is Overlay.SheetDelete -> (s as? SheetSession)?.let { SheetDeleteDialog(graph, it) }
         is Overlay.WordCount -> (s as? DocSession)?.let { WordCountDialog(graph, it) }
@@ -427,6 +428,44 @@ private fun RecoverDialog(graph: Graph, s: Session) {
         },
     )
 }
+
+/**
+ * d28: the file's saved versions, newest first (time, kind, size), each with [Restore]. Restoring keeps what the window
+ * holds now as a version first, then brings the old one back as an unsaved change (one undo step).
+ */
+@Composable
+private fun HistorySheet(graph: Graph, s: Session) {
+    val list = remember(s.ref.key, graph.historyVersion) { graph.versions(s) }
+    val fmt = remember { java.text.SimpleDateFormat("MM-dd HH:mm:ss", java.util.Locale.ROOT) }
+    LaunchedEffect(list.size) { android.util.Log.i(io.embodit.spatialoffice.platform.TAG, "HISTORY list ${s.ref.name} n=${list.size} kinds=${list.joinToString(",") { it.kind }}") }
+    Sheet(
+        modifier = Modifier.width(680.dp),
+        onDismissRequest = { graph.overlay = null },
+        leadingAction = { SheetClose { graph.overlay = null } },
+        title = { Txt(tr(R.string.hist_title, s.ref.name), "hist/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold, maxLines = 2) },
+        bottom = {
+            Txt(tr(R.string.hist_note, io.embodit.spatialoffice.platform.History.KEEP), "hist/note", Modifier.fillMaxWidth(), style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2)
+        },
+    ) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (list.isEmpty()) Txt(tr(R.string.hist_empty), "hist/empty", Modifier.fillMaxWidth().padding(vertical = 24.dp), style = PicoTheme.typography.bodyLarge, maxLines = 3)
+            list.forEachIndexed { i, v ->
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(16.dp)).background(PicoTheme.colorScheme.fillLight).padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Txt(fmt.format(java.util.Date(v.at)) + (if (i == 0) tr(R.string.hist_newest) else ""), "hist/time", style = PicoTheme.typography.titleMedium, maxLines = 1)
+                        Txt(tr(if (v.kind == io.embodit.spatialoffice.platform.History.KIND_BEFORE_RESTORE) R.string.hist_kind_restore else R.string.hist_kind_save, sizeLabel(v.size)), "hist/kind", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 1)
+                    }
+                    SecondaryButton(tr(R.string.hist_restore), "hist/restore", onClick = { graph.overlay = null; graph.restoreVersion(s, v) })
+                }
+            }
+        }
+    }
+}
+
+private fun sizeLabel(b: Long): String = if (b < 1024) "$b B" else if (b < 1024 * 1024) "${(b + 512) / 1024} KB" else String.format(java.util.Locale.ROOT, "%.1f MB", b / 1048576.0)
 
 @Composable
 private fun SheetRenameSheet(graph: Graph, s: SheetSession) {

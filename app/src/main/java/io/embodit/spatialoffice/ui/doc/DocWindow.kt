@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -92,6 +93,8 @@ import io.embodit.spatialoffice.ui.Txt
 import io.embodit.spatialoffice.ui.UndoRedo
 import io.embodit.spatialoffice.ui.WindowFrame
 import io.embodit.spatialoffice.ui.commonKeys
+import io.embodit.spatialoffice.ui.colorEntries
+import io.embodit.spatialoffice.ui.sizeEntries
 
 /** Which paragraph has the caret and what is selected in it; shared by the paper and the toolbar. */
 class DocFocus {
@@ -112,23 +115,61 @@ fun paraStyle(style: ParaStyle): TextStyle = when (style) {
 
 fun aligned(style: TextStyle, align: Int): TextStyle = if (align == 0) style else style.copy(textAlign = when (align) { 1 -> TextAlign.Center; 2 -> TextAlign.End; else -> TextAlign.Justify })
 
-/** Numbers of numbered-list paragraphs (1, 2, 3 … per run of consecutive numbered paragraphs), by block id. */
+/**
+ * Numbers of numbered-list paragraphs by block id: 1, 2, 3 … per run of consecutive list paragraphs, counted per level
+ * (M2 d17: a deeper level starts again at 1 and a shallower one carries on).
+ */
 fun listNumbers(all: List<UiBlock>): Map<Int, Int> {
     val out = HashMap<Int, Int>()
-    var n = 0
+    val n = IntArray(9)
     for (b in all) {
-        if (b is UiBlock.Para && b.style == ParaStyle.NUMBERED) { n++; out[b.id] = n } else n = 0
+        if (b is UiBlock.Para && (b.style == ParaStyle.NUMBERED || b.style == ParaStyle.BULLET)) {
+            val l = b.level.coerceIn(0, 8)
+            for (k in l + 1 until 9) n[k] = 0
+            if (b.style == ParaStyle.NUMBERED) { n[l]++; out[b.id] = n[l] }
+        } else n.fill(0)
     }
     return out
 }
 
+/** The list marker of [b] at its level: • ◦ ▪ for bullets; 1. a. i. for numbers (cycling every three levels). */
+fun listMarker(b: UiBlock.Para, numbers: Map<Int, Int>): String? = when (b.style) {
+    ParaStyle.BULLET -> listOf("•", "◦", "▪")[b.level % 3]
+    ParaStyle.NUMBERED -> {
+        val n = numbers[b.id] ?: 1
+        when (b.level % 3) { 0 -> "$n."; 1 -> ('a' + (n - 1) % 26) + "."; else -> roman(n) + "." }
+    }
+    else -> null
+}
+
+private fun roman(n: Int): String {
+    var v = n.coerceIn(1, 3999); val sb = StringBuilder()
+    for ((k, r) in listOf(1000 to "m", 900 to "cm", 500 to "d", 400 to "cd", 100 to "c", 90 to "xc", 50 to "l", 40 to "xl", 10 to "x", 9 to "ix", 5 to "v", 4 to "iv", 1 to "i")) while (v >= k) { sb.append(r); v -= k }
+    return sb.toString()
+}
+
+/** Page dp per twip of indent: the 672 dp text column stands for the 6.27 in (9026 twips) of an A4 text width. */
+const val DP_PER_TWIP = 672f / 9026f
+
+/** d17 / d19: where the paragraph starts (list level, indent) and the room above and below it. */
+fun paraPadding(b: UiBlock.Para): androidx.compose.foundation.layout.PaddingValues = androidx.compose.foundation.layout.PaddingValues(
+    start = (b.level * 28 + b.indentTw * DP_PER_TWIP).dp,
+    top = (4 + (b.spaceBefore ?: 0) * DP_PER_TWIP).dp,
+    bottom = (4 + (b.spaceAfter ?: 0) * DP_PER_TWIP).dp,
+)
+
+/** The paragraph's text style: its style's size and line height, scaled for its largest text and by its line spacing (d16 / d19). */
+fun paraTextStyle(b: UiBlock.Para): TextStyle {
+    val base = aligned(paraStyle(b.style), b.align)
+    val biggest = b.spans.maxOfOrNull { (it.size ?: b.baseSizeHp).toFloat() / b.baseSizeHp.coerceAtLeast(1) }?.coerceAtLeast(1f) ?: 1f
+    val spacing = (b.lineSpacing ?: 240) / 240f
+    return base.copy(lineHeight = (base.lineHeight.value * biggest * spacing).sp)
+}
+
 @Composable
 private fun Marker(b: UiBlock.Para, numbers: Map<Int, Int>) {
-    when (b.style) {
-        ParaStyle.BULLET -> Text("•", style = paraStyle(b.style), modifier = Modifier.width(26.dp))
-        ParaStyle.NUMBERED -> Text("${numbers[b.id] ?: 1}.", style = paraStyle(b.style), modifier = Modifier.width(30.dp))
-        else -> {}
-    }
+    val m = listMarker(b, numbers) ?: return
+    Text(m, style = paraTextStyle(b), modifier = Modifier.width(if (b.style == ParaStyle.BULLET) 26.dp else 34.dp))
 }
 
 /** Colour of a find hit (d41): a yellow marker, black text stays ≥ 4.5:1 on it. */
@@ -146,9 +187,13 @@ fun underlined(text: String, start: Int, len: Int, ink: androidx.compose.ui.grap
     return AnnotatedString.Builder(text).apply { addStyle(SpanStyle(color = ink, fontWeight = FontWeight.Bold, textDecoration = TextDecoration.Underline), start, start + len) }.toAnnotatedString()
 }
 
-fun annotated(spans: List<Span>): AnnotatedString = buildAnnotatedString {
+/** [spans] styled: bold / italic / underline / strikethrough, and (M2) colour, highlight and size relative to [baseHp] at [baseSp]. */
+fun annotated(spans: List<Span>, baseHp: Int = 22, baseSp: Float = 17f): AnnotatedString = buildAnnotatedString {
     for (s in spans) withStyle(
         SpanStyle(
+            color = s.color?.let { io.embodit.spatialoffice.ui.TextPalette.rgb(it) } ?: androidx.compose.ui.graphics.Color.Unspecified,
+            background = io.embodit.spatialoffice.ui.TextPalette.highlight(s.highlight) ?: androidx.compose.ui.graphics.Color.Unspecified,
+            fontSize = s.size?.let { (baseSp * it / baseHp.coerceAtLeast(1)).sp } ?: androidx.compose.ui.unit.TextUnit.Unspecified,
             fontWeight = if (s.bold) FontWeight.Bold else null,
             fontStyle = if (s.italic) FontStyle.Italic else null,
             textDecoration = when {
@@ -204,6 +249,34 @@ private fun toggle(s: DocSession, focus: DocFocus, attr: Attr) {
     s.setParagraph(p.id, RichText.setAttr(p.spans, a, b, attr, on), p.style)
 }
 
+/**
+ * M2: [f] over the selection of the paragraph with the caret; with only a caret, over the whole paragraph (as the
+ * B / I / U toggles do). [f] gets the spans, the range and the paragraph.
+ */
+fun formatDoc(s: DocSession, focus: DocFocus, f: (List<Span>, Int, Int, UiBlock.Para) -> List<Span>): Boolean {
+    if (!s.richText) return false
+    val p = focused(s, focus)?.takeIf { it.editable } ?: return false
+    val sel = focus.selection
+    val len = RichText.text(p.spans).length
+    val (a, b) = if (sel.collapsed) 0 to len else sel.min.coerceIn(0, len) to sel.max.coerceIn(0, len)
+    return s.formatRange(p.id, a, b, f)
+}
+
+/** Value shared by the selected characters (the whole paragraph with only a caret); null when mixed. */
+fun <T> docCommon(s: DocSession, focus: DocFocus, get: (Span) -> T?): T? {
+    val p = focused(s, focus) ?: return null
+    val sel = focus.selection
+    val len = RichText.text(p.spans).length
+    return if (sel.collapsed) RichText.common(p.spans, 0, len, get) else RichText.common(p.spans, sel.min.coerceIn(0, len), sel.max.coerceIn(0, len), get)
+}
+
+fun docStepSize(s: DocSession, focus: DocFocus, steps: Int) = formatDoc(s, focus) { sp, a, b, p -> RichText.stepSize(sp, a, b, steps, p.baseSizeHp) }
+fun docSetSize(s: DocSession, focus: DocFocus, hp: Int) = formatDoc(s, focus) { sp, a, b, _ -> RichText.setSize(sp, a, b, hp) }
+fun docSetColor(s: DocSession, focus: DocFocus, rgb: Int?) = formatDoc(s, focus) { sp, a, b, _ -> RichText.setColor(sp, a, b, rgb) }
+fun docSetHighlight(s: DocSession, focus: DocFocus, name: String?) = formatDoc(s, focus) { sp, a, b, _ -> RichText.setHighlight(sp, a, b, name) }
+fun docClearFormat(s: DocSession, focus: DocFocus) = formatDoc(s, focus) { sp, a, b, _ -> RichText.clearFormat(sp, a, b) }
+fun docToggle(s: DocSession, focus: DocFocus, attr: Attr) = toggle(s, focus, attr)
+
 private fun hasAttr(s: DocSession, focus: DocFocus, attr: Attr): Boolean {
     val p = focused(s, focus) ?: return false
     val sel = focus.selection
@@ -256,20 +329,22 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
 
 @Composable
 private fun ParaView(b: UiBlock.Para, numbers: Map<Int, Int> = emptyMap(), hit: io.embodit.spatialoffice.platform.FindHit? = null) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+    Row(Modifier.fillMaxWidth().padding(paraPadding(b))) {
         Marker(b, numbers)
-        Text(marked(annotated(b.spans), hit, b.id), style = aligned(paraStyle(b.style), b.align), modifier = Modifier.weight(1f))
+        Text(marked(annotatedOf(b), hit, b.id), style = paraTextStyle(b), modifier = Modifier.weight(1f))
         if (b.why != null && b.why != "html") Txt(tr(R.string.ph_readonly), "doc/readonly", Modifier.padding(start = 8.dp), style = PicoTheme.typography.labelMedium, color = Ink.Hint)
     }
 }
 
+fun annotatedOf(b: UiBlock.Para): AnnotatedString = annotated(b.spans, b.baseSizeHp, paraStyle(b.style).fontSize.value)
+
 @Composable
 private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: List<UiBlock>, numbers: Map<Int, Int>) {
     val requester = remember(b.id) { FocusRequester() }
-    var value by remember(b.id) { mutableStateOf(TextFieldValue(annotated(b.spans))) }
+    var value by remember(b.id) { mutableStateOf(TextFieldValue(annotatedOf(b))) }
     // model changed underneath (format toggle, undo, style): rebuild the styled text, keep the caret
     val text = RichText.text(b.spans)
-    val styled = marked(annotated(b.spans), s.findHit, b.id)
+    val styled = marked(annotatedOf(b), s.findHit, b.id)
     if (value.annotatedString != styled) {
         // same text: only the styling moved, so the caret and the input method's composing range stay as they are
         value = if (value.text == text) value.copy(annotatedString = styled) else TextFieldValue(styled, TextRange(text.length))
@@ -282,7 +357,7 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
             focus.want = -1; focus.wantCaret = -1
         }
     }
-    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+    Row(Modifier.fillMaxWidth().padding(paraPadding(b))) {
         Marker(b, numbers)
         BasicTextField(
             value = value,
@@ -302,12 +377,12 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
                     val spans = RichText.applyEdit(b.spans, nv.text)
                     s.setParagraph(b.id, spans, b.style)
                     // keep what the input method handed over (caret, composing range); only the styling is ours
-                    value = nv.copy(annotatedString = annotated(spans))
+                    value = nv.copy(annotatedString = annotated(spans, b.baseSizeHp, paraStyle(b.style).fontSize.value))
                     if (s.findHit?.a == b.id) s.findHit = null
                     focus.selection = nv.selection
                 }
             },
-            textStyle = aligned(paraStyle(b.style), b.align),
+            textStyle = paraTextStyle(b),
             cursorBrush = SolidColor(Ink.Select),
             modifier = Modifier.weight(1f).heightIn(min = 32.dp).focusRequester(requester)
                 .semantics { contentDescription = "paragraph-${b.id}" }
@@ -317,6 +392,12 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
                     val editable = all.filterIsInstance<UiBlock.Para>().filter { it.editable }
                     val i = editable.indexOfFirst { it.id == b.id }
                     when {
+                        // d17: Tab / Shift+Tab in a list item change its level (the caret stays where it is)
+                        e.key == Key.Tab && (b.style == ParaStyle.BULLET || b.style == ParaStyle.NUMBERED) -> {
+                            s.setListLevel(b.id, b.level + if (e.isShiftPressed) -1 else 1)
+                            focus.want = b.id; focus.wantCaret = value.selection.start
+                            true
+                        }
                         // Backspace at the very start of an empty paragraph removes it and goes to the previous one
                         e.key == Key.Backspace && value.text.isEmpty() && editable.size > 1 -> {
                             val prev = editable.getOrNull(i - 1) ?: editable.getOrNull(i + 1)
@@ -529,14 +610,32 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                 ToolToggle(R.drawable.ic_text_bold, tr(R.string.bold), hasAttr(s, focus, Attr.BOLD), { toggle(s, focus, Attr.BOLD) }, enabled = canEdit && s.richText)
                 ToolToggle(R.drawable.ic_text_italic, tr(R.string.italic), hasAttr(s, focus, Attr.ITALIC), { toggle(s, focus, Attr.ITALIC) }, enabled = canEdit && s.richText)
                 ToolToggle(R.drawable.ic_text_underline, tr(R.string.underline), hasAttr(s, focus, Attr.UNDERLINE), { toggle(s, focus, Attr.UNDERLINE) }, enabled = canEdit && s.richText)
+                // M2 d15 / d16 / d18: [Text ▾] sizes, strikethrough (moved from More), clear formatting; [Colour ▾] colours and highlights
+                ToolMenu(tr(R.string.menu_text), "doc/text", enabled = canEdit && s.richText, entries =
+                    sizeEntries("doc/text", docCommon(s, focus) { it.size ?: para?.baseSizeHp }, { docStepSize(s, focus, it) }, { docSetSize(s, focus, it) }) + listOf(
+                        MenuEntry(tr(R.string.strike), "doc/strike", checked = hasAttr(s, focus, Attr.STRIKE)) { toggle(s, focus, Attr.STRIKE) },
+                        MenuEntry(tr(R.string.clear_format), "doc/clear-format") { docClearFormat(s, focus) },
+                    ))
+                ToolMenu(tr(R.string.menu_color), "doc/color", enabled = canEdit && s.richText, entries =
+                    colorEntries("doc/color", docCommon(s, focus) { it.color }, { docSetColor(s, focus, it) }, docCommon(s, focus) { it.highlight }, { docSetHighlight(s, focus, it) }))
                 ToolMenu(tr(R.string.menu_paragraph), "doc/paragraph", enabled = canEdit && s.styled, entries = listOfNotNull(
                     MenuEntry(tr(R.string.bullets), "doc/bullets", checked = para?.style == ParaStyle.BULLET) { restyle(if (para?.style == ParaStyle.BULLET) ParaStyle.BODY else ParaStyle.BULLET) },
                     MenuEntry(tr(R.string.numbering), "doc/numbering", checked = para?.style == ParaStyle.NUMBERED) { restyle(if (para?.style == ParaStyle.NUMBERED) ParaStyle.BODY else ParaStyle.NUMBERED) },
                 ) + if (s.richText) listOf(
+                    // d17 indent / list level, d19 line spacing and space around the paragraph
+                    MenuEntry(tr(R.string.indent_more), "doc/indent-more") { if (para != null) { s.indent(para.id, true); focus.want = para.id } },
+                    MenuEntry(tr(R.string.indent_less), "doc/indent-less") { if (para != null) { s.indent(para.id, false); focus.want = para.id } },
                     MenuEntry(tr(R.string.align_left), "doc/align-left", checked = para?.align == 0) { align(0) },
                     MenuEntry(tr(R.string.align_center), "doc/align-center", checked = para?.align == 1) { align(1) },
                     MenuEntry(tr(R.string.align_right), "doc/align-right", checked = para?.align == 2) { align(2) },
                     MenuEntry(tr(R.string.align_justify), "doc/align-justify", checked = para?.align == 3) { align(3) },
+                ) + listOf(
+                    io.embodit.spatialoffice.ui.subMenu(tr(R.string.line_spacing, LINE_SPACINGS.firstOrNull { it.second == (para?.lineSpacing ?: 240) }?.first ?: "…"), "doc/line", LINE_SPACINGS.map { (label, line) ->
+                        MenuEntry(tr(R.string.line_spacing, label), "doc/line-$label", checked = (para?.lineSpacing ?: 240) == line) { if (para != null) { s.setLineSpacing(para.id, line); focus.want = para.id } }
+                    }),
+                    MenuEntry(tr(R.string.para_space), "doc/para-space", checked = para?.spaceBefore == 120 && para.spaceAfter == 120) {
+                        if (para != null) { if (para.spaceBefore == 120 && para.spaceAfter == 120) s.setParaSpacing(para.id, null, null) else s.setParaSpacing(para.id, 120, 120); focus.want = para.id }
+                    },
                 ) else emptyList())
                 ToolMenu(tr(R.string.menu_insert), "doc/insert", enabled = s.richText, entries = listOf(
                     MenuEntry(tr(R.string.ins_picture), "doc/picture") {
@@ -546,9 +645,10 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                     MenuEntry(tr(R.string.ins_table), "doc/table") { graph.show(s, Overlay.InsertTable(Win.DOC)) },
                 ))
                 ToolMenu(tr(R.string.more), "doc/more", entries = listOfNotNull(
-                    if (s.richText && canEdit) MenuEntry(tr(R.string.strike), "doc/strike", checked = hasAttr(s, focus, Attr.STRIKE)) { toggle(s, focus, Attr.STRIKE) } else null,
                     MenuEntry(tr(R.string.find_replace), "doc/find") { graph.show(s, Overlay.Find(Win.DOC)) },
                     MenuEntry(tr(R.string.word_count), "doc/wordcount") { graph.show(s, Overlay.WordCount(Win.DOC)) },
+                    // d28 version history
+                    MenuEntry(tr(R.string.menu_history), "doc/history") { graph.show(s, Overlay.History(Win.DOC)) },
                 ))
                 ToolDivider()
                 UndoRedo(s)
@@ -590,6 +690,9 @@ private fun styleName(st: ParaStyle): String = tr(
         ParaStyle.BODY -> R.string.style_body
     },
 )
+
+/** d19: the line spacings [Paragraph ▾] offers (label → w:line, 240 = single). */
+val LINE_SPACINGS = listOf("1.0" to 240, "1.15" to 276, "1.5" to 360, "2.0" to 480)
 
 /** Width of the paragraph-style button: fits the longest short name in both languages ("Heading 3", "Numbered"). */
 val STYLE_BUTTON_W = 120.dp

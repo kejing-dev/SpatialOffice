@@ -1,5 +1,28 @@
 package io.embodit.spatialoffice.ui.slides
 
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ParagraphStyle
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.TextUnit
+import io.embodit.spatialoffice.core.layout.Rotation
+import io.embodit.spatialoffice.core.pptx.TextPara
+import io.embodit.spatialoffice.core.text.Attr
+import io.embodit.spatialoffice.core.text.RichText
+import io.embodit.spatialoffice.core.text.Span
+import io.embodit.spatialoffice.ui.TextPalette
+import io.embodit.spatialoffice.ui.colorEntries
+import io.embodit.spatialoffice.ui.sizeEntries
+import io.embodit.spatialoffice.ui.subMenu
 import android.util.Log
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.heightIn
@@ -177,6 +200,10 @@ fun slideKeys(graph: io.embodit.spatialoffice.platform.Graph, s: DeckSession, e:
     if (e.type != KeyEventType.KeyDown) return false
     if (e.isCtrlPressed) return when {
         e.key == Key.F || e.key == Key.H -> { graph.show(s, io.embodit.spatialoffice.platform.Overlay.Find(Win.SLIDES)); true }
+        // p17: B / I / U on the selected characters of the picked text box (all its text when nothing is selected)
+        e.key == Key.B && s.pickedText() != null -> { slideToggle(s, Attr.BOLD); true }
+        e.key == Key.I && s.pickedText() != null -> { slideToggle(s, Attr.ITALIC); true }
+        e.key == Key.U && s.pickedText() != null -> { slideToggle(s, Attr.UNDERLINE); true }
         // p19: the picked object's shortcuts; a text field that has the keyboard keeps Ctrl+C / V for its text
         s.textEditing -> false
         e.key == Key.C && s.selected >= 0 -> { objCopy(graph, s); true }
@@ -302,6 +329,11 @@ fun SlideCanvas(s: DeckSession, index: Int, width: Dp, editable: Boolean, modifi
                 val b = if (editable) s.boxOf(sh) else UnitBox(sh.x, sh.y, sh.w, sh.h)
                 val w = (b.w * perEmu).coerceAtLeast(1f).dp
                 var box = Modifier.offset((b.x * perEmu).dp, (b.y * perEmu).dp).size(w, (b.h * perEmu).coerceAtLeast(1f).dp)
+                // p24: the object turned about its centre (while the handle is held, at the angle it is dragged to)
+                val rot = if (editable) s.rotationOf(sh) else sh.rotation
+                if (rot != 0) box = box.rotate(rot.toFloat())
+                // p22: its outline
+                sh.lineRgb?.let { rgb -> val lw = ((sh.lineWidthEmu ?: 12700L) * perEmu).coerceAtLeast(0.5f).dp; box = box.border(lw, TextPalette.rgb(rgb), geomShape(sh.geom, w)) }
                 sh.fillRgb?.takeIf { sh.kind != ShapeKind.PICTURE }?.let { rgb -> box = box.background(Color(0xFF000000 or rgb.toLong()), geomShape(sh.geom, w)) }
                 // press and drag anywhere on the object moves it; a click picks it
                 val move = if (canDrag) Modifier.objectDrag(s, sh.id, pxPerEmu, null) else Modifier
@@ -357,6 +389,30 @@ private fun PickedFrame(s: DeckSession, sh: Shape, perEmu: Float, pxPerEmu: Floa
     // above the object; below it when there is no room above
     val tabY = if (y >= 40.dp) y - 34.dp else minOf(y + h + 34.dp, slideH + 30.dp)
     MoveTab(x + w / 2, tabY, tr(R.string.obj_move), Modifier.objectDrag(s, sh.id, pxPerEmu, null), "slide-${sh.id}")
+    // p24: the rotation handle beside the move tab; the angle of the pointer about the object's centre, 15° steps
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val hx = x + w / 2 + 60.dp
+    val (px0, py0) = with(density) { (hx - (x + w / 2)).toPx() to (tabY - (y + h / 2)).toPx() }
+    RotateTab(hx, tabY, tr(R.string.obj_rotate), Modifier.dragTotal(
+        key = Triple(sh.id, "rotate", px0 to py0), name = "slide shape ${sh.id} rotate",
+        onStart = { s.beginRotate(sh.id) },
+        onTotal = { dx, dy ->
+            val start = s.deck.slides.getOrNull(s.current)?.shapes?.firstOrNull { it.id == sh.id }?.rotation ?: 0
+            val turn = Rotation.angle(0f, 0f, px0 + dx, py0 + dy) - Rotation.angle(0f, 0f, px0, py0)
+            s.rotateTo(Rotation.snap(start + turn))
+        },
+        onEnd = { s.endRotate() }, onCancel = { s.cancelRotate() },
+    ), "slide-${sh.id}")
+}
+
+@Composable
+private fun RotateTab(x: Dp, y: Dp, label: String, drag: Modifier, probe: String? = null) {
+    Box(
+        Modifier.offset(x - 24.dp, y - 24.dp).size(48.dp).probe(probe?.let { "$it-rotate" }).clip(androidx.compose.foundation.shape.CircleShape).background(Ink.Select).then(drag).semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        com.pico.spatial.ui.design.Icon(painter = androidx.compose.ui.res.painterResource(R.drawable.ic_rotate), contentDescription = null, modifier = Modifier.size(26.dp), tint = Color.White)
+    }
 }
 
 private fun shapeString(sh: Shape): String = sh.paras.joinToString("\n") { it.text }
@@ -396,30 +452,160 @@ private fun TapEdit(
     }
 }
 
+/** p17 / p18: the text of a box as styled text: each span's size, colour, B / I / U / strikethrough, each paragraph's alignment. */
+fun richShapeText(spans: List<Span>, paras: List<TextPara>, perPt: Float, base: TextStyle): AnnotatedString = buildAnnotatedString {
+    val text = RichText.text(spans)
+    var pStart = 0
+    var pi = 0
+    // paragraph styles first (their ranges include the "\n" that ends them), then the spans
+    while (pStart <= text.length) {
+        val nl = text.indexOf('\n', pStart).let { if (it < 0) text.length else it + 1 }
+        val align = paras.getOrNull(pi)?.align
+        if (align != null && nl > pStart) addStyle(ParagraphStyle(textAlign = when (align) { 1 -> TextAlign.Center; 2 -> TextAlign.End; else -> TextAlign.Start }), pStart, nl)
+        pi++
+        if (nl >= text.length) break
+        pStart = nl
+    }
+    for (sp in spans) withStyle(
+        SpanStyle(
+            fontSize = sp.size?.let { (it / 2f * perPt).sp } ?: TextUnit.Unspecified,
+            color = sp.color?.let { TextPalette.rgb(it) } ?: Color.Unspecified,
+            fontWeight = if (sp.bold) FontWeight.Bold else null,
+            fontStyle = if (sp.italic) FontStyle.Italic else null,
+            textDecoration = when {
+                sp.underline && sp.strike -> TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough))
+                sp.underline -> TextDecoration.Underline
+                sp.strike -> TextDecoration.LineThrough
+                else -> null
+            },
+        ),
+    ) { append(sp.text) }
+}
+
+/**
+ * p18: bullets drawn in front of bulleted paragraphs ("• ", indented by level) without being part of the text: the
+ * field and the caret map around them.
+ */
+class BulletMarks(private val paras: List<TextPara>) : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val t = text.text
+        val starts = ArrayList<Int>()
+        var i = 0
+        starts.add(0)
+        while (true) { val k = t.indexOf('\n', i); if (k < 0) break; starts.add(k + 1); i = k + 1 }
+        val prefix = starts.indices.map { pi -> paras.getOrNull(pi)?.takeIf { it.bullet }?.let { "  ".repeat(it.level) + "• " } ?: "" }
+        if (prefix.all { it.isEmpty() }) return TransformedText(text, OffsetMapping.Identity)
+        val out = AnnotatedString.Builder()
+        val o2t = IntArray(t.length + 1)
+        var added = 0
+        for ((pi, st) in starts.withIndex()) {
+            val en = starts.getOrNull(pi + 1) ?: t.length
+            if (prefix[pi].isNotEmpty()) {
+                val style = text.spanStyles.firstOrNull { it.start <= st && it.end > st }?.item
+                if (style != null) out.withStyle(style.copy(textDecoration = null)) { append(prefix[pi]) } else out.append(prefix[pi])
+                added += prefix[pi].length
+            }
+            for (o in st until en) o2t[o] = o + added
+            if (en > st) out.append(text.subSequence(st, en))
+        }
+        o2t[t.length] = t.length + added
+        val total = t.length + added
+        return TransformedText(out.toAnnotatedString(), object : OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int = o2t[offset.coerceIn(0, t.length)]
+            override fun transformedToOriginal(offset: Int): Int {
+                val tt = offset.coerceIn(0, total)
+                var lo = 0
+                for (o in 0..t.length) if (o2t[o] <= tt) lo = o else break
+                return lo
+            }
+        })
+    }
+}
+
 @Composable
 private fun ShapeText(s: DeckSession, slide: Int, sh: Shape, box: Modifier, move: Modifier, perPt: Float, canPick: Boolean, editable: Boolean) {
+    val spans = remember(s.version, sh) { s.spansOf(sh) }
+    val biggest = spans.maxOfOrNull { it.size ?: 0 }?.takeIf { it > 0 }?.let { it / 2f } ?: (sh.fontPt ?: if (sh.kind == ShapeKind.TITLE) 40f else 20f)
     val size = ((sh.fontPt ?: if (sh.kind == ShapeKind.TITLE) 40f else 20f) * perPt)
     val style = TextStyle(
-        fontSize = size.sp, lineHeight = (size * 1.25f).sp,
+        fontSize = size.sp, lineHeight = (biggest * perPt * 1.25f).sp,
         color = sh.colorRgb?.let { Color(0xFF000000 or it.toLong()) } ?: Ink.Text,
         fontWeight = if (sh.bold || sh.kind == ShapeKind.TITLE) FontWeight.Bold else null,
         textAlign = when (sh.align) { 1 -> TextAlign.Center; 2 -> TextAlign.End; else -> TextAlign.Start },
     )
     val align = if (sh.kind == ShapeKind.TITLE) Alignment.CenterStart else Alignment.TopStart
+    val rich = remember(spans, sh.paras, perPt) { richShapeText(spans, sh.paras, perPt, style) }
+    val marks = remember(sh.paras) { BulletMarks(sh.paras) }
     if (!editable) {
         // thumbnails, and text this version does not edit: still picked and moved like any object on the editing canvas
         val pick = if (canPick) move.clickable(interactionSource = remember(sh.id) { MutableInteractionSource() }, indication = null) { s.selected = sh.id } else Modifier
         Box(box.then(pick), contentAlignment = align) {
-            Text(sh.paras.joinToString("\n") { (if (it.bullet) "  ".repeat(it.level) + "• " else "") + it.text }, style = style, modifier = Modifier.fillMaxWidth())
+            Text(marks.filter(rich).text, style = style, modifier = Modifier.fillMaxWidth())
         }
         return
     }
-    TapEdit(
-        key = slide to sh.id, model = shapeString(sh), style = style, name = "slide-text-${sh.id}", whole = box.then(move), inner = Modifier, align = align,
+    RichTapEdit(
+        s = s, slide = slide, sh = sh, rich = rich, marks = marks, style = style, whole = box.then(move), align = align, perPt = perPt,
         hint = if (sh.fillRgb == null) tr(if (sh.kind == ShapeKind.TITLE) R.string.slide_title_ph else R.string.slide_body_ph) else null,
-        editable = true, onPick = { s.selected = sh.id }, onChange = { s.setText(slide, sh.id, it) },
-        onEditing = { s.textEditing = it }, hit = s.findHit?.takeIf { it.a == slide && it.b == sh.id },
+        hit = s.findHit?.takeIf { it.a == slide && it.b == sh.id },
     )
+}
+
+/**
+ * [TapEdit] for a text box with formatting (p17): read until clicked, then typed into; the field holds the styled text,
+ * reports its selection to the session (the [Text ▾] / [Colour ▾] tools act on it) and every edit goes through the
+ * span model, so a run keeps its format while the text around it changes.
+ */
+@Composable
+private fun RichTapEdit(
+    s: DeckSession, slide: Int, sh: Shape, rich: AnnotatedString, marks: BulletMarks, style: TextStyle, whole: Modifier, align: Alignment, perPt: Float,
+    hint: String?, hit: io.embodit.spatialoffice.platform.FindHit?,
+) {
+    val key = slide to sh.id
+    val name = "slide-text-${sh.id}"
+    var editing by remember(key) { mutableStateOf(false) }
+    var value by remember(key) { mutableStateOf(TextFieldValue(rich)) }
+    var hadFocus by remember(key) { mutableStateOf(false) }
+    if (value.annotatedString != rich) {
+        // the model changed (format, undo, find): same text keeps the caret and selection
+        value = if (value.text == rich.text) value.copy(annotatedString = rich) else TextFieldValue(rich, TextRange(rich.length))
+    }
+    val requester = remember(key) { FocusRequester() }
+    val outer = if (editing) whole
+    else whole.clickable(interactionSource = remember(key) { MutableInteractionSource() }, indication = null) { s.selected = sh.id; hadFocus = false; editing = true }.semantics { contentDescription = name }
+    Box(outer.border(1.dp, if (editing) Ink.Select else Color(0x22000000), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp), contentAlignment = align) {
+        if (value.text.isEmpty() && hint != null) Text(hint, style = style.copy(color = Ink.Hint), modifier = Modifier.fillMaxWidth())
+        if (editing) {
+            BasicTextField(
+                value = value,
+                onValueChange = { nv ->
+                    if (nv.text != value.text) s.setText(slide, sh.id, nv.text)
+                    // the styling comes back from the model on the next composition (same text: caret and composing range kept)
+                    value = if (nv.text == value.text) nv.copy(annotatedString = value.annotatedString) else nv
+                    s.textSel = DeckSession.TextSel(slide, sh.id, nv.selection.min, nv.selection.max)
+                },
+                textStyle = style,
+                cursorBrush = SolidColor(Ink.Select),
+                visualTransformation = marks,
+                modifier = Modifier.fillMaxWidth().focusRequester(requester)
+                    .onFocusChanged {
+                        if (it.isFocused) { hadFocus = true; s.selected = sh.id; s.textEditing = true; s.textSel = DeckSession.TextSel(slide, sh.id, value.selection.min, value.selection.max) }
+                        else if (hadFocus) { editing = false; s.textEditing = false }
+                    }
+                    .semantics { contentDescription = name },
+            )
+            LaunchedEffect(key) { repeat(5) { if (runCatching { requester.requestFocus() }.isSuccess) return@LaunchedEffect; kotlinx.coroutines.delay(60) } }
+        } else {
+            val shown = if (hit != null && hit.start + hit.len <= rich.length) io.embodit.spatialoffice.ui.doc.marked(rich, hit, hit.a) else rich
+            Text(marks.filter(shown).text, style = style, modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+/** p17: B / I / U / strikethrough on the picked text box's selected characters (on when not all of them have it). */
+fun slideToggle(s: DeckSession, attr: Attr): Boolean {
+    val on = s.textCommon { sp -> when (attr) { Attr.BOLD -> sp.bold; Attr.ITALIC -> sp.italic; Attr.UNDERLINE -> sp.underline; Attr.STRIKE -> sp.strike } } != true
+    return s.formatText { sp, a, b -> RichText.setAttr(sp, a, b, attr, on) }
 }
 
 /** A table on the slide: its cells as a grid over the frame. On the editing canvas a click types into a cell; a drag moves the table. */
@@ -443,6 +629,26 @@ private fun SlideTable(s: DeckSession, slide: Int, sh: Shape, box: Modifier, per
             }
         }
     }
+}
+
+/** p22 / p24: [Object ▾] fill ›, line ›, and the 90° turns (fill only for drawn shapes and text boxes). */
+@Composable
+private fun objectStyleEntries(s: DeckSession): List<MenuEntry> {
+    val sh = s.pickedShape() ?: return emptyList()
+    val canFill = sh.kind != ShapeKind.PICTURE && sh.table == null && sh.kind != ShapeKind.CHART && sh.kind != ShapeKind.OTHER
+    val fill = if (canFill) subMenu(tr(R.string.fill_color, sh.fillRgb?.let { v -> TextPalette.SHAPE.firstOrNull { it.second == v }?.let { tr(it.first) } } ?: if (sh.fillRgb == null) tr(R.string.fill_none) else "…"), "slides/fill",
+        TextPalette.SHAPE.map { (name, v) -> MenuEntry(tr(R.string.fill_color, tr(name)), "slides/fill-item", checked = sh.fillRgb == v) { s.setFill(v) } } +
+            listOf(MenuEntry(tr(R.string.fill_none), "slides/fill-none", checked = sh.fillRgb == null) { s.setFill(null) })) else null
+    val line = if (sh.kind != ShapeKind.CHART && sh.table == null && sh.kind != ShapeKind.OTHER) subMenu(tr(R.string.line_color, sh.lineRgb?.let { v -> TextPalette.SHAPE.firstOrNull { it.second == v }?.let { tr(it.first) } } ?: tr(R.string.line_none)), "slides/line",
+        TextPalette.SHAPE.map { (name, v) -> MenuEntry(tr(R.string.line_color, tr(name)), "slides/line-item", checked = sh.lineRgb == v) { s.setLine(v, sh.lineWidthEmu ?: TextPalette.EMU_PER_PT) } } +
+            listOf(MenuEntry(tr(R.string.line_none), "slides/line-none", checked = sh.lineRgb == null) { s.setLine(null, null) }) +
+            TextPalette.LINE_PT.map { pt -> val emu = Math.round(pt * TextPalette.EMU_PER_PT).toLong(); MenuEntry(tr(R.string.line_width, TextPalette.pt(pt)), "slides/line-w", checked = sh.lineWidthEmu == emu) { s.setLine(sh.lineRgb ?: 0x111111, emu) } }) else null
+    return listOfNotNull(
+        fill, line,
+        MenuEntry(tr(R.string.rot_right), "slides/rot-right") { s.rotateBy(90) },
+        MenuEntry(tr(R.string.rot_left), "slides/rot-left") { s.rotateBy(-90) },
+        if (sh.rotation != 0) MenuEntry(tr(R.string.rot_reset), "slides/rot-reset") { s.setRotation(0) } else null,
+    )
 }
 
 /** Colour presets for [Theme]: background (lt1), text (dk1), second text / accent pair, accents. */
@@ -481,6 +687,8 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
                 ))
                 ToolMenu(tr(R.string.menu_page), "slides/page", entries = listOfNotNull(
                     MenuEntry(tr(R.string.dup_slide), "slides/dup") { s.duplicateSlide() },
+                    // d28 version history (the slides toolbar has no More)
+                    MenuEntry(tr(R.string.menu_history), "slides/history") { graph.show(s, io.embodit.spatialoffice.platform.Overlay.History(Win.SLIDES)) },
                     if (s.current > 0) MenuEntry(tr(R.string.slide_up), "slides/up") { s.moveSlide(-1) } else null,
                     if (s.current < s.slideCount - 1) MenuEntry(tr(R.string.slide_down), "slides/down") { s.moveSlide(1) } else null,
                     MenuEntry(tr(R.string.delete_slide), "slides/delete") { if (!s.deleteSlide()) graph.say(s, graph.str(R.string.last_slide)) },
@@ -499,6 +707,24 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
                     if (s.canPaste) MenuEntry(tr(R.string.obj_paste), "slides/paste") { objPaste(graph, s) } else null,
                     MenuEntry(tr(R.string.edit_find), "slides/find") { graph.show(s, io.embodit.spatialoffice.platform.Overlay.Find(Win.SLIDES)) },
                 ))
+                // M2 p17 / p18: [Text ▾] B / I / U / strikethrough, sizes, alignment, bullets, clear formatting; [Colour ▾] text colours
+                val textOn = s.pickedText() != null && !s.readOnly
+                ToolMenu(tr(R.string.menu_text), "slides/text", enabled = textOn, entries = listOf(
+                    MenuEntry(tr(R.string.bold), "slides/bold", checked = s.textCommon { it.bold } == true) { slideToggle(s, Attr.BOLD) },
+                    MenuEntry(tr(R.string.italic), "slides/italic", checked = s.textCommon { it.italic } == true) { slideToggle(s, Attr.ITALIC) },
+                    MenuEntry(tr(R.string.underline), "slides/underline", checked = s.textCommon { it.underline } == true) { slideToggle(s, Attr.UNDERLINE) },
+                    MenuEntry(tr(R.string.strike), "slides/strike", checked = s.textCommon { it.strike } == true) { slideToggle(s, Attr.STRIKE) },
+                    subMenu(tr(R.string.size_pt, Math.round(s.textBaseSize() / 2f)), "slides/size", sizeEntries("slides/text", s.textCommon { it.size },
+                        { n -> val base = s.textBaseSize(); s.formatText { sp, a, b -> RichText.stepSize(sp, a, b, n, base) } },
+                        { hp -> s.formatText { sp, a, b -> RichText.setSize(sp, a, b, hp) } })),
+                    MenuEntry(tr(R.string.align_left), "slides/align-left", checked = s.paraAlign() == 0) { s.setParaFormat(align = 0) },
+                    MenuEntry(tr(R.string.align_center), "slides/align-center", checked = s.paraAlign() == 1) { s.setParaFormat(align = 1) },
+                    MenuEntry(tr(R.string.align_right), "slides/align-right", checked = s.paraAlign() == 2) { s.setParaFormat(align = 2) },
+                    MenuEntry(tr(R.string.bullets), "slides/bullets", checked = s.paraBullets()) { s.setParaFormat(bullet = !s.paraBullets()) },
+                    MenuEntry(tr(R.string.clear_format), "slides/clear-format") { s.formatText { sp, a, b -> RichText.clearFormat(sp, a, b) } },
+                ))
+                ToolMenu(tr(R.string.menu_color), "slides/color", enabled = textOn, entries =
+                    colorEntries("slides/color", s.textCommon { it.color }, { rgb -> s.formatText { sp, a, b -> RichText.setColor(sp, a, b, rgb) } }))
                 ToolMenu(tr(R.string.menu_object), "slides/object", enabled = hasSel, entries = listOf(
                     MenuEntry(tr(R.string.obj_left), "slides/obj-left") { s.nudge(-1, 0) },
                     MenuEntry(tr(R.string.obj_right), "slides/obj-right") { s.nudge(1, 0) },
@@ -510,7 +736,7 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
                     // p19 copy / paste / duplicate, p20 layer order (only the moves that can still happen)
                     MenuEntry(tr(R.string.obj_copy), "slides/obj-copy") { objCopy(graph, s) },
                     MenuEntry(tr(R.string.obj_duplicate), "slides/obj-dup") { s.duplicateSelected() },
-                ) + listOf(
+                ) + objectStyleEntries(s) + listOf(
                     ZOrder.FRONT to R.string.z_front, ZOrder.FORWARD to R.string.z_forward, ZOrder.BACKWARD to R.string.z_backward, ZOrder.BACK to R.string.z_back,
                 ).filter { s.canReorder(it.first) }.map { (op, label) -> MenuEntry(tr(label), "slides/z-" + op.name.lowercase()) { s.reorder(op) } })
                 ToolDivider()

@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import io.embodit.spatialoffice.R
@@ -53,6 +54,8 @@ sealed class Overlay {
     data class Find(override val win: Win = Win.DOC) : Overlay()
     /** d27: the file has an autosaved draft with changes that were never saved: take them back? */
     data class Recover(override val win: Win) : Overlay()
+    /** d28: the file's saved versions, newest first, each with [Restore]. */
+    data class History(override val win: Win) : Overlay()
     /** s21: new name for the current worksheet. */
     data class SheetRename(override val win: Win = Win.SHEET) : Overlay()
     /** s21: delete the current worksheet (formulas that point at it turn into #REF!). */
@@ -92,6 +95,7 @@ class Graph(val app: Application) {
     val windows = WindowCtl(this)
     val accounts = Accounts(app, this).also { storage.accounts = it }
     val drafts = Drafts(app)
+    val history = History(app)
 
     var homePage by mutableStateOf(HomePage.RECENT)
     var browseDir by mutableStateOf<File?>(null)
@@ -421,7 +425,7 @@ class Graph(val app: Application) {
                 else say(s, str(R.string.save_failed, e.message ?: str(R.string.perm_denied)))
             }
                 .onSuccess { b ->
-                    s.saved(); filesVersion++; dropDraft(s)
+                    s.saved(); filesVersion++; dropDraft(s); keepVersion(s)
                     recents.touch(s.ref, storage.display(s.ref))
                     Log.i(TAG, "SAVE ${s.ref.name} backup=${b?.name}")
                     if (overlay !is Overlay.CopyBeside) say(s, if (b != null) str(R.string.saved_first, storage.display(s.ref)) else str(R.string.saved_to, storage.display(s.ref)))
@@ -454,7 +458,8 @@ class Graph(val app: Application) {
                         layouts.move(old.key, ref.key); recents.rename(old.key, ref, storage.display(ref)); moved(s, ref)
                     }
                     layouts.markBackedUp(s.ref.key, "")   // a file made here has no original to back up
-                    s.saved(); filesVersion++; dropDraft(s, old.key); dropDraft(s)
+                    if (renamed) history.move(old.key, s.ref.key)
+                    s.saved(); filesVersion++; dropDraft(s, old.key); dropDraft(s); keepVersion(s)
                     recents.touch(s.ref, storage.display(s.ref))
                     Log.i(TAG, "SAVE new ${old.name} -> ${f.name}")
                     say(s, if (renamed) str(R.string.renamed, f.name) else str(R.string.saved_to, storage.display(s.ref)))
@@ -721,6 +726,34 @@ class Graph(val app: Application) {
         else { dropDraft(s, key); say(s, str(R.string.draft_failed)) }
     }
 
+    // ---------------------------------------------------------------- d28 version history
+
+    /** Bumped when a version is kept, so an open history list follows. */
+    var historyVersion by mutableIntStateOf(0)
+        private set
+
+    /** After a save: the saved bytes become the newest version (the newest [History.KEEP] are kept). */
+    private fun keepVersion(s: Session) {
+        if (s.readOnly) return
+        val key = s.ref.key
+        val bytes = runCatching { s.serialize() }.getOrNull() ?: return
+        scope.launch(Dispatchers.IO) { history.add(key, bytes); withContext(Dispatchers.Main) { historyVersion++ } }
+    }
+
+    fun versions(s: Session): List<History.Version> = history.list(s.ref.key)
+
+    /**
+     * [Restore] in the history list: what the window holds now is kept as a version first ("before restore"), then the
+     * old version comes back as an unsaved change (one undo step; saving makes it the file).
+     */
+    fun restoreVersion(s: Session, v: History.Version): Boolean {
+        val ok = history.restore(s, v)
+        historyVersion++
+        Log.i(TAG, "HISTORY restore ${s.ref.name} at=${v.at} ok=$ok dirty=${s.dirty} versions=${history.list(s.ref.key).size}")
+        if (ok) say(s, str(R.string.hist_restored))
+        return ok
+    }
+
     // ---------------------------------------------------------------- BACK / controller B (profile D60)
 
     fun onBack(where: String) {
@@ -744,7 +777,8 @@ class Graph(val app: Application) {
             io.embodit.spatialoffice.core.cloud.Provider.values().joinToString(",") { it.id + ":" + accounts.state(it) } +
             " open=[" + files.entries.joinToString(",") { e -> "${e.tag}:${e.kind}:${byTag[e.tag]?.ref?.name}:${windows.state[WinRef(winOf(FileKind.valueOf(e.kind)), e.tag)] ?: "-"}" } + "]" +
             " chartOf=$chartTag objBox=${deck?.dragBox} sel=${deck?.selected} docPicked=${doc?.picked}" +
-            " range=${sheet?.selection?.name()} sheets=${sheet?.book?.sheetNames} find=${(doc ?: sheet ?: deck)?.findHit} drafts=${drafts.count()} pending=${pendingRecover.size}"
+            " range=${sheet?.selection?.name()} sheets=${sheet?.book?.sheetNames} find=${(doc ?: sheet ?: deck)?.findHit} drafts=${drafts.count()} pending=${pendingRecover.size}" +
+            " textSel=${deck?.textSel} rot=${deck?.pickedShape()?.rotation} hist=${listOfNotNull(doc, sheet, deck).joinToString(",") { "${it.kind}:${history.list(it.ref.key).size}" }}"
 
     companion object {
         fun from(context: Context): Graph = (context.applicationContext as SpatialApplication).graph
