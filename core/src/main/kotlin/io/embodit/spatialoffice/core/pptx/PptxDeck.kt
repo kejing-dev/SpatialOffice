@@ -1277,7 +1277,7 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
             val runs = tp.runs
             if (runs == null) {
                 tp.text.split('\n').forEachIndexed { k, line ->
-                    if (k > 0) sb.append("<a:br/>")
+                    if (k > 0) sb.append(brOf(rPr))
                     if (line.isNotEmpty()) sb.append("<a:r>").append(rPr).append("<a:t>").append(Xml.escape(line)).append("</a:t></a:r>")
                 }
             } else {
@@ -1285,7 +1285,7 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
                     val start = if (span.src >= 0) runRPr.getOrNull(span.src) ?: rPr else rPr
                     val r = reconcileRPr(start, span, chain, tp.level, master)
                     span.text.split('\n').forEachIndexed { k, line ->
-                        if (k > 0) sb.append("<a:br/>")
+                        if (k > 0) sb.append(brOf(r))
                         if (line.isNotEmpty()) sb.append("<a:r>").append(r).append("<a:t>").append(Xml.escape(line)).append("</a:t></a:r>")
                     }
                 }
@@ -1419,12 +1419,25 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         return XmlEx.withAttr(pPr, root, "lvl", if (level == 0) null else level.toString()) + pPr.substring(root.openEnd)
     }
 
+    /** A line break inside a paragraph, carrying the run properties of the text around it (as PowerPoint writes it). */
+    private fun brOf(rPr: String): String = if (rPr.startsWith("<a:rPr")) "<a:br>$rPr</a:br>" else "<a:br/>"
+
     private fun withBullet(pPrIn: String, want: Boolean, level: Int, chain: List<StyleSrc>): String {
         var pPr = pPrIn
         val cur = (if (pPr.isEmpty()) null else explicitBullet(pPr, Xml.root(pPr))) ?: inheritedBullet(chain, level)
         if (cur == want) return pPr
         if (pPr.isNotEmpty()) pPr = XmlEx.removeChildren(pPr, BULLET_ELEMS)
-        if (inheritedBullet(chain, level) == want) return pPr
+        if (inheritedBullet(chain, level) == want) {
+            // back to what the layout gives: drop the zero margin / indent that turning the bullet off added (v0.4.1)
+            val root = if (want && pPr.isNotEmpty()) Xml.root(pPr) else null
+            if (root != null && Xml.attr(pPr, root, "marL") == "0" && Xml.attr(pPr, root, "indent") == "0") {
+                var tag = pPr.substring(root.start, root.openEnd)
+                tag = XmlEx.tagWithAttr(tag, "marL", null)
+                tag = XmlEx.tagWithAttr(tag, "indent", null)
+                pPr = tag + pPr.substring(root.openEnd)
+            }
+            return pPr
+        }
         if (pPr.isEmpty()) pPr = "<a:pPr/>"
         pPr = XmlEx.insertChild(pPr, if (want) "<a:buChar char=\"•\"/>" else "<a:buNone/>", if (want) "a:buChar" else "a:buNone", APPR_ORDER)
         val root = Xml.root(pPr) ?: return pPr

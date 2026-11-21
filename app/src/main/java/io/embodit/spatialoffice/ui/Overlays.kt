@@ -376,7 +376,7 @@ private fun FindSheet(graph: Graph, s: Session) {
                 val from = (cur.start - 28).coerceAtLeast(0); val to = (cur.start + cur.len + 28).coerceAtMost(text.length)
                 val place = if (s is io.embodit.spatialoffice.platform.DeckSession) tr(R.string.find_slide_n, cur.a + 1) + (if (cur.b < 0) " · " + tr(R.string.notes_short) else "") else s.hitPlace(cur)
                 val lead = (place?.let { "$it  " } ?: "") + (if (from > 0) "…" else "")
-                val shown = lead + text.substring(from, to).replace('\n', ' ') + (if (to < text.length) "…" else "")
+                val shown = lead + text.substring(from, to).replace('\n', ' ').replace(io.embodit.spatialoffice.platform.SOFT_BREAK, ' ') + (if (to < text.length) "…" else "")
                 val at = lead.length + cur.start - from
                 com.pico.spatial.ui.design.Text(
                     io.embodit.spatialoffice.ui.doc.underlined(shown, at, cur.len, PicoTheme.colorScheme.labelPrimary),

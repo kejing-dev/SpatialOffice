@@ -1,5 +1,6 @@
 package io.embodit.spatialoffice.ui.slides
 
+import io.embodit.spatialoffice.platform.SOFT_BREAK
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.ParagraphStyle
@@ -415,8 +416,6 @@ private fun RotateTab(x: Dp, y: Dp, label: String, drag: Modifier, probe: String
     }
 }
 
-private fun shapeString(sh: Shape): String = sh.paras.joinToString("\n") { it.text }
-
 /**
  * Text that is read until it is clicked, then typed into (v0.2.5). While it is only read, a press-and-drag on it
  * belongs to [whole] (moving the object it is part of); a text field would keep the drag for its own selection.
@@ -484,7 +483,9 @@ fun richShapeText(spans: List<Span>, paras: List<TextPara>, perPt: Float, base: 
 
 /**
  * p18: bullets drawn in front of bulleted paragraphs ("• ", indented by level) without being part of the text: the
- * field and the caret map around them.
+ * field and the caret map around them. A line break inside a paragraph ([SOFT_BREAK], a:br) is shown as a new line
+ * without a bullet. The paragraph styles (alignment) are laid over the transformed text again, each one ending where
+ * the next paragraph's bullet starts, so neighbouring paragraphs never overlap (v0.4.1 q10-1).
  */
 class BulletMarks(private val paras: List<TextPara>) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
@@ -493,8 +494,12 @@ class BulletMarks(private val paras: List<TextPara>) : VisualTransformation {
         var i = 0
         starts.add(0)
         while (true) { val k = t.indexOf('\n', i); if (k < 0) break; starts.add(k + 1); i = k + 1 }
-        val prefix = starts.indices.map { pi -> paras.getOrNull(pi)?.takeIf { it.bullet }?.let { "  ".repeat(it.level) + "• " } ?: "" }
-        if (prefix.all { it.isEmpty() }) return TransformedText(text, OffsetMapping.Identity)
+        val prefix = starts.indices.map { pi -> paras.getOrNull(pi)?.takeIf { it.bullet }?.let { "  ".repeat(it.level.coerceIn(0, 8)) + "• " } ?: "" }
+        if (prefix.all { it.isEmpty() }) {
+            if (t.indexOf(SOFT_BREAK) < 0) return TransformedText(text, OffsetMapping.Identity)
+            // same length, soft breaks shown as new lines
+            return TransformedText(AnnotatedString(t.replace(SOFT_BREAK, '\n'), text.spanStyles, text.paragraphStyles), OffsetMapping.Identity)
+        }
         val out = AnnotatedString.Builder()
         val o2t = IntArray(t.length + 1)
         var added = 0
@@ -507,16 +512,11 @@ class BulletMarks(private val paras: List<TextPara>) : VisualTransformation {
             }
             for (o in st until en) o2t[o] = o + added
             // the characters with their span styles only: the paragraph styles are laid over again below, prefix included
-            if (en > st) text.subSequence(st, en).let { sub -> out.append(AnnotatedString(sub.text, sub.spanStyles)) }
+            if (en > st) text.subSequence(st, en).let { sub -> out.append(AnnotatedString(sub.text.replace(SOFT_BREAK, '\n'), sub.spanStyles)) }
         }
         o2t[t.length] = t.length + added
         val total = t.length + added
-        // a paragraph's alignment covers its bullet too (a bullet outside it would be a paragraph of its own)
-        for (ps in text.paragraphStyles) {
-            val pi = starts.indexOf(ps.start)
-            val from = o2t[ps.start.coerceIn(0, t.length)] - (if (pi >= 0) prefix[pi].length else 0)
-            out.addStyle(ps.item, from.coerceAtLeast(0), o2t[ps.end.coerceIn(0, t.length)])
-        }
+        for ((from, to, style) in paragraphRanges(t, starts, prefix, o2t, text.paragraphStyles)) out.addStyle(style, from, to)
         return TransformedText(out.toAnnotatedString(), object : OffsetMapping {
             override fun originalToTransformed(offset: Int): Int = o2t[offset.coerceIn(0, t.length)]
             override fun transformedToOriginal(offset: Int): Int {
@@ -526,6 +526,32 @@ class BulletMarks(private val paras: List<TextPara>) : VisualTransformation {
                 return lo
             }
         })
+    }
+
+    companion object {
+        /**
+         * Where each paragraph style of the original text lands in the transformed text: a style that starts a
+         * paragraph covers its bullet too; one that ends just after a "\n" stops there, before the next paragraph's
+         * bullet. Sorted, clipped so no two overlap, empty ones dropped.
+         */
+        fun paragraphRanges(
+            t: String, starts: List<Int>, prefix: List<String>, o2t: IntArray,
+            styles: List<AnnotatedString.Range<ParagraphStyle>>,
+        ): List<Triple<Int, Int, ParagraphStyle>> {
+            val out = ArrayList<Triple<Int, Int, ParagraphStyle>>()
+            var last = 0
+            for (ps in styles.sortedBy { it.start }) {
+                val s0 = ps.start.coerceIn(0, t.length)
+                val e0 = ps.end.coerceIn(s0, t.length)
+                val pi = starts.indexOf(s0)
+                val from = maxOf(last, o2t[s0] - (if (pi >= 0) prefix[pi].length else 0), 0)
+                val to = if (e0 > 0 && t[e0 - 1] == '\n') o2t[e0 - 1] + 1 else o2t[e0]
+                if (to <= from) continue
+                out.add(Triple(from, to, ps.item))
+                last = to
+            }
+            return out
+        }
     }
 }
 

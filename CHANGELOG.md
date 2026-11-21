@@ -1,5 +1,14 @@
 # Changelog · 更新记录
 
+## v0.4.1 · 2026-11-21
+
+- 修好：打开一个文本框里有两段以上项目符号的演示文件会闪退；选中跨两段的文字加 / 去项目符号也不再闪退
+- 修好：演示标题里的段内换行（PowerPoint 的 Shift+Enter）在查找替换、打字、改格式之后还是换行，不会被拆成两段
+- 去掉项目符号再加回来，段落的缩进回到原样
+- Fixed: a deck with bullets on two or more paragraphs of one box no longer closes the app; bullets on / off over a selection across paragraphs no longer crashes
+- Fixed: a line break inside a slide paragraph (Shift+Enter in PowerPoint) stays a line break through find & replace, typing and formatting
+- Turning bullets off and on again gives the paragraph its own indent back
+
 ## v0.4.0 · 2026-11-21
 
 - 三类工具条都有 [文字 ▾] 和 [颜色 ▾]：选中几个字改字号（加大 / 减小 / 12 / 14 / 18 / 24 磅）、六种文字颜色、删除线、清除格式；文档还能加黄 / 绿 / 青高亮

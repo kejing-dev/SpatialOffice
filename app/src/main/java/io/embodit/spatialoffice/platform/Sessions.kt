@@ -849,6 +849,12 @@ class SheetSession(ref: FileRef, kind: FileKind, bytes: ByteArray) : Session(ref
     }
 }
 
+/**
+ * A line break inside a slide paragraph (PowerPoint's Shift+Enter, `a:br`) in the text a slide box is edited as;
+ * "\n" there always starts a new paragraph. The slides editor shows it as a new line.
+ */
+const val SOFT_BREAK = ' '
+
 /** An object copied on a slide, with the deck it belongs to (pasting is for the same file: the copy points at its pictures). */
 class ObjClip(val from: DeckSession, val clip: io.embodit.spatialoffice.core.pptx.ShapeClip)
 
@@ -864,11 +870,16 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
 
     fun image(part: String): Bitmap? = images.getOrPut(part) { deck.partBytes(part)?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() } }
 
-    /** p17: a text box as one run of spans; every paragraph but the last ends with "\n", carried by its last span. */
+    /**
+     * p17: a text box as one run of spans; every paragraph but the last ends with "\n", carried by its last span. A
+     * line break inside a paragraph (a:br, "\n" in [TextPara.text]) is [SOFT_BREAK] here, so it stays a line break
+     * through typing, find / replace and formatting (v0.4.1 q10-2).
+     */
     fun spansOf(sh: Shape): List<Span> {
         val out = ArrayList<Span>()
         sh.paras.forEachIndexed { i, p ->
-            val runs = (p.runs ?: listOf(Span(p.text))).filter { it.text.isNotEmpty() }.toMutableList()
+            val runs = (p.runs ?: listOf(Span(p.text))).filter { it.text.isNotEmpty() }
+                .map { if (it.text.indexOf('\n') >= 0) it.copy(text = it.text.replace('\n', SOFT_BREAK)) else it }.toMutableList()
             if (i < sh.paras.size - 1) {
                 if (runs.isEmpty()) runs.add((out.lastOrNull() ?: Span("")).copy(text = "\n"))
                 else runs[runs.size - 1] = runs.last().copy(text = runs.last().text + "\n")
@@ -892,7 +903,8 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
             }
         }
         groups.add(cur)
-        return groups.mapIndexed { i, runs ->
+        return groups.mapIndexed { i, kept ->
+            val runs = kept.map { if (it.text.indexOf(SOFT_BREAK) >= 0) it.copy(text = it.text.replace(SOFT_BREAK, '\n')) else it }
             val o = old.paras.getOrNull(i) ?: old.paras.lastOrNull()
             TextPara(runs.joinToString("") { it.text }, o?.level ?: 0, o?.bullet ?: false, runs, o?.align)
         }
@@ -953,6 +965,9 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
     /** Indices of the paragraphs the selection touches (all of them with nothing selected). */
     private fun selParas(sh: Shape): IntRange {
         val text = RichText.text(spansOf(sh))
+        val t = textSel?.takeIf { it.slide == current && it.shape == sh.id && it.end > it.start }
+        // nothing selected: every paragraph, an empty last one included
+        if (t == null) return 0..(text.count { it == '\n' })
         val (a, b) = textRange(sh)
         val first = text.substring(0, a).count { it == '\n' }
         val last = text.substring(0, (b - 1).coerceAtLeast(a)).count { it == '\n' }
@@ -1220,7 +1235,8 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
 
     // ---- p21 find / replace over every slide, notes included
 
-    private fun shapeText(sh: io.embodit.spatialoffice.core.pptx.Shape) = sh.paras.joinToString("\n") { it.text }
+    /** The same text [spansOf] gives (paragraphs split by "\n", line breaks inside one as [SOFT_BREAK]), so hit offsets match. */
+    private fun shapeText(sh: io.embodit.spatialoffice.core.pptx.Shape) = sh.paras.joinToString("\n") { it.text.replace('\n', SOFT_BREAK) }
 
     override fun findHits(q: String, matchCase: Boolean, allSheets: Boolean): List<FindHit> {
         if (q.isEmpty()) return emptyList()

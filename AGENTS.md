@@ -199,11 +199,14 @@ setStrike / setFontColor / setFontSize / clearFont / defaultFontPt`, `Cell.itali
 [Text ▾] replaced the B button (groups stay 8), [Colour ▾] = text colours + the fills that were [Fill ▾]; Ctrl+I / Ctrl+U.
 **Slides** (`PptxDeck`): `TextPara.runs` (effective formatting of each `a:r`, `src` = index among all runs of the box as
 stored now) and `TextPara.align`; `setShapeText` keeps a paragraph whose text, level, bullet, runs and align are unchanged
-verbatim. `DeckSession.spansOf / parasFrom` turn a box into one span list ("
-" between paragraphs) and back; typing
+verbatim. `DeckSession.spansOf / parasFrom` turn a box into one span list ("\n" between paragraphs, `SOFT_BREAK`
+U+2028 for a line break inside one, `a:br`; v0.4.1 q10-2) and back; typing
 (`setText`), find / replace and the menus all go through it, so mixed formats survive edits. `textSel` (the text field
 reports its selection) + `formatText` / `setParaFormat` / `textCommon`; with no selection they act on the whole box.
-The text field shows bullets through `BulletMarks` (a VisualTransformation, not text). `setShapeFill / setShapeLine /
+The text field shows bullets through `BulletMarks` (a VisualTransformation, not text): it draws `SOFT_BREAK` as a new
+line without a bullet and lays each paragraph style back so it ends before the next paragraph's bullet
+(`BulletMarks.paragraphRanges`, sorted and clipped: Compose refuses overlapping paragraphs, v0.4.1 q10-1; `M2FixTest`).
+Find hits on slides count offsets in the same text (`shapeText` uses `SOFT_BREAK` too). `setShapeFill / setShapeLine /
 setShapeRotation`, `Shape.lineRgb / lineWidthEmu / rotation`; [Object ▾] › Fill ›, Line ›, rotate ±90°, straighten; the
 rotate handle beside the move tab (`core/layout/Rotation`: angle about the centre, 15° steps; written once on release).
 **Version history** (`platform/History`): every successful save keeps the saved bytes in
