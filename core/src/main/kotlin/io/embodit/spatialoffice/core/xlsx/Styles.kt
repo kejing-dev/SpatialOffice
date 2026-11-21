@@ -213,6 +213,99 @@ internal class Styles(xml0: String) {
         return xfWith(xf, mapOf("fontId" to fontId.toString(), "applyFont" to "1"), "applyFont")
     }
 
+    /** M2 (s23): effective font of a cell style. [rgb] 0xRRGGBB from an `rgb` colour (theme / indexed colours read as null); [pt] the `sz`, null when the font has none. */
+    data class FontInfo(val bold: Boolean, val italic: Boolean, val underline: Boolean, val strike: Boolean, val rgb: Int?, val pt: Float?)
+
+    fun font(style: Int): FontInfo {
+        val raw = fontRawOf(style) ?: return FontInfo(false, false, false, false, null, null)
+        return fontInfoOf(raw)
+    }
+
+    private fun fontRawOf(style: Int): String? = xfs.getOrNull(style)?.let { fonts.getOrNull(it.fontId) } ?: fonts.firstOrNull()
+
+    /** Size of font 0 (the workbook's default font), 11 when it has none. */
+    fun defaultFontPt(): Float = fonts.firstOrNull()?.let { fontInfoOf(it).pt } ?: 11f
+
+    private fun fontInfoOf(raw: String): FontInfo {
+        val f = Xml.root(raw) ?: return FontInfo(false, false, false, false, null, null)
+        fun flag(local: String): Boolean {
+            val k = XmlX.kid(raw, f, local) ?: return false
+            val v = Xml.attr(raw, k, "val")
+            return v == null || !(v == "0" || v == "false")
+        }
+        val u = XmlX.kid(raw, f, "u")?.let { Xml.attr(raw, it, "val") != "none" } ?: false
+        val rgb = XmlX.kid(raw, f, "color")?.let { Xml.attr(raw, it, "rgb") }?.takeLast(6)?.toIntOrNull(16)
+        val pt = XmlX.kid(raw, f, "sz")?.let { Xml.attr(raw, it, "val") }?.toFloatOrNull()
+        return FontInfo(flag("b"), flag("i"), u, flag("strike"), rgb, pt)
+    }
+
+    /**
+     * [fontRaw] with every child named [local] removed and, when [child] is given, that child put back in its CT_Font
+     * place. Everything else in the font keeps its text.
+     */
+    private fun fontWithChild(fontRaw: String, local: String, child: String?): String {
+        var raw = fontRaw
+        var f = Xml.root(raw) ?: return raw
+        if (!f.selfClosing) {
+            while (true) {
+                val old = XmlX.kid(raw, f, local) ?: break
+                raw = raw.substring(0, old.start) + raw.substring(old.end)
+                f = Xml.root(raw)!!
+            }
+        }
+        if (child == null) return raw
+        if (f.selfClosing) return XmlX.startTag(raw, f, emptyMap(), false) + child + "</" + f.name + ">"
+        val want = FONT_ORDER.indexOf(local)
+        val pos = Xml.children(raw, f).lastOrNull { FONT_ORDER.indexOf(Xml.local(it.name)).let { i -> i in 0 until want } }?.end ?: f.openEnd
+        return raw.substring(0, pos) + child + raw.substring(pos)
+    }
+
+    private fun ptText(pt: Float): String = if (pt == Math.floor(pt.toDouble()).toFloat()) pt.toInt().toString() else pt.toString()
+
+    /** Style index equal to [style] but with its font changed by [edit] (font XML to font XML); appended when new. */
+    fun withFont(style: Int, edit: (String) -> String): Int {
+        val xf = baseXf(style)
+        val fontRaw = fonts.getOrNull(xf.fontId) ?: throw UnsupportedOperationException("styles part has no fonts")
+        val wanted = edit(fontRaw)
+        if (wanted == fontRaw && style in xfs.indices) return style
+        var fontId = fonts.indexOf(wanted)
+        if (fontId < 0) {
+            append("fonts", wanted)
+            fontId = fonts.size - 1
+        }
+        if (fontId == xf.fontId && style in xfs.indices) return style
+        return xfWith(xf, mapOf("fontId" to fontId.toString(), "applyFont" to "1"), "applyFont")
+    }
+
+    fun withItalic(style: Int, on: Boolean): Int = if (font(style).italic == on) style else withFont(style) { fontWithChild(it, "i", if (on) "<${pfx}i/>" else null) }
+    fun withStrike(style: Int, on: Boolean): Int = if (font(style).strike == on) style else withFont(style) { fontWithChild(it, "strike", if (on) "<${pfx}strike/>" else null) }
+    fun withUnderline(style: Int, on: Boolean): Int = if (font(style).underline == on) style else withFont(style) { fontWithChild(it, "u", if (on) "<${pfx}u/>" else null) }
+
+    /** Font colour 0xRRGGBB; null removes the font's colour element (automatic). */
+    fun withFontColor(style: Int, rgb: Int?): Int {
+        val raw = fontRawOf(style)
+        val hasColor = raw?.let { r -> Xml.root(r)?.let { XmlX.kid(r, it, "color") } } != null
+        if (rgb == null && !hasColor) return style
+        if (rgb != null && font(style).rgb == (rgb and 0xFFFFFF)) return style
+        return withFont(style) { fontWithChild(it, "color", rgb?.let { c -> "<${pfx}color rgb=\"${String.format("FF%06X", c and 0xFFFFFF)}\"/>" }) }
+    }
+
+    fun withFontSize(style: Int, pt: Float): Int {
+        if (font(style).pt == pt) return style
+        return withFont(style) { fontWithChild(it, "sz", "<${pfx}sz val=\"${ptText(pt)}\"/>") }
+    }
+
+    /** Bold, italic, underline and strikethrough off, colour removed, size back to font 0's; name and family kept. */
+    fun withClearedFont(style: Int): Int {
+        val def = fonts.firstOrNull()?.let { fontInfoOf(it).pt }
+        return withFont(style) { raw ->
+            var r = raw
+            for (k in listOf("b", "i", "strike", "u", "color")) r = fontWithChild(r, k, null)
+            if (def != null && fontInfoOf(r).pt != def) r = fontWithChild(r, "sz", "<${pfx}sz val=\"${ptText(def)}\"/>")
+            r
+        }
+    }
+
     /** Style index equal to [style] but with number format [code]. */
     fun withNumFmt(style: Int, code: String): Int {
         val xf = baseXf(style)
@@ -318,6 +411,7 @@ internal class Styles(xml0: String) {
     }
 
     companion object {
+        private val FONT_ORDER = listOf("b", "i", "strike", "condense", "extend", "outline", "shadow", "u", "vertAlign", "sz", "color", "name", "family", "charset", "scheme")
         private val BUILTIN_BY_CODE = mapOf("General" to 0, "0" to 1, "0.00" to 2, "#,##0" to 3, "#,##0.00" to 4, "0%" to 9, "0.00%" to 10)
 
         /** A minimal standard styles part: one font, the two required fills, one border, one cell format. */

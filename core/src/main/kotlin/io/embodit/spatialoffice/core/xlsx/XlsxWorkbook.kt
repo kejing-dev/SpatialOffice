@@ -481,7 +481,9 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         }
         if (formula != null) input = "=$formula"
         val (h, wrap) = styles?.alignment(c.style) ?: Pair(null, false)
-        return Cell(input, display, kind, number, formula != null, bold, fmt.kind, h, wrap)
+        val font = styles?.font(c.style)
+        return Cell(input, display, kind, number, formula != null, bold, fmt.kind, h, wrap,
+            font?.italic ?: false, font?.underline ?: false, font?.strike ?: false, font?.rgb, font?.pt)
     }
 
     /** Column width in characters of the default font, as stored in the file (default 8.43). */
@@ -852,6 +854,50 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         c.styleChanged = true
         dirty = true
     }
+
+    // ---- M2 (s23): font of a cell; each finds or adds a font that differs only in that property ----
+
+    private fun fontOf(sheet: Int, row: Int, col: Int): Styles.FontInfo? {
+        val s = sheetAt(sheet)
+        return styles?.font(s.rows[row]?.cells?.get(col)?.style ?: inheritedStyle(s, row, col))
+    }
+
+    fun setItalic(sheet: Int, row: Int, col: Int, on: Boolean) {
+        if ((fontOf(sheet, row, col)?.italic ?: false) == on) return
+        restyle(sheet, row, col) { st, style -> st.withItalic(style, on) }
+    }
+
+    fun setUnderline(sheet: Int, row: Int, col: Int, on: Boolean) {
+        if ((fontOf(sheet, row, col)?.underline ?: false) == on) return
+        restyle(sheet, row, col) { st, style -> st.withUnderline(style, on) }
+    }
+
+    fun setStrike(sheet: Int, row: Int, col: Int, on: Boolean) {
+        if ((fontOf(sheet, row, col)?.strike ?: false) == on) return
+        restyle(sheet, row, col) { st, style -> st.withStrike(style, on) }
+    }
+
+    /** Font colour 0xRRGGBB; null removes the colour (automatic). */
+    fun setFontColor(sheet: Int, row: Int, col: Int, rgb: Int?) {
+        if (rgb == null && styles == null) return
+        if (rgb != null && fontOf(sheet, row, col)?.rgb == (rgb and 0xFFFFFF)) return
+        restyle(sheet, row, col) { st, style -> st.withFontColor(style, rgb) }
+    }
+
+    fun setFontSize(sheet: Int, row: Int, col: Int, pt: Float) {
+        require(pt > 0f && pt <= 409f) { "font size $pt" }
+        if (fontOf(sheet, row, col)?.pt == pt) return
+        restyle(sheet, row, col) { st, style -> st.withFontSize(style, pt) }
+    }
+
+    /** Bold / italic / underline / strikethrough off, colour removed, size back to the default font's (font 0). */
+    fun clearFont(sheet: Int, row: Int, col: Int) {
+        if (styles == null) return
+        restyle(sheet, row, col) { st, style -> st.withClearedFont(style) }
+    }
+
+    /** Size of the workbook's default font (font 0), 11 when unknown. */
+    fun defaultFontPt(): Float = styles?.defaultFontPt() ?: 11f
 
     /** Horizontal alignment of a cell: "left", "center", "right", or null for general. Wrap is kept. */
     fun setHAlign(sheet: Int, row: Int, col: Int, align: String?) {

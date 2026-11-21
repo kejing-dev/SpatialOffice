@@ -17,6 +17,12 @@ data class Cell(
     val hAlign: String? = null,
     /** Text wraps inside the cell (`wrapText`). */
     val wrap: Boolean = false,
+    /** M2 (s23): effective font of the cell. [colorRgb] 0xRRGGBB (null = automatic or a theme colour); [fontPt] the font size, null when the font has none. */
+    val italic: Boolean = false,
+    val underline: Boolean = false,
+    val strike: Boolean = false,
+    val colorRgb: Int? = null,
+    val fontPt: Float? = null,
 )
 
 /** One cell as copied: what the formula bar showed and its cell style index (meaningful within the same workbook). */
