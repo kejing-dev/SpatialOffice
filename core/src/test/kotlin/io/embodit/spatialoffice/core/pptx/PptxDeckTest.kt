@@ -101,7 +101,7 @@ class PptxDeckTest {
         assertEquals(44f, title.fontPt); assertEquals(1, title.align); assertEquals(0x000000, title.colorRgb)
         val sub = s[0].shapes[1]
         assertEquals(ShapeKind.BODY, sub.kind)
-        assertEquals(listOf(TextPara("Spring planning & <draft> agenda", 0, false)), sub.paras)
+        assertEquals(listOf(TextPara("Spring planning & <draft> agenda", 0, false)), sub.paras.map { it.plain() })
         assertEquals(0xFFFFFF, s[0].backgroundRgb)
 
         // multi-level bullets
@@ -109,7 +109,7 @@ class PptxDeckTest {
         assertEquals(ShapeKind.BODY, body.kind)
         assertEquals(
             listOf(TextPara("Grow the active user base", 0, true), TextPara("Improve onboarding", 1, true), TextPara("Shorten the first-run flow", 2, true), TextPara("降低流失率", 1, true), TextPara("Keep costs flat", 0, true)),
-            body.paras,
+            body.paras.map { it.plain() },
         )
         assertEquals(listOf(457200L, 1600200L, 8229600L, 4525963L), listOf(body.x, body.y, body.w, body.h))
         assertEquals(32f, body.fontPt); assertEquals(0, body.align)
@@ -122,7 +122,7 @@ class PptxDeckTest {
         assertEquals(listOf(914400L, 1645920L, 3657600L, 2057400L), listOf(pic.x, pic.y, pic.w, pic.h))
         val box = s[2].shapes[2]
         assertEquals(ShapeKind.TEXT, box.kind); assertTrue(box.editable); assertEquals(18f, box.fontPt)
-        assertEquals(listOf(TextPara("Photo of the current build")), box.paras)
+        assertEquals(listOf(TextPara("Photo of the current build")), box.paras.map { it.plain() })
 
         assertEquals("Mention the dependency on the hardware team.", s[3].notes)
         assertEquals("", s[0].notes)
@@ -183,7 +183,7 @@ class PptxDeckTest {
         assertEquals(original.replace("<a:t>Improve onboarding</a:t>", "<a:t>改进新手引导 &amp; &lt;onboarding&gt; &quot;flow&quot;</a:t>"), replaced)
 
         val re = PptxDeck.open(out)
-        assertEquals(paras, re.slides[1].shapes[1].paras)
+        assertEquals(paras.map { it.plain() }, re.slides[1].shapes[1].paras.map { it.plain() })
         assertEquals(open().slides.filter { it.index != 1 }, re.slides.filter { it.index != 1 })
         assertEquals(open().slides[1].shapes[0], re.slides[1].shapes[0])
     }
@@ -200,7 +200,7 @@ class PptxDeckTest {
             "<a:p><a:pPr algn=\"ctr\" lvl=\"1\"/><a:r>$rPr<a:t>Second line</a:t></a:r></a:p>" +
             "<a:p><a:pPr algn=\"ctr\" marL=\"0\" indent=\"0\"><a:buNone/></a:pPr><a:r>$rPr<a:t>No bullet here</a:t></a:r></a:p></p:txBody>"))
         val s = PptxDeck.open(out).slides[6].shapes[1]
-        assertEquals(listOf(TextPara("欢迎提问", 0, true), TextPara("Second line", 1, true), TextPara("No bullet here", 0, false)), s.paras)
+        assertEquals(listOf(TextPara("欢迎提问", 0, true), TextPara("Second line", 1, true), TextPara("No bullet here", 0, false)), s.paras.map { it.plain() })
         assertEquals(32f, s.fontPt); assertTrue(s.bold); assertEquals(0x1F4E79, s.colorRgb); assertEquals(1, s.align)
     }
 
@@ -214,9 +214,9 @@ class PptxDeckTest {
         assertEquals(setOf("ppt/slides/slide2.xml", "ppt/slides/slide3.xml"), changedParts(src, out))
         assertTrue(text(out, "ppt/slides/slide2.xml").contains("<a:p><a:r><a:t>Goals</a:t></a:r><a:br/><a:r><a:t>for spring</a:t></a:r></a:p>"))
         val re = PptxDeck.open(out)
-        assertEquals(listOf(TextPara("Goals\nfor spring")), re.slides[1].shapes[0].paras)
-        assertEquals(listOf(TextPara("Only one point left", 2, true)), re.slides[1].shapes[1].paras)
-        assertEquals(listOf(TextPara("Caption", 0, true), TextPara("", 0, false)), re.slides[2].shapes[2].paras)
+        assertEquals(listOf(TextPara("Goals\nfor spring")), re.slides[1].shapes[0].paras.map { it.plain() })
+        assertEquals(listOf(TextPara("Only one point left", 2, true)), re.slides[1].shapes[1].paras.map { it.plain() })
+        assertEquals(listOf(TextPara("Caption", 0, true), TextPara("", 0, false)), re.slides[2].shapes[2].paras.map { it.plain() })
         assertEquals("Goals\nfor spring", titles(re)[1])
         // clearing a shape leaves one empty paragraph, which the format requires
         val d2 = open()
@@ -307,7 +307,7 @@ class PptxDeckTest {
         assertEquals(listOf(ShapeKind.TITLE, ShapeKind.BODY), cover.map { it.kind })
         assertEquals("the new title slide takes its geometry from the title layout", listOf(685800L, 2130425L, 7772400L, 1470025L), listOf(cover[0].x, cover[0].y, cover[0].w, cover[0].h))
         val inserted = re.slides[4].shapes
-        assertEquals(listOf(TextPara("First point", 0, true), TextPara("Detail", 1, true)), inserted[1].paras)
+        assertEquals(listOf(TextPara("First point", 0, true), TextPara("Detail", 1, true)), inserted[1].paras.map { it.plain() })
         assertEquals(listOf(457200L, 1600200L, 8229600L, 4525963L), listOf(inserted[1].x, inserted[1].y, inserted[1].w, inserted[1].h))
         assertTrue(re.slides.all { s -> s.shapes.filter { it.kind == ShapeKind.TITLE || it.kind == ShapeKind.BODY }.all { it.editable } })
         // the original slides are untouched parts
@@ -393,12 +393,12 @@ class PptxDeckTest {
         val s = shape(PptxDeck.open(out), 4, id)
         assertEquals(ShapeKind.TEXT, s.kind); assertTrue(s.editable)
         assertEquals(listOf(1000000L, 4200000L, 5000000L, 800000L), listOf(s.x, s.y, s.w, s.h))
-        assertEquals(listOf(TextPara("备注：数据截至五月 & <draft>"), TextPara("Second line")), s.paras)
+        assertEquals(listOf(TextPara("备注：数据截至五月 & <draft>"), TextPara("Second line")), s.paras.map { it.plain() })
         assertEquals(18f, s.fontPt)
         // and it can be edited like any other text shape
         val d2 = PptxDeck.open(out)
         d2.setShapeText(4, id, listOf(TextPara("Edited box")))
-        assertEquals(listOf(TextPara("Edited box")), shape(PptxDeck.open(d2.save()), 4, id).paras)
+        assertEquals(listOf(TextPara("Edited box")), shape(PptxDeck.open(d2.save()), 4, id).paras.map { it.plain() })
     }
 
     @Test fun saveClearsDirtyAndEditingCanContinue() {
@@ -433,7 +433,7 @@ class PptxDeckTest {
         val out = d2.save()
         assertEquals((1..7).map { "ppt/slides/slide$it.xml" }.toSet(), changedParts(src, out))
         val expected = before.map { s -> s.copy(shapes = s.shapes.map { sh -> if (sh.editable) sh.copy(paras = sh.paras.map { it.copy(text = it.text + "！") }) else sh }) }
-        assertEquals(expected, PptxDeck.open(out).slides)
+        assertEquals(plainSlides(expected), plainSlides(PptxDeck.open(out).slides))
         assertDeckConsistent(out)
         writeRoundTrip("pptx-rewritten.pptx", out)
     }
@@ -497,7 +497,7 @@ class PptxDeckTest {
         val el = shapeRange(before, 3)
         val replaced = assertOnlyRangeChanged(before, text(out, part), el.start, el.end)
         assertEquals(empty.replace("<p:spPr/></p:sp>", "<p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>Now it has text</a:t></a:r></a:p></p:txBody></p:sp>"), replaced)
-        assertEquals(listOf(TextPara("Now it has text")), PptxDeck.open(out).slides[0].shapes[1].paras)
+        assertEquals(listOf(TextPara("Now it has text")), PptxDeck.open(out).slides[0].shapes[1].paras.map { it.plain() })
         assertEquals("the new shape id is one above the highest id on the slide", 10, d.addTextBox(0, 0L, 0L, 100L, 100L, "x"))
     }
 
@@ -544,10 +544,10 @@ class PptxDeckTest {
         val re = PptxDeck.open(out)
         assertEquals(listOf("空间办公 Spatial Review", "Agenda", "Thanks"), titles(re))
         assertEquals("空间办公 Spatial Review", re.firstTitle())
-        assertEquals(listOf(TextPara("Q2 planning & <notes>")), re.slides[0].shapes[1].paras)
-        assertEquals(listOf(TextPara("Status", 0, true), TextPara("Risks", 1, true), TextPara("下一步", 1, true), TextPara("Summary", 0, false)), re.slides[1].shapes[1].paras)
+        assertEquals(listOf(TextPara("Q2 planning & <notes>")), re.slides[0].shapes[1].paras.map { it.plain() })
+        assertEquals(listOf(TextPara("Status", 0, true), TextPara("Risks", 1, true), TextPara("下一步", 1, true), TextPara("Summary", 0, false)), re.slides[1].shapes[1].paras.map { it.plain() })
         assertEquals("Keep this short.", re.slides[1].notes)
-        assertEquals(listOf(TextPara("Confidential")), shape(re, 1, boxId).paras)
+        assertEquals(listOf(TextPara("Confidential")), shape(re, 1, boxId).paras.map { it.plain() })
         assertEquals(28f, re.slides[1].shapes[1].fontPt)
         assertNotNull(re.slides[2].shapes.firstOrNull { it.kind == ShapeKind.BODY })
         assertAllPartsIdentical(out, re.save())
@@ -575,4 +575,7 @@ class PptxDeckTest {
         assertEquals(listOf("产品评审 2026 & <final>", "Thank you", "Goals", "Prototype", "Timeline", "Architecture", "Appendix"), titles(PptxDeck.open(out)))
         writeRoundTrip("pptx-edited.pptx", out)
     }
+
+    /** Slides with every paragraph reduced to text, level and bullet (M2 added run formatting and alignment to the model). */
+    private fun plainSlides(l: List<Slide>) = l.map { s -> s.copy(shapes = s.shapes.map { it.copy(paras = it.paras.map { p -> p.plain() }) }) }
 }
