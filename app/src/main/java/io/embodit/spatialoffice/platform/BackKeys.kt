@@ -66,24 +66,28 @@ object BackKeys {
         val w = a.window ?: return
         val cb = w.callback ?: return
         if (cb is Wrapped) return
-        w.callback = Wrapped(cb, a.javaClass.simpleName)
+        w.callback = Wrapped(cb, a.javaClass.simpleName) { w.peekDecorView() }
         Log.i(TAG, "BACK keys wrapped on ${a.javaClass.simpleName}")
     }
 
-    private class Wrapped(private val d: Window.Callback, private val name: String) : Window.Callback by d {
-        override fun dispatchKeyEvent(event: KeyEvent): Boolean = route(event, "key:$name") || d.dispatchKeyEvent(event)
+    /** BACK / B go to [handler]; keys with no function here (A / X / Y, centre, Enter outside a typing target) are eaten ([KeyGuard]). */
+    private class Wrapped(private val d: Window.Callback, private val name: String, private val root: () -> View?) : Window.Callback by d {
+        override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+            route(event, "key:$name") || KeyGuard.eat(event, root(), "key:$name") || d.dispatchKeyEvent(event)
     }
 
     private val hooked = java.util.Collections.newSetFromMap(java.util.WeakHashMap<View, Boolean>())
     private val main by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
     @Volatile private var lastSweepMs = 0L
 
-    /** Layer 2 again from any thread, at most once a second (new menus / sheets / windows get hooked too). */
+    /**
+     * Layer 2 again from any thread (a dialog, sheet or menu just opened, v0.4.2): the new window is attached a frame or
+     * two later, so sweep after 250 ms and again after 1 s. Hooking is idempotent.
+     */
     fun sweepSoon(reason: String) {
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastSweepMs < 1_000L) return
-        lastSweepMs = now
-        main.post { sweep(reason) }
+        lastSweepMs = android.os.SystemClock.elapsedRealtime()
+        main.postDelayed({ sweep(reason) }, 250L)
+        main.postDelayed({ sweep(reason) }, 1_000L)
     }
 
     /** Layer 2: every root view of this process (WindowManagerGlobal), so a focused Toolbar window cannot swallow BACK. */
@@ -93,7 +97,16 @@ object BackKeys {
             val g = c.getMethod("getInstance").invoke(null)
             @Suppress("UNCHECKED_CAST")
             val names = c.getMethod("getViewRootNames").invoke(g) as Array<String>
-            names.mapNotNull { n -> runCatching { c.getMethod("getRootView", String::class.java).invoke(g, n) as? View }.getOrNull()?.let { n to it } }
+            val byName = names.mapNotNull { n -> runCatching { c.getMethod("getRootView", String::class.java).invoke(g, n) as? View }.getOrNull()?.let { n to it } }
+            // v0.4.2: on this image getViewRootNames can come back empty; the list of attached root views is the fallback
+            byName.ifEmpty {
+                runCatching {
+                    val f = c.getDeclaredField("mViews")
+                    f.isAccessible = true
+                    @Suppress("UNCHECKED_CAST")
+                    (f.get(g) as? List<View>).orEmpty().toList().map { v -> (v.javaClass.simpleName + "@" + Integer.toHexString(System.identityHashCode(v))) to v }
+                }.getOrElse { emptyList() }
+            }
         }.getOrElse { Log.w(TAG, "BACK sweep failed: $it"); emptyList() }
         for ((n, v) in roots) hook(v, n, reason)
     }
@@ -101,14 +114,14 @@ object BackKeys {
     private fun hook(v: View, name: String, reason: String) {
         synchronized(hooked) { if (!hooked.add(v)) return }
         val short = name.substringAfterLast('/').take(48)
-        v.addOnUnhandledKeyEventListener { _, e -> route(e, "unhandled:$short") }
+        v.addOnUnhandledKeyEventListener { _, e -> route(e, "unhandled:$short") || KeyGuard.eat(e, v, "unhandled:$short") }
         val wrapped = runCatching {
             val f = v.javaClass.getDeclaredField("mWindow")
             f.isAccessible = true
             val w = f.get(v) as? Window ?: return@runCatching "no window"
             val cb = w.callback ?: return@runCatching "no callback"
             if (cb is Wrapped) return@runCatching "already"
-            w.callback = Wrapped(cb, "root:$short")
+            w.callback = Wrapped(cb, "root:$short") { v }
             "wrapped ${cb.javaClass.simpleName}"
         }.getOrElse { "not wrapped (${it.javaClass.simpleName})" }
         Log.i(TAG, "BACK keys hooked root $short ${v.javaClass.simpleName} ($reason) callback $wrapped")

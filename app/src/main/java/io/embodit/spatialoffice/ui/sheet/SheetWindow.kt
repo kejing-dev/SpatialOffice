@@ -1,6 +1,8 @@
 package io.embodit.spatialoffice.ui.sheet
 
 import androidx.compose.foundation.ScrollState
+import io.embodit.spatialoffice.platform.typingTarget
+import io.embodit.spatialoffice.ui.noKeyFocus
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -215,7 +217,7 @@ fun FormulaBar(s: SheetSession, edit: CellEdit, modifier: Modifier = Modifier) {
                 keyboardActions = KeyboardActions(onDone = { edit.commit(s); s.select(s.row + 1, s.col); edit.load(s) }),
                 textStyle = TextStyle(fontSize = 17.sp, color = Ink.Text),
                 cursorBrush = SolidColor(Ink.Select),
-                modifier = Modifier.fillMaxWidth().focusRequester(edit.focus).semantics { contentDescription = "formula-input" },
+                modifier = Modifier.fillMaxWidth().focusRequester(edit.focus).typingTarget().semantics { contentDescription = "formula-input" },
             )
         }
     }
@@ -297,7 +299,7 @@ fun SheetGrid(
 
     Column(modifier.clip(RoundedCornerShape(12.dp)).background(Ink.Paper).border(1.dp, Ink.Line, RoundedCornerShape(12.dp)).then(dragSelect)) {
         Row(Modifier.fillMaxWidth().height(ROW_H).background(Ink.Header)) {
-            Box(Modifier.width(HEAD_W).height(ROW_H).clickable { edit?.commit(s); s.selectAll(); edit?.load(s) }.semantics { contentDescription = "sheet-all" })
+            Box(Modifier.width(HEAD_W).height(ROW_H).noKeyFocus().clickable { edit?.commit(s); s.selectAll(); edit?.load(s) }.semantics { contentDescription = "sheet-all" })
             Row(scroll) {
                 cols.forEach { c ->
                     HeadCell(A1.colName(c) + (if (c == s.filterCol) " ▾" else ""), colWidth(s, c), ROW_H, c in sel.c1..sel.c2, "col-" + A1.colName(c)) {
@@ -338,7 +340,7 @@ private fun GridRow(s: SheetSession, edit: CellEdit?, r: Int, cols: List<Int>, r
                         .background(if (inSel && (s.isRange || active)) Ink.SelectFill else Color.Transparent)
                         .border(if (active) 2.dp else 0.5.dp, if (active) Ink.Select else Ink.Line)
                         .rangeEdges(edges)
-                        .clickable {
+                        .noKeyFocus().clickable {
                             edit?.commit(s); s.select(r, c); edit?.load(s)
                             runCatching { edit?.focus?.requestFocus() }
                         }
@@ -391,7 +393,7 @@ private fun Modifier.rangeEdges(edges: BooleanArray?): Modifier = if (edges == n
 private fun HeadCell(label: String, width: Dp, height: Dp, active: Boolean, name: String, onClick: () -> Unit) {
     Box(
         Modifier.width(width).height(height).background(if (active) Ink.Range else Ink.Header).border(0.5.dp, Ink.Line)
-            .clickable(onClick = onClick).semantics { contentDescription = name },
+            .noKeyFocus().clickable(onClick = onClick).semantics { contentDescription = name },
         contentAlignment = Alignment.Center,
     ) {
         Text(label, style = TextStyle(fontSize = 14.sp, color = Ink.TextSoft, fontWeight = if (active) FontWeight.Bold else null), maxLines = 1)
@@ -523,7 +525,7 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
     Toolbar(
         supportingContent = { FileTools(graph, Win.SHEET, s) },
         content = {
-            Box(Modifier.focusRequester(keys).onPreviewKeyEvent { e -> commonKeys(graph, s, e) || sheetKeys(graph, s, edit, e) || typeIntoCell(s, edit, e) }.focusable()) {
+            Box(Modifier.focusRequester(keys).onPreviewKeyEvent { e -> commonKeys(graph, s, e) || sheetKeys(graph, s, edit, e) || typeIntoCell(s, edit, e) }.typingTarget().focusable()) {
             ToolRow {
                 // M2 s23: [Text ▾] takes the B button's place (B / I / U / strikethrough, sizes, clear formatting); the groups stay 8
                 ToolMenu(tr(R.string.menu_text), "sheet/text", enabled = !s.isCsv, entries = listOf(

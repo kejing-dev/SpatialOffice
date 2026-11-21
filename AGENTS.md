@@ -176,6 +176,15 @@ message. While a text field has the keyboard (`DeckSession.textEditing`) Ctrl+C 
 root view of the process and in an OnBackPressedCallback; `BackPolicy`: a dialog / sheet open → close it, the home
 window closed → bring it back, else nothing; never exit (log `BACK <where> -> <act>`). Windows open at once, there is no
 level-head gate any more (profile D9 / D10; `core/layout/LevelGate` removed, `Seat` kept in its own file).
+**Controller / keyboard keys never press a button (v0.4.2, QA #11 q11-1, profile D60).** Two layers: (1) every Button /
+IconButton / SegmentItem / MenuItem / `clickable` / `toggleable` carries `Modifier.noKeyFocus()` (`ui/Common.kt`,
+`focusProperties { canFocus = false }`), so a tapped button never keeps key focus; `KeyFocusTest` scans the sources and
+fails on a control without it. (2) the same window callback that catches BACK (`BackKeys.Wrapped`, plus the unhandled-key
+listener) runs `platform/KeyGuard`: every gamepad button except B and D-pad centre are eaten; Enter / Space are eaten
+unless a typing target of that window has focus (`Modifier.typingTarget()` on paragraphs, cells, slide text boxes, the
+formula bar, find fields, the sheet grid). Ctrl / Alt shortcuts, Tab, arrows and letters pass untouched. Log
+`KEYGUARD ate <key> at <window> typing=<bool>`. New dialogs / menus / windows are hooked by `BackKeys.sweepSoon` (overlay
+set, menu opened, window event). New controls: add `.noKeyFocus()`; new text inputs: add `.typingTarget()`.
 `ui/SafeSound`: SpatialUI 6.2.8 plays its click through `SpaceView.playSoundEffect`, which system images before that
 method lack (the 2026-09-01 PICO 6.1.0 emulator image): there the buttons are silent instead of the app dying on the
 first press (log `SOUND system click …`).

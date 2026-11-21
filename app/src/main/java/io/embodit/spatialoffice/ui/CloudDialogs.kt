@@ -67,7 +67,7 @@ fun CloudOverlays(graph: Graph, win: Win, tag: String? = null) {
 private fun WayRow(icon: Int, title: String, sub: String, tag: String, enabled: Boolean, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = 76.dp).clip(RoundedCornerShape(18.dp)).background(PicoTheme.colorScheme.fillSecondary)
-            .then(if (enabled) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier.alpha(0.55f))
+            .then(if (enabled) Modifier.noKeyFocus().clickable(role = Role.Button, onClick = onClick) else Modifier.alpha(0.55f))
             .semantics { contentDescription = tag }.padding(horizontal = 18.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

@@ -132,10 +132,11 @@ class Graph(val app: Application) {
         set(v) {
             if (v != null && v.tag == null) v.tag = when (v.win) { Win.DOC -> doc?.tag; Win.SHEET -> sheet?.tag; Win.SLIDES -> deck?.tag; else -> null }
             overlayState = v
+            if (v != null) BackKeys.sweepSoon("overlay ${v.javaClass.simpleName}")
         }
 
     /** Shows [o] in [s]'s own window. */
-    fun show(s: Session, o: Overlay) { activate(s); o.tag = s.tag; overlayState = o }
+    fun show(s: Session, o: Overlay) { activate(s); o.tag = s.tag; overlayState = o; BackKeys.sweepSoon("overlay ${o.javaClass.simpleName}") }
     var toast by mutableStateOf<Toast?>(null)
         private set
     /** Bumped when the set of files on disk may have changed (new, save, rename), so lists re-read. */

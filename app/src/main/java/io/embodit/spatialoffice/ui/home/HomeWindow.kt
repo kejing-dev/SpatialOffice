@@ -1,6 +1,7 @@
 package io.embodit.spatialoffice.ui.home
 
 import android.content.Intent
+import io.embodit.spatialoffice.ui.noKeyFocus
 import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -95,7 +96,7 @@ private fun NavItem(graph: Graph, page: HomePage, icon: Int, label: Int) {
     SideNavigationItem(
         selected = graph.homePage == page,
         contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
-        modifier = Modifier.heightIn(min = 56.dp).clickable { graph.homePage = page; Log.i(TAG, "PAGE $page") },
+        modifier = Modifier.heightIn(min = 56.dp).noKeyFocus().clickable { graph.homePage = page; Log.i(TAG, "PAGE $page") },
         leading = { Icon(painter = painterResource(icon), contentDescription = null, modifier = Modifier.size(22.dp)) },
     ) {
         Txt(tr(label), "home/nav", style = PicoTheme.typography.titleMedium)
@@ -181,7 +182,7 @@ internal fun FileRow(name: String, meta: String, kind: FileKind, folder: Boolean
         headlineContent = { Txt(name, "$tag/name", style = PicoTheme.typography.titleMedium, maxLines = 2) },
         supportingContent = { Txt(meta, "$tag/meta", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2) },
         leadingContent = { FileTile(kind, folder) },
-        modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp).clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 72.dp).noKeyFocus().clickable(onClick = onClick),
     )
 }
 
@@ -275,7 +276,7 @@ internal fun QuickNewRow(graph: Graph, cover: androidx.compose.ui.unit.Dp, top: 
 @Composable
 private fun NewCard(cover: Int, label: String, ext: String, tag: String, coverHeight: androidx.compose.ui.unit.Dp, onClick: () -> Unit) {
     Column(
-        Modifier.width(224.dp).clip(RoundedCornerShape(20.dp)).background(PicoTheme.colorScheme.fillSecondary).clickable(onClick = onClick).padding(12.dp),
+        Modifier.width(224.dp).clip(RoundedCornerShape(20.dp)).background(PicoTheme.colorScheme.fillSecondary).noKeyFocus().clickable(onClick = onClick).padding(12.dp),
     ) {
         Image(painter = painterResource(cover), contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxWidth().height(coverHeight).clip(RoundedCornerShape(12.dp)))
         Spacer(Modifier.height(10.dp))

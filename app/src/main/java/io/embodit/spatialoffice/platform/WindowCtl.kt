@@ -91,6 +91,7 @@ class WindowCtl(private val graph: Graph) {
     fun seen(ref: WinRef, focused: Boolean, onstage: Boolean, sighted: Boolean) {
         seen[ref] = Triple(focused, onstage, sighted)
         Log.i(TAG, "WINDOW $ref focused=$focused onstage=$onstage sighted=$sighted")
+        BackKeys.sweepSoon("window $ref") // v0.4.2: its toolbar / ornament windows attach after the activity resumes
     }
 
     /** The tag an editor window shows when its bundle did not carry one: the oldest window of [win] still waiting for content. */
@@ -122,6 +123,7 @@ class WindowCtl(private val graph: Graph) {
             "ON_DESTROY" -> { resumedAt.remove(ref); askedAt.remove(ref); if (ref.win == Win.STAGE) stageDestroyedAt = SystemClock.elapsedRealtime() }
         }
         Log.i(TAG, "WINDOW $ref $event")
+        BackKeys.sweepSoon("window $ref") // v0.4.2: its toolbar / ornament windows attach after the activity resumes
         if (event == "ON_DESTROY" && !exiting && ref.editor && ref !in closedForStage && ref !in reopen) graph.windowClosed(ref)
     }
 

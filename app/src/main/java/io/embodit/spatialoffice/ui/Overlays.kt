@@ -1,6 +1,7 @@
 package io.embodit.spatialoffice.ui
 
 import androidx.compose.foundation.background
+import io.embodit.spatialoffice.platform.typingTarget
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
@@ -185,7 +186,7 @@ private fun SaveAsSheet(graph: Graph, win: Win, s: Session) {
                 Row(
                     Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(16.dp))
                         .background(if (on) PicoTheme.colorScheme.fillSecondary else PicoTheme.colorScheme.fillLight)
-                        .clickable { choice = t }.padding(horizontal = 16.dp, vertical = 8.dp),
+                        .noKeyFocus().clickable { choice = t }.padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (t == SaveAsTarget.CLOUD) Icon(painter = painterResource(R.drawable.ic_cloud), contentDescription = null, modifier = Modifier.size(20.dp), tint = if (on) PicoTheme.colorScheme.interaction else PicoTheme.colorScheme.labelPrimary)
@@ -274,7 +275,7 @@ private fun CompatPanel(graph: Graph, s: Session) {
 /** The close button of every sheet, labelled in the app language (the built-in one reads the system language). */
 @Composable
 fun SheetClose(onClick: () -> Unit) {
-    IconButton(onClick = onClick, modifier = Modifier.size(48.dp)) {
+    IconButton(onClick = onClick, modifier = Modifier.noKeyFocus().size(48.dp)) {
         Icon(painter = painterResource(R.drawable.ic_cross), contentDescription = tr(R.string.close), modifier = Modifier.size(20.dp))
     }
 }
@@ -404,7 +405,7 @@ private fun after(h: io.embodit.spatialoffice.platform.FindHit, ref: io.embodit.
 fun CheckRow(label: String, on: Boolean, tag: String, onChange: (Boolean) -> Unit) {
     Row(
         Modifier.heightIn(min = 56.dp).clip(RoundedCornerShape(16.dp))
-            .toggleable(value = on, role = androidx.compose.ui.semantics.Role.Switch) { onChange(it) }.padding(horizontal = 12.dp)
+            .noKeyFocus().toggleable(value = on, role = androidx.compose.ui.semantics.Role.Switch) { onChange(it) }.padding(horizontal = 12.dp)
             .semantics { contentDescription = tag },
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -523,7 +524,7 @@ fun LabeledField(label: String, value: String, tag: String, onChange: (String) -
             value = value, onValueChange = onChange, singleLine = true,
             textStyle = androidx.compose.ui.text.TextStyle(fontSize = androidx.compose.ui.unit.TextUnit(18f, androidx.compose.ui.unit.TextUnitType.Sp), color = PicoTheme.colorScheme.labelPrimary),
             cursorBrush = androidx.compose.ui.graphics.SolidColor(PicoTheme.colorScheme.interaction),
-            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(14.dp)).background(PicoTheme.colorScheme.fillSecondary)
+            modifier = Modifier.typingTarget().fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(14.dp)).background(PicoTheme.colorScheme.fillSecondary)
                 .padding(horizontal = 16.dp, vertical = 16.dp).androidSemantics(tag),
         )
     }
@@ -606,7 +607,7 @@ private fun ImagePickSheet(graph: Graph, win: Win) {
             files.forEach { f ->
                 Row(
                     Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(14.dp)).background(PicoTheme.colorScheme.fillLight)
-                        .clickable { graph.imageChosen(win, io.embodit.spatialoffice.platform.FileRef.Path(f)) }.padding(horizontal = 16.dp, vertical = 8.dp)
+                        .noKeyFocus().clickable { graph.imageChosen(win, io.embodit.spatialoffice.platform.FileRef.Path(f)) }.padding(horizontal = 16.dp, vertical = 8.dp)
                         .semantics { contentDescription = "img-" + f.name },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {

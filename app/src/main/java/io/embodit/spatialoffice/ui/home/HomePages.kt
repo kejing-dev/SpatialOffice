@@ -1,6 +1,7 @@
 package io.embodit.spatialoffice.ui.home
 
 import androidx.compose.foundation.layout.Arrangement
+import io.embodit.spatialoffice.ui.noKeyFocus
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -144,7 +145,7 @@ internal fun SettingsPage(graph: Graph) {
         // the whole row toggles (the bare Switch is far smaller than 48 dp)
         SettingRow(
             tr(R.string.set_keep), tr(R.string.set_keep_sub), "settings/keep",
-            Modifier.clip(RoundedCornerShape(16.dp)).toggleable(value = s.keepBackup, role = Role.Switch) { v -> graph.settings.update { it.copy(keepBackup = v) } },
+            Modifier.clip(RoundedCornerShape(16.dp)).noKeyFocus().toggleable(value = s.keepBackup, role = Role.Switch) { v -> graph.settings.update { it.copy(keepBackup = v) } },
         ) { Switch(checked = s.keepBackup, onCheckedChange = null) }
         SettingRow(tr(R.string.set_radius), tr(R.string.set_radius_sub), "settings/radius") {
             Segments(listOf(0 to "1.2 m", 1 to "1.5 m", 2 to "1.8 m"), s.radius, "settings/radius", itemWidth = 88.dp) { v -> graph.settings.update { it.copy(radius = v) } }

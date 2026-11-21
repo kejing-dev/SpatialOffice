@@ -73,7 +73,7 @@ fun EditorTitleBar(graph: Graph, win: Win, s: Session, extra: (@Composable () ->
     TitleBar(
         modifier = Modifier.fillMaxWidth(),
         leadingActions = {
-            IconButton(onClick = { graph.requestClose(s) }, modifier = Modifier.size(48.dp).semantics { contentDescription = "close-file" }) {
+            IconButton(onClick = { graph.requestClose(s) }, modifier = Modifier.noKeyFocus().size(48.dp).semantics { contentDescription = "close-file" }) {
                 Icon(painter = painterResource(R.drawable.ic_cross), contentDescription = tr(R.string.close_file), modifier = Modifier.size(20.dp))
             }
         },
@@ -98,9 +98,9 @@ fun EditorTitleBar(graph: Graph, win: Win, s: Session, extra: (@Composable () ->
                             onDismissRequest = { menu = false },
                             positionProvider = rememberMenuPositionProvider(horizontalPlacement = HorizontalPlacement.alignEnd(), verticalPlacement = VerticalPlacement.below(offset = 8.dp)),
                         ) {
-                            MenuItem(title = { Txt(tr(R.string.menu_layout_file), "editor/menu") }, onClick = { menu = false; graph.layoutWithFile(s) })
-                            MenuItem(title = { Txt(tr(R.string.menu_open_backup), "editor/menu") }, onClick = { menu = false; graph.openBackup(s) })
-                            MenuItem(title = { Txt(tr(R.string.menu_shortcuts), "editor/menu") }, onClick = { menu = false; graph.show(s, Overlay.Shortcuts(win)) })
+                            MenuItem(title = { Txt(tr(R.string.menu_layout_file), "editor/menu") }, onClick = { menu = false; graph.layoutWithFile(s) }, modifier = Modifier.noKeyFocus())
+                            MenuItem(title = { Txt(tr(R.string.menu_open_backup), "editor/menu") }, onClick = { menu = false; graph.openBackup(s) }, modifier = Modifier.noKeyFocus())
+                            MenuItem(title = { Txt(tr(R.string.menu_shortcuts), "editor/menu") }, onClick = { menu = false; graph.show(s, Overlay.Shortcuts(win)) }, modifier = Modifier.noKeyFocus())
                         }
                     }
                 }

@@ -1,6 +1,7 @@
 package io.embodit.spatialoffice.ui.space
 
 import androidx.compose.foundation.background
+import io.embodit.spatialoffice.ui.noKeyFocus
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -194,7 +195,7 @@ private fun PiecePanel(graph: Graph, index: Int?) {
             else -> {}
         }
         // a piece that is not in front is one big target: click it and it turns to the front
-        if (!focused) Box(Modifier.fillMaxSize().clickable { graph.focusOn(index) })
+        if (!focused) Box(Modifier.fillMaxSize().noKeyFocus().clickable { graph.focusOn(index) })
     }
 }
 

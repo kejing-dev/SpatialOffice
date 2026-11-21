@@ -1,6 +1,8 @@
 package io.embodit.spatialoffice.ui.doc
 
 import androidx.compose.ui.layout.onSizeChanged
+import io.embodit.spatialoffice.platform.typingTarget
+import io.embodit.spatialoffice.ui.noKeyFocus
 import io.embodit.spatialoffice.ui.dragTotal
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -313,7 +315,7 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
         if (all.isEmpty() && focus != null && !s.readOnly) item("empty") {
             Text(
                 tr(R.string.doc_placeholder), style = paraStyle(ParaStyle.BODY).copy(color = Ink.Hint),
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { focus.want = s.insertAfter(-1, emptyList(), ParaStyle.BODY) },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).noKeyFocus().clickable { focus.want = s.insertAfter(-1, emptyList(), ParaStyle.BODY) },
             )
         }
         items(all, key = { it.id }) { b ->
@@ -385,7 +387,7 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
             },
             textStyle = paraTextStyle(b),
             cursorBrush = SolidColor(Ink.Select),
-            modifier = Modifier.weight(1f).heightIn(min = 32.dp).focusRequester(requester)
+            modifier = Modifier.weight(1f).heightIn(min = 32.dp).focusRequester(requester).typingTarget()
                 .semantics { contentDescription = "paragraph-${b.id}" }
                 .onFocusChanged { if (it.isFocused) { focus.id = b.id; s.caretBlock = b.id; focus.selection = value.selection; s.picked = -1 } }
                 .onPreviewKeyEvent { e ->
@@ -454,7 +456,7 @@ private fun PictureView(s: DocSession, b: UiBlock.Image, editable: Boolean) {
             Image(
                 bitmap = bmp.asImageBitmap(), contentDescription = null, contentScale = ContentScale.FillBounds,
                 modifier = Modifier.fillMaxSize()
-                    .then(if (editable) Modifier.clickable(interactionSource = remember(b.id) { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { s.picked = b.id } else Modifier)
+                    .then(if (editable) Modifier.noKeyFocus().clickable(interactionSource = remember(b.id) { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { s.picked = b.id } else Modifier)
                     .then(if (picked) Modifier.border(3.dp, Ink.Select) else Modifier)
                     .semantics { contentDescription = "doc-picture-${b.id}" },
             )
@@ -551,7 +553,7 @@ private fun TableGrid(b: UiBlock.Table, edit: DocSession?, windowFocus: () -> Un
                             onValueChange = { text = it; edit.setTableCell(b.id, r, c, it.text) },
                             textStyle = style,
                             cursorBrush = SolidColor(Ink.Select),
-                            modifier = cellMod.focusRequester(requester)
+                            modifier = cellMod.focusRequester(requester).typingTarget()
                                 .onFocusChanged {
                                     focused = it.isFocused
                                     if (it.isFocused) { edit.tableCaret = Triple(b.id, r, c); edit.picked = b.id; text = text.copy(selection = TextRange(text.text.length)) }
@@ -602,7 +604,7 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
         supportingContent = { FileTools(graph, Win.DOC, s) },
         content = {
             if (!s.readOnly) Box(
-                Modifier.focusRequester(keys).onPreviewKeyEvent { e -> toolbarKeys(graph, s, e) }.focusable(),
+                Modifier.focusRequester(keys).onPreviewKeyEvent { e -> toolbarKeys(graph, s, e) }.typingTarget().focusable(),
             ) { ToolRow {
                 // q1-5: a short name on a fixed-width button (the menu keeps the long names), so [Save] never gets squeezed
                 ToolMenu(styleShort(para?.style ?: ParaStyle.BODY), "doc/style", enabled = canEdit && s.styled, width = STYLE_BUTTON_W, entries = listOf(ParaStyle.BODY, ParaStyle.H1, ParaStyle.H2, ParaStyle.H3, ParaStyle.TITLE).map { st ->

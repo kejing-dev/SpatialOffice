@@ -31,7 +31,7 @@ class SpatialApplication : Application() {
             override fun onActivityPostCreated(a: Activity, b: Bundle?) { BackKeys.wrap(a); BackKeys.sweep("created") }
             override fun onActivityStarted(a: Activity) = BackKeys.sweep("started")
             override fun onActivityResumed(a: Activity) { BackKeys.wrap(a); BackKeys.sweep("resumed") }
-            override fun onActivityPostResumed(a: Activity) = BackKeys.sweep("post-resumed")
+            override fun onActivityPostResumed(a: Activity) { BackKeys.sweep("post-resumed"); BackKeys.sweepSoon("post-resumed") }
             override fun onActivityPaused(a: Activity) {}
             override fun onActivityStopped(a: Activity) {}
             override fun onActivitySaveInstanceState(a: Activity, b: Bundle) {}

@@ -1,5 +1,12 @@
 # Changelog · 更新记录
 
+## v0.4.2 · 2026-11-21
+
+- 修好：手柄 A / X / Y、回车、确认键不会再「点」到窗口里的按钮。之前在演示窗口按几下会多出空白页，在「找回没保存的改动？」上按 A 会把改动删掉
+- 窗口按钮、菜单项、开关、列表行都拿不到键盘焦点；回车只在正在打字的地方（段落、单元格、文本框、查找框）起作用，Ctrl 快捷键、Tab、方向键照常
+- Fixed: controller A / X / Y, Enter and the centre key no longer press a window button (before, a few presses added blank slides, and A on "Recover unsaved changes?" threw the changes away)
+- Window buttons, menu entries, switches and list rows never take key focus; Enter only works where you are typing (paragraph, cell, text box, find field); Ctrl shortcuts, Tab and arrows work as before
+
 ## v0.4.1 · 2026-11-21
 
 - 修好：打开一个文本框里有两段以上项目符号的演示文件会闪退；选中跨两段的文字加 / 去项目符号也不再闪退

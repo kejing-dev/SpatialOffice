@@ -27,6 +27,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -181,11 +182,19 @@ fun Txt(
     )
 }
 
+/**
+ * Profile D60 / QA #11 q11-1: window buttons, menu entries, rows and switches never take key focus, so controller A /
+ * Enter / centre cannot press them (they still answer rays, gaze + pinch and touch). Typing targets keep their focus.
+ * Every Button / IconButton / SegmentItem / MenuItem / clickable / toggleable of the app goes through this
+ * (NoKeyFocusSourceTest scans the sources); the window callback eats the keys as well ([io.embodit.spatialoffice.platform.KeyGuard]).
+ */
+fun Modifier.noKeyFocus(): Modifier = this.focusProperties { canFocus = false }
+
 /** Main action, 64 dp high. */
 @Composable
 fun PrimaryButton(text: String, tag: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, icon: Int? = null) {
     Button(
-        onClick = onClick, modifier = modifier, enabled = enabled,
+        onClick = onClick, modifier = modifier.noKeyFocus(), enabled = enabled,
         size = ButtonDefaults.Regular.copy(height = 64.dp, minWidth = 144.dp),
         shape = RoundedCornerShape(32.dp),
         colors = ButtonDefaults.buttonColors(containerColor = PicoTheme.colorScheme.interaction, contentColor = PicoTheme.colorScheme.labelPrimaryLight),
@@ -202,7 +211,7 @@ fun PrimaryButton(text: String, tag: String, onClick: () -> Unit, modifier: Modi
 fun SecondaryButton(text: String, tag: String, onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, icon: Int? = null, danger: Boolean = false) {
     val fg = if (danger) PicoTheme.colorScheme.labelPrimaryLight else PicoTheme.colorScheme.labelPrimary
     Button(
-        onClick = onClick, modifier = modifier, enabled = enabled,
+        onClick = onClick, modifier = modifier.noKeyFocus(), enabled = enabled,
         size = ButtonDefaults.Regular.copy(height = 64.dp, minWidth = 112.dp),
         shape = RoundedCornerShape(32.dp),
         colors = ButtonDefaults.buttonColors(containerColor = if (danger) PicoTheme.colorScheme.error else PicoTheme.colorScheme.fillSecondary, contentColor = fg),
@@ -225,7 +234,7 @@ fun ToolButton(text: String, tag: String, onClick: () -> Unit, enabled: Boolean 
     Button(
         onClick = onClick, enabled = enabled,
         // a fixed width for buttons whose label follows the state (paragraph style), so the row never reflows
-        modifier = if (width != null) Modifier.width(width) else Modifier,
+        modifier = (if (width != null) Modifier.width(width) else Modifier).noKeyFocus(),
         // gate:allow button-height editor toolbar: 14–16 tools in one system Toolbar (PRD §11), 48 dp targets
         size = ButtonDefaults.Small.copy(height = 48.dp, minWidth = 64.dp),
         shape = RoundedCornerShape(24.dp),
@@ -244,7 +253,7 @@ fun ToolButton(text: String, tag: String, onClick: () -> Unit, enabled: Boolean 
 fun ToolIcon(icon: Int, label: String, onClick: () -> Unit, enabled: Boolean = true, size: Dp = 48.dp) {
     IconButton(
         onClick = onClick, enabled = enabled,
-        modifier = Modifier.size(size).semantics { contentDescription = label },
+        modifier = Modifier.noKeyFocus().size(size).semantics { contentDescription = label },
     ) {
         Icon(painter = painterResource(icon), contentDescription = null, modifier = Modifier.size(size * 22 / 48))
     }
@@ -254,7 +263,7 @@ fun ToolIcon(icon: Int, label: String, onClick: () -> Unit, enabled: Boolean = t
 fun ToolToggle(icon: Int, label: String, checked: Boolean, onChange: (Boolean) -> Unit, enabled: Boolean = true) {
     ToggleIconButton(
         checked = checked, onCheckedChange = onChange, enabled = enabled,
-        modifier = Modifier.size(48.dp).semantics { contentDescription = label },
+        modifier = Modifier.noKeyFocus().size(48.dp).semantics { contentDescription = label },
     ) {
         Icon(painter = painterResource(icon), contentDescription = null, modifier = Modifier.size(22.dp))
     }
@@ -281,7 +290,7 @@ fun <T> Segments(options: List<Pair<T, String>>, selected: T, tag: String, modif
             SegmentItem(
                 selected = value == selected,
                 onClick = { onSelect(value) },
-                modifier = Modifier.width(itemWidth).fillMaxHeight(),
+                modifier = Modifier.noKeyFocus().width(itemWidth).fillMaxHeight(),
                 title = { Txt(label, "$tag/segment", style = labelStyle ?: PicoTheme.typography.labelLarge) },
             )
         }
@@ -311,7 +320,7 @@ fun ToolMenu(label: String, tag: String, entries: List<MenuEntry>, enabled: Bool
     var open by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var page by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<MenuEntry?>(null) }
     Box {
-        ToolButton(label, tag, onClick = { open = !open; page = null }, enabled = enabled && entries.isNotEmpty(), icon = icon, width = width)
+        ToolButton(label, tag, onClick = { open = !open; page = null; if (open) io.embodit.spatialoffice.platform.BackKeys.sweepSoon("menu $tag") }, enabled = enabled && entries.isNotEmpty(), icon = icon, width = width)
         if (open) {
             // the open page follows the entries as they are now (a tick moves after a pick)
             val sub = page?.let { p -> entries.firstOrNull { it.tag == p.tag && it.sub != null }?.sub ?: p.sub }
@@ -326,11 +335,13 @@ fun ToolMenu(label: String, tag: String, entries: List<MenuEntry>, enabled: Bool
                 if (sub != null) com.pico.spatial.ui.design.menu.MenuItem(
                     title = { Txt("‹  " + page!!.label.removeSuffix("  ›"), "$tag/back") },
                     onClick = { page = null },
+                    modifier = Modifier.noKeyFocus(),
                 )
                 (sub ?: entries).forEach { e ->
                     com.pico.spatial.ui.design.menu.MenuItem(
                         title = { Txt((if (e.checked) "✓ " else "") + e.label, "$tag/item") },
                         onClick = { if (e.sub != null) page = e else { open = false; page = null; e.onClick() } },
+                        modifier = Modifier.noKeyFocus(),
                     )
                 }
             }

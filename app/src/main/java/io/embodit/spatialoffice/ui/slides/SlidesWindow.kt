@@ -1,6 +1,8 @@
 package io.embodit.spatialoffice.ui.slides
 
 import io.embodit.spatialoffice.platform.SOFT_BREAK
+import io.embodit.spatialoffice.platform.typingTarget
+import io.embodit.spatialoffice.ui.noKeyFocus
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.ParagraphStyle
@@ -256,7 +258,7 @@ private fun Thumbnails(s: DeckSession, modifier: Modifier) {
                             onDragCancel = { dragFrom = -1; dragDy = 0f },
                         )
                     }
-                    .clickable { s.current = i; s.selected = -1 }.semantics { contentDescription = "slide-thumb-${i + 1}" },
+                    .noKeyFocus().clickable { s.current = i; s.selected = -1 }.semantics { contentDescription = "slide-thumb-${i + 1}" },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Txt((i + 1).toString(), "slides/thumb-no", Modifier.width(26.dp), style = PicoTheme.typography.labelLarge, color = if (on) PicoTheme.colorScheme.labelPrimary else PicoTheme.colorScheme.labelSecondary)
@@ -338,7 +340,7 @@ fun SlideCanvas(s: DeckSession, index: Int, width: Dp, editable: Boolean, modifi
                 sh.fillRgb?.takeIf { sh.kind != ShapeKind.PICTURE }?.let { rgb -> box = box.background(Color(0xFF000000 or rgb.toLong()), geomShape(sh.geom, w)) }
                 // press and drag anywhere on the object moves it; a click picks it
                 val move = if (canDrag) Modifier.objectDrag(s, sh.id, pxPerEmu, null) else Modifier
-                val pick = if (editable) Modifier.clickable(interactionSource = remember(sh.id) { MutableInteractionSource() }, indication = null) { s.selected = sh.id; focusManager.clearFocus() } else Modifier
+                val pick = if (editable) Modifier.noKeyFocus().clickable(interactionSource = remember(sh.id) { MutableInteractionSource() }, indication = null) { s.selected = sh.id; focusManager.clearFocus() } else Modifier
                 when {
                     sh.kind == ShapeKind.PICTURE -> sh.imagePart?.let { s.image(it) }?.let { bmp ->
                         Image(
@@ -432,7 +434,7 @@ private fun TapEdit(
     if (!editing && text != model) text = model
     val requester = remember(key) { FocusRequester() }
     val outer = if (editing || !editable) whole
-    else whole.clickable(interactionSource = remember(key) { MutableInteractionSource() }, indication = null) { onPick(); hadFocus = false; editing = true }.semantics { contentDescription = name }
+    else whole.noKeyFocus().clickable(interactionSource = remember(key) { MutableInteractionSource() }, indication = null) { onPick(); hadFocus = false; editing = true }.semantics { contentDescription = name }
     Box(outer.then(inner).border(1.dp, if (editing) Ink.Select else Color(0x22000000), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp), contentAlignment = align) {
         if (text.isEmpty() && hint != null) Text(hint, style = style.copy(color = Ink.Hint), modifier = Modifier.fillMaxWidth())
         if (editing) {
@@ -441,7 +443,7 @@ private fun TapEdit(
                 onValueChange = { text = it; onChange(it) },
                 textStyle = style,
                 cursorBrush = SolidColor(Ink.Select),
-                modifier = Modifier.fillMaxWidth().focusRequester(requester)
+                modifier = Modifier.fillMaxWidth().focusRequester(requester).typingTarget()
                     .onFocusChanged { if (it.isFocused) { hadFocus = true; onPick(); onEditing(true) } else if (hadFocus) { editing = false; onEditing(false) } }
                     .semantics { contentDescription = name },
             )
@@ -571,7 +573,7 @@ private fun ShapeText(s: DeckSession, slide: Int, sh: Shape, box: Modifier, move
     val marks = remember(sh.paras) { BulletMarks(sh.paras) }
     if (!editable) {
         // thumbnails, and text this version does not edit: still picked and moved like any object on the editing canvas
-        val pick = if (canPick) move.clickable(interactionSource = remember(sh.id) { MutableInteractionSource() }, indication = null) { s.selected = sh.id } else Modifier
+        val pick = if (canPick) move.noKeyFocus().clickable(interactionSource = remember(sh.id) { MutableInteractionSource() }, indication = null) { s.selected = sh.id } else Modifier
         Box(box.then(pick), contentAlignment = align) {
             Text(marks.filter(rich).text, style = style, modifier = Modifier.fillMaxWidth())
         }
@@ -605,7 +607,7 @@ private fun RichTapEdit(
     }
     val requester = remember(key) { FocusRequester() }
     val outer = if (editing) whole
-    else whole.clickable(interactionSource = remember(key) { MutableInteractionSource() }, indication = null) { s.selected = sh.id; hadFocus = false; editing = true }.semantics { contentDescription = name }
+    else whole.noKeyFocus().clickable(interactionSource = remember(key) { MutableInteractionSource() }, indication = null) { s.selected = sh.id; hadFocus = false; editing = true }.semantics { contentDescription = name }
     Box(outer.border(1.dp, if (editing) Ink.Select else Color(0x22000000), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp), contentAlignment = align) {
         if (value.text.isEmpty() && hint != null) Text(hint, style = style.copy(color = Ink.Hint), modifier = Modifier.fillMaxWidth())
         if (editing) {
@@ -620,7 +622,7 @@ private fun RichTapEdit(
                 textStyle = style,
                 cursorBrush = SolidColor(Ink.Select),
                 visualTransformation = marks,
-                modifier = Modifier.fillMaxWidth().focusRequester(requester)
+                modifier = Modifier.fillMaxWidth().focusRequester(requester).typingTarget()
                     .onFocusChanged {
                         if (it.isFocused) { hadFocus = true; s.selected = sh.id; s.textEditing = true; s.textSel = DeckSession.TextSel(slide, sh.id, value.selection.min, value.selection.max) }
                         else if (hadFocus) { editing = false; s.textEditing = false }
