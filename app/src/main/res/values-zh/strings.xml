@@ -589,9 +589,12 @@
     <string name="hist_title">历史版本 · %1$s</string>
     <string name="hist_note">每次保存留一版，最多 %1$d 版，只存在这台设备上。</string>
     <string name="hist_empty" formatted="false">还没有保存过的版本。保存一次，这里就有一条。</string>
-    <string name="hist_newest" formatted="false"> · 最新</string>
+    <string name="hist_newest" formatted="false">· 最新</string>
     <string name="hist_kind_save">保存的版本 · %1$s</string>
     <string name="hist_kind_restore">恢复前的内容 · %1$s</string>
     <string name="hist_restore" formatted="false">恢复</string>
     <string name="hist_restored" formatted="false">这一版回来了。保存后才写进文件，撤销能退回。</string>
+    <string name="size_menu" formatted="false">字号</string>
+    <string name="hl_menu" formatted="false">高亮</string>
+    <string name="hl_none" formatted="false">清除高亮</string>
 </resources>

@@ -180,6 +180,39 @@ level-head gate any more (profile D9 / D10; `core/layout/LevelGate` removed, `Se
 method lack (the 2026-09-01 PICO 6.1.0 emulator image): there the buttons are silent instead of the app dying on the
 first press (log `SOUND system click …`).
 
+v0.4.0 (M2, design-package roadmap[1]; "Text formatting everywhere + version history"; no new panels, two new toolbar
+menus per editor and second pages inside menus):
+
+**Text model.** `core/text/Span` carries `color` (0xRRGGBB, null = automatic), `highlight` (Word name, documents only) and
+`size` (half-points, null = the paragraph's); `RichText.restyle / setColor / setHighlight / setSize / stepSize / clearFormat /
+common`; `FontSizes.LADDER` (Word's 8…72 pt list) and `PRESETS_PT` (12 14 18 24). Each format writer compares the model with
+the run's own formatting and touches only what differs, so untouched runs stay byte-identical (null = remove the element).
+**Documents** (`DocxDocument`): `Run.color / highlight / size`, `Paragraph.level / indentTw / lineSpacing / spaceBefore /
+spaceAfter / baseSizeHp` (size of text without its own: style chain, then docDefaults, else 20); `setListLevel` (own list
+definitions now have 9 levels), `setIndent`, `setLineSpacing`, `setParaSpacing` rewrite only the paragraph's `w:pPr`.
+`DocSession.formatRange(id, a, b, f)` is what [Text ▾] / [Colour ▾] (and `docfmt`) call; with only a caret they act on the
+whole paragraph, like B / I / U. Tab / Shift+Tab in a list item change its level (`ParaEditor` key handler →
+`setListLevel`); [Paragraph ▾] indent (`DocSession.indent`: list → level, other → 420 twips) and [Line spacing ›]. The paper
+draws levels (28 dp each, markers • ◦ ▪ / 1. a. i. counted per level), indent, spacing (`paraPadding`, `paraTextStyle`),
+colours, highlights and sizes (relative to `baseSizeHp`). **Spreadsheets** (`XlsxWorkbook`): `setItalic / setUnderline /
+setStrike / setFontColor / setFontSize / clearFont / defaultFontPt`, `Cell.italic / underline / strike / colorRgb / fontPt`;
+[Text ▾] replaced the B button (groups stay 8), [Colour ▾] = text colours + the fills that were [Fill ▾]; Ctrl+I / Ctrl+U.
+**Slides** (`PptxDeck`): `TextPara.runs` (effective formatting of each `a:r`, `src` = index among all runs of the box as
+stored now) and `TextPara.align`; `setShapeText` keeps a paragraph whose text, level, bullet, runs and align are unchanged
+verbatim. `DeckSession.spansOf / parasFrom` turn a box into one span list ("
+" between paragraphs) and back; typing
+(`setText`), find / replace and the menus all go through it, so mixed formats survive edits. `textSel` (the text field
+reports its selection) + `formatText` / `setParaFormat` / `textCommon`; with no selection they act on the whole box.
+The text field shows bullets through `BulletMarks` (a VisualTransformation, not text). `setShapeFill / setShapeLine /
+setShapeRotation`, `Shape.lineRgb / lineWidthEmu / rotation`; [Object ▾] › Fill ›, Line ›, rotate ±90°, straighten; the
+rotate handle beside the move tab (`core/layout/Rotation`: angle about the centre, 15° steps; written once on release).
+**Version history** (`platform/History`): every successful save keeps the saved bytes in
+`files/history/<sha1 of the key>/<millis>.save.v` (an unchanged save is not kept twice; newest 10); [Restore] keeps what
+the window holds as `.restore.v` first, then `Session.recover` (one undo step, unsaved). A first save that renames the
+file moves its history. Overlay `History` (doc More ▾, sheet Edit ▾, slides Page ▾). Logs: `DOCTEXT`, `PARA level|indent|
+line|spacing`, `SLIDETEXT`, `OBJSTYLE`, `HISTORY kept|restore|list`. Menus: `MenuEntry.sub` / `subMenu()` opens a second
+page of the same menu ([‹ back] first). Tests: `M2Test` (app), `DocxM2Test`, `PptxM2Test`, `XlsxM2Test`, `RotationTest`.
+
 ## The save rule
 
 Opening never changes a file. Saving rewrites only the parts that hold an edit, and inside such a part only the
@@ -247,6 +280,12 @@ Each command calls the same function as the control it stands for; the app logs 
 | `obj-copy` `obj-paste` `obj-dup` `z` | `front` `back` `forward` `backward` for `z` | Object ▸ … / Insert ▸ Paste on the picked slide object |
 | `notes` | text | the current slide's speaker notes |
 | `back` | — | what BACK / controller B does (BackPolicy) |
+| `docfmt` | `<i> <a>-<b>|all <op> [v]` | v0.4.0: [Text ▾] / [Colour ▾] on characters a..b of the i-th editable paragraph; op `color RRGGBB|none`, `highlight yellow|green|cyan|none`, `size-up`, `size-down`, `size <pt>`, `clear`, `strike|bold|italic|underline 1|0` (log `DOCTEXT debug … spans=…`) |
+| `doclevel`, `docindent`, `docline`, `docspace` | `<i> tab|shift-tab` / `<i> more|less` / `<i> 240|276|360|480|none` / `<i> <before>,<after>|none` | list level (what Tab / Shift+Tab do), indent, line spacing, space before / after |
+| `history`, `hist-restore` | `doc|sheet|slides` / `<win> <n>` | the version list; [Restore] on the n-th version counted from the oldest |
+| `font`, `font-color`, `font-size`, `font-clear` | `italic|underline|strike|bold 1|0` / `RRGGBB|none` / `<pt>|up|down` / — | sheet [Text ▾] / [Colour ▾] on the selection |
+| `stext-sel`, `stext` | `<a>,<b>` / `bold|italic|underline|strike`, `color RRGGBB|none`, `size up|down|<pt>`, `align 0|1|2`, `bullet 1|0`, `clear` | select characters of the picked slide text box, then the [Text ▾] / [Colour ▾] entries (log `SLIDETEXT debug … runs=…`) |
+| `obj-fill`, `obj-line`, `obj-rot`, `obj-rotby`, `rotdrag` | `RRGGBB|none` / `RRGGBB|none [pt]` / degrees / degrees / degrees | picked slide object: fill, line, rotation (absolute / by), the rotate handle (press, drag to that angle snapped to 15°, release) |
 | `dump` | — | log state only (v0.2.1 adds `tableCaret`, `cols`; v0.2.5 `open=[…]`, `chartOf`, `objBox`) |
 | `objdrag` | `move|top_left|top_right|bottom_left|bottom_right <n>x<dxEmu>,<dyEmu>` | n pointer steps on the picked slide object through the session calls the gesture makes |
 | `slide-table`, `slide-cell` | `rows,cols` / `r,c=text` | insert a table on the slide (picked) / set a cell of the picked table |
@@ -275,7 +314,7 @@ the others do not appear in the app at all.
 
 ## Not in this version
 
-Font / size / colour of text, comments and tracked changes (read-only), charts inside documents and slides,
+Fonts (typeface), comments and tracked changes (read-only), charts inside documents and slides,
 animations, merged cells / conditional formats (kept, not editable), web-page editing, pinned cards, named layouts,
 3D objects on slides. (v0.2.1 added scan-to-sign-in, the cloud conflict check and the Feishu inbox; none of them has
 run against a real account yet.)

@@ -95,6 +95,7 @@ import io.embodit.spatialoffice.ui.WindowFrame
 import io.embodit.spatialoffice.ui.commonKeys
 import io.embodit.spatialoffice.ui.colorEntries
 import io.embodit.spatialoffice.ui.sizeEntries
+import io.embodit.spatialoffice.ui.subMenu
 
 /** Which paragraph has the caret and what is selected in it; shared by the paper and the toolbar. */
 class DocFocus {
@@ -611,13 +612,17 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                 ToolToggle(R.drawable.ic_text_italic, tr(R.string.italic), hasAttr(s, focus, Attr.ITALIC), { toggle(s, focus, Attr.ITALIC) }, enabled = canEdit && s.richText)
                 ToolToggle(R.drawable.ic_text_underline, tr(R.string.underline), hasAttr(s, focus, Attr.UNDERLINE), { toggle(s, focus, Attr.UNDERLINE) }, enabled = canEdit && s.richText)
                 // M2 d15 / d16 / d18: [Text ▾] sizes, strikethrough (moved from More), clear formatting; [Colour ▾] colours and highlights
-                ToolMenu(tr(R.string.menu_text), "doc/text", enabled = canEdit && s.richText, entries =
-                    sizeEntries("doc/text", docCommon(s, focus) { it.size ?: para?.baseSizeHp }, { docStepSize(s, focus, it) }, { docSetSize(s, focus, it) }) + listOf(
-                        MenuEntry(tr(R.string.strike), "doc/strike", checked = hasAttr(s, focus, Attr.STRIKE)) { toggle(s, focus, Attr.STRIKE) },
-                        MenuEntry(tr(R.string.clear_format), "doc/clear-format") { docClearFormat(s, focus) },
-                    ))
-                ToolMenu(tr(R.string.menu_color), "doc/color", enabled = canEdit && s.richText, entries =
-                    colorEntries("doc/color", docCommon(s, focus) { it.color }, { docSetColor(s, focus, it) }, docCommon(s, focus) { it.highlight }, { docSetHighlight(s, focus, it) }))
+                // one [Text ▾] (the document toolbar has no room for a second button: [Save] stays in view in English):
+                // larger / smaller, then pages for the fixed sizes, colours and highlights
+                ToolMenu(tr(R.string.menu_text), "doc/text", enabled = canEdit && s.richText, entries = sizeEntries("doc/text", null, { docStepSize(s, focus, it) }, {}).take(2) + listOf(
+                    subMenu(tr(R.string.size_menu), "doc/size", sizeEntries("doc/text", docCommon(s, focus) { it.size ?: para?.baseSizeHp }, { docStepSize(s, focus, it) }, { docSetSize(s, focus, it) }).drop(2)),
+                    subMenu(tr(R.string.menu_color), "doc/color", colorEntries("doc/color", docCommon(s, focus) { it.color }, { docSetColor(s, focus, it) })),
+                    subMenu(tr(R.string.hl_menu), "doc/highlight", io.embodit.spatialoffice.ui.TextPalette.HIGHLIGHT.map { (name, v) ->
+                        MenuEntry(tr(R.string.hl_color, tr(name)), "doc/highlight-item", checked = docCommon(s, focus) { it.highlight } == v) { docSetHighlight(s, focus, v) }
+                    } + listOf(MenuEntry(tr(R.string.hl_none), "doc/highlight-none") { docSetHighlight(s, focus, null) })),
+                    MenuEntry(tr(R.string.strike), "doc/strike", checked = hasAttr(s, focus, Attr.STRIKE)) { toggle(s, focus, Attr.STRIKE) },
+                    MenuEntry(tr(R.string.clear_format), "doc/clear-format") { docClearFormat(s, focus) },
+                ))
                 ToolMenu(tr(R.string.menu_paragraph), "doc/paragraph", enabled = canEdit && s.styled, entries = listOfNotNull(
                     MenuEntry(tr(R.string.bullets), "doc/bullets", checked = para?.style == ParaStyle.BULLET) { restyle(if (para?.style == ParaStyle.BULLET) ParaStyle.BODY else ParaStyle.BULLET) },
                     MenuEntry(tr(R.string.numbering), "doc/numbering", checked = para?.style == ParaStyle.NUMBERED) { restyle(if (para?.style == ParaStyle.NUMBERED) ParaStyle.BODY else ParaStyle.NUMBERED) },

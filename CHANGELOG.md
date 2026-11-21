@@ -1,5 +1,20 @@
 # Changelog · 更新记录
 
+## v0.4.0 · 2026-11-21
+
+- 三类工具条都有 [文字 ▾] 和 [颜色 ▾]：选中几个字改字号（加大 / 减小 / 12 / 14 / 18 / 24 磅）、六种文字颜色、删除线、清除格式；文档还能加黄 / 绿 / 青高亮
+- 文档 [段落 ▾]：增加 / 减少缩进，编号和项目符号列表里 Tab / Shift+Tab 换级别（1. → a. → i.），行距 1.0 / 1.15 / 1.5 / 2.0，段前段后各 6 磅
+- 表格：[文字 ▾] 收进了原来的 B 键，加粗、斜体、下划线、删除线、字号都在里面（Ctrl+I / Ctrl+U 也行）；[颜色 ▾] 里是文字颜色和单元格填充色
+- 演示：文本框里只改选中的那几个字（加粗、斜体、下划线、颜色、字号），别的字原来什么格式还是什么格式；段落左中右对齐、项目符号
+- 演示 [所选对象 ▾]：填充色、线条颜色和粗细、向左 / 向右转 90°、转回正；选中对象后移动钮旁边多一个旋转钮，拖着转，15° 一档
+- 历史版本：每次保存留一版（只存在这台设备上，最多 10 版），[更多 ▾]（表格在 [编辑 ▾]，演示在 [页面 ▾]）› 历史版本 里点 [恢复]；恢复前的内容也会留一版，撤销能退回
+- Text ▾ and Colour ▾ in all three toolbars: size (larger / smaller / 12 / 14 / 18 / 24 pt), six text colours, strikethrough, clear formatting for the selected characters; documents also have yellow / green / cyan highlight
+- Documents Paragraph ▾: increase / decrease indent, Tab / Shift+Tab change a list item's level (1. → a. → i.), line spacing 1.0 / 1.15 / 1.5 / 2.0, 6 pt before and after
+- Sheets: Text ▾ takes the B button's place with bold, italic, underline, strikethrough and size (Ctrl+I / Ctrl+U too); Colour ▾ holds text colours and cell fills
+- Slides: format only the selected characters of a text box (bold, italic, underline, colour, size); the rest keep their own format; paragraph alignment and bullets
+- Slides Object ▾: fill, line colour and width, rotate left / right 90°, straighten; a rotate handle beside the move tab turns the picked object in 15° steps
+- Version history: every save keeps a version on this device (up to 10); More ▾ (sheets: Edit ▾, slides: Page ▾) › Version history › Restore; what you had before a restore is kept too, and Undo takes it back
+
 ## v0.3.0 · 2026-11-21
 
 - 表格：拖一下选一片（也可以点行号、列号，Shift+方向键加选，Ctrl+方向键跳到数据边上），选中的地方蓝框标出，下面一行显示求和 · 平均 · 计数；加粗、填充、数字格式对整片生效

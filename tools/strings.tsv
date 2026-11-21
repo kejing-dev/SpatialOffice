@@ -588,8 +588,11 @@ menu_history	历史版本…	Version history…
 hist_title	历史版本 · %1$s	Version history · %1$s
 hist_note	每次保存留一版，最多 %1$d 版，只存在这台设备上。	Every save keeps a version, up to %1$d, on this device only.
 hist_empty	还没有保存过的版本。保存一次，这里就有一条。	No saved versions yet. Save once and one shows up here.
-hist_newest	 · 最新	 · newest
+hist_newest	· 最新	· newest
 hist_kind_save	保存的版本 · %1$s	Saved · %1$s
 hist_kind_restore	恢复前的内容 · %1$s	Before a restore · %1$s
 hist_restore	恢复	Restore
 hist_restored	这一版回来了。保存后才写进文件，撤销能退回。	That version is back. Save to write it to the file; Undo takes it back.
+size_menu	字号	Size
+hl_menu	高亮	Highlight
+hl_none	清除高亮	No highlight

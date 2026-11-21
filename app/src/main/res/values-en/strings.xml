@@ -589,9 +589,12 @@
     <string name="hist_title">Version history · %1$s</string>
     <string name="hist_note">Every save keeps a version, up to %1$d, on this device only.</string>
     <string name="hist_empty" formatted="false">No saved versions yet. Save once and one shows up here.</string>
-    <string name="hist_newest" formatted="false"> · newest</string>
+    <string name="hist_newest" formatted="false">· newest</string>
     <string name="hist_kind_save">Saved · %1$s</string>
     <string name="hist_kind_restore">Before a restore · %1$s</string>
     <string name="hist_restore" formatted="false">Restore</string>
     <string name="hist_restored" formatted="false">That version is back. Save to write it to the file; Undo takes it back.</string>
+    <string name="size_menu" formatted="false">Size</string>
+    <string name="hl_menu" formatted="false">Highlight</string>
+    <string name="hl_none" formatted="false">No highlight</string>
 </resources>

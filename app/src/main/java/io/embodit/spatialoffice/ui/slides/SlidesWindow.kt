@@ -506,10 +506,17 @@ class BulletMarks(private val paras: List<TextPara>) : VisualTransformation {
                 added += prefix[pi].length
             }
             for (o in st until en) o2t[o] = o + added
-            if (en > st) out.append(text.subSequence(st, en))
+            // the characters with their span styles only: the paragraph styles are laid over again below, prefix included
+            if (en > st) text.subSequence(st, en).let { sub -> out.append(AnnotatedString(sub.text, sub.spanStyles)) }
         }
         o2t[t.length] = t.length + added
         val total = t.length + added
+        // a paragraph's alignment covers its bullet too (a bullet outside it would be a paragraph of its own)
+        for (ps in text.paragraphStyles) {
+            val pi = starts.indexOf(ps.start)
+            val from = o2t[ps.start.coerceIn(0, t.length)] - (if (pi >= 0) prefix[pi].length else 0)
+            out.addStyle(ps.item, from.coerceAtLeast(0), o2t[ps.end.coerceIn(0, t.length)])
+        }
         return TransformedText(out.toAnnotatedString(), object : OffsetMapping {
             override fun originalToTransformed(offset: Int): Int = o2t[offset.coerceIn(0, t.length)]
             override fun transformedToOriginal(offset: Int): Int {

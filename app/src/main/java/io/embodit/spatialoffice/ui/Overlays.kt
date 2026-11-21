@@ -455,7 +455,7 @@ private fun HistorySheet(graph: Graph, s: Session) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Txt(fmt.format(java.util.Date(v.at)) + (if (i == 0) tr(R.string.hist_newest) else ""), "hist/time", style = PicoTheme.typography.titleMedium, maxLines = 1)
+                        Txt(fmt.format(java.util.Date(v.at)) + (if (i == 0) "  " + tr(R.string.hist_newest) else ""), "hist/time", style = PicoTheme.typography.titleMedium, maxLines = 1)
                         Txt(tr(if (v.kind == io.embodit.spatialoffice.platform.History.KIND_BEFORE_RESTORE) R.string.hist_kind_restore else R.string.hist_kind_save, sizeLabel(v.size)), "hist/kind", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 1)
                     }
                     SecondaryButton(tr(R.string.hist_restore), "hist/restore", onClick = { graph.overlay = null; graph.restoreVersion(s, v) })
