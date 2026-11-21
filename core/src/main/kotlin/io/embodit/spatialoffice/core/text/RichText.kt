@@ -1,7 +1,14 @@
 package io.embodit.spatialoffice.core.text
 
-/** A stretch of text with one format. [src] = index of the run in the opened file whose other formatting it keeps (−1 = none). */
-data class Span(val text: String, val bold: Boolean = false, val italic: Boolean = false, val underline: Boolean = false, val src: Int = -1, val strike: Boolean = false)
+/**
+ * A stretch of text with one format. [src] = index of the run in the opened file whose other formatting it keeps (−1 = none).
+ * M2 (v0.4.0): [color] text colour 0xRRGGBB (null = automatic / inherited), [highlight] marker colour by its Word name
+ * ("yellow", "green", "cyan"; null = none; documents only), [size] font size in half-points (null = the paragraph's).
+ */
+data class Span(
+    val text: String, val bold: Boolean = false, val italic: Boolean = false, val underline: Boolean = false, val src: Int = -1, val strike: Boolean = false,
+    val color: Int? = null, val highlight: String? = null, val size: Int? = null,
+)
 
 enum class Attr { BOLD, ITALIC, UNDERLINE, STRIKE }
 
@@ -99,7 +106,43 @@ object RichText {
         return left to right
     }
 
-    private fun sameFormat(a: Span, b: Span) = a.bold == b.bold && a.italic == b.italic && a.underline == b.underline && a.strike == b.strike && a.src == b.src
+    /** Applies [f] to every span over characters [start, end) (spans are split at the ends). */
+    fun restyle(spans: List<Span>, start: Int, end: Int, f: (Span) -> Span): List<Span> {
+        if (end <= start) return spans
+        val (left, rest) = split(spans, start)
+        val (mid, right) = split(rest, end - start)
+        return normalize(left + mid.map(f) + right)
+    }
+
+    fun setColor(spans: List<Span>, start: Int, end: Int, rgb: Int?): List<Span> = restyle(spans, start, end) { it.copy(color = rgb) }
+    fun setHighlight(spans: List<Span>, start: Int, end: Int, name: String?): List<Span> = restyle(spans, start, end) { it.copy(highlight = name) }
+    fun setSize(spans: List<Span>, start: Int, end: Int, halfPoints: Int?): List<Span> = restyle(spans, start, end) { it.copy(size = halfPoints) }
+
+    /** d16 / p17: one step up ([steps] > 0) or down the size ladder for each span; a span without a size starts from [baseHp]. */
+    fun stepSize(spans: List<Span>, start: Int, end: Int, steps: Int, baseHp: Int): List<Span> =
+        restyle(spans, start, end) { it.copy(size = FontSizes.step(it.size ?: baseHp, steps)) }
+
+    /** d18: bold, italic, underline, strikethrough, colour, highlight and size all back to the paragraph's own. */
+    fun clearFormat(spans: List<Span>, start: Int, end: Int): List<Span> =
+        restyle(spans, start, end) { it.copy(bold = false, italic = false, underline = false, strike = false, color = null, highlight = null, size = null) }
+
+    /** The value of [get] when all characters in [start, end) share it, else null; an empty range reads the character before the caret. */
+    fun <T> common(spans: List<Span>, start: Int, end: Int, get: (Span) -> T?): T? {
+        if (end <= start) return formatAt(spans, if (start > 0) start - 1 else 0)?.let(get)
+        var pos = 0
+        var first = true
+        var v: T? = null
+        for (s in spans) {
+            val a = pos; val b = pos + s.text.length; pos = b
+            if (b <= start || a >= end || s.text.isEmpty()) continue
+            val x = get(s)
+            if (first) { v = x; first = false } else if (x != v) return null
+        }
+        return v
+    }
+
+    private fun sameFormat(a: Span, b: Span) = a.bold == b.bold && a.italic == b.italic && a.underline == b.underline && a.strike == b.strike && a.src == b.src &&
+        a.color == b.color && a.highlight == b.highlight && a.size == b.size
     private fun get(s: Span, attr: Attr) = when (attr) { Attr.BOLD -> s.bold; Attr.ITALIC -> s.italic; Attr.UNDERLINE -> s.underline; Attr.STRIKE -> s.strike }
     private fun with(s: Span, attr: Attr, on: Boolean) = when (attr) {
         Attr.BOLD -> s.copy(bold = on); Attr.ITALIC -> s.copy(italic = on); Attr.UNDERLINE -> s.copy(underline = on); Attr.STRIKE -> s.copy(strike = on)
@@ -141,5 +184,20 @@ object RichText {
         val (_, right) = split(rest, len)
         val mid = if (replacement.isEmpty()) emptyList() else listOf(fmt.copy(text = replacement))
         return normalize(left + mid + right)
+    }
+}
+
+/** Font size ladder in half-points (8 … 72 pt, Word's list): [step] moves along it. */
+object FontSizes {
+    val LADDER = intArrayOf(16, 18, 20, 21, 22, 24, 28, 32, 36, 40, 44, 48, 52, 56, 72, 96, 144)
+    /** The menu's fixed sizes (pt): 12, 14, 18, 24. */
+    val PRESETS_PT = intArrayOf(12, 14, 18, 24)
+
+    /** [hp] moved [steps] places along the ladder; a size between two places counts from the nearer one in the direction of travel. */
+    fun step(hp: Int, steps: Int): Int {
+        if (steps == 0) return hp
+        var i = if (steps > 0) LADDER.indexOfLast { it <= hp } else LADDER.indexOfFirst { it >= hp }
+        if (i < 0) i = if (steps > 0) -1 else LADDER.size
+        return LADDER[(i + steps).coerceIn(0, LADDER.size - 1)]
     }
 }
