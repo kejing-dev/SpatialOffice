@@ -8,6 +8,8 @@ package io.embodit.spatialoffice.core.text
 data class Span(
     val text: String, val bold: Boolean = false, val italic: Boolean = false, val underline: Boolean = false, val src: Int = -1, val strike: Boolean = false,
     val color: Int? = null, val highlight: String? = null, val size: Int? = null,
+    /** M3: [link] external hyperlink URL (documents), [vertAlign] "superscript" | "subscript" (null = baseline). */
+    val link: String? = null, val vertAlign: String? = null,
 )
 
 enum class Attr { BOLD, ITALIC, UNDERLINE, STRIKE }
@@ -118,13 +120,55 @@ object RichText {
     fun setHighlight(spans: List<Span>, start: Int, end: Int, name: String?): List<Span> = restyle(spans, start, end) { it.copy(highlight = name) }
     fun setSize(spans: List<Span>, start: Int, end: Int, halfPoints: Int?): List<Span> = restyle(spans, start, end) { it.copy(size = halfPoints) }
 
+    /** M3 d22: superscript / subscript ([v] "superscript" | "subscript"; null = back to the baseline). */
+    fun setVertAlign(spans: List<Span>, start: Int, end: Int, v: String?): List<Span> = restyle(spans, start, end) { it.copy(vertAlign = v) }
+
+    /** Link colour Word gives the Hyperlink style (0563C1), used for new links. */
+    const val LINK_RGB = 0x0563C1
+
+    /**
+     * M3 d20: makes characters [start, end) a link to [url] (blue, underlined), or with null takes the link away again
+     * (underline and colour go with it).
+     */
+    fun setLink(spans: List<Span>, start: Int, end: Int, url: String?): List<Span> = restyle(spans, start, end) {
+        if (url != null) it.copy(link = url, underline = true, color = LINK_RGB)
+        else if (it.link != null) it.copy(link = null, underline = false, color = if (it.color == LINK_RGB) null else it.color) else it
+    }
+
+    /** M3 d20: the link around character [at] (or the one before a caret at the end): its URL and character range. */
+    fun linkAt(spans: List<Span>, at: Int): Triple<String, Int, Int>? {
+        var pos = 0
+        val ranges = ArrayList<Triple<String?, Int, Int>>()
+        for (s in spans) { ranges.add(Triple(s.link, pos, pos + s.text.length)); pos += s.text.length }
+        val i = ranges.indexOfFirst { at >= it.second && at < it.third }.let { if (it < 0 && at > 0) ranges.indexOfFirst { r -> at == r.third } else it }
+        if (i < 0) return null
+        val url = ranges[i].first ?: return null
+        var a = i; var b = i
+        while (a > 0 && ranges[a - 1].first == url) a--
+        while (b < ranges.size - 1 && ranges[b + 1].first == url) b++
+        return Triple(url, ranges[a].second, ranges[b].third)
+    }
+
+    /** M3 d20: every link of a paragraph in order: URL and character range. */
+    fun links(spans: List<Span>): List<Triple<String, Int, Int>> {
+        val out = ArrayList<Triple<String, Int, Int>>()
+        var pos = 0
+        for (s in spans) {
+            val end = pos + s.text.length
+            val l = s.link
+            if (l != null) { val last = out.lastOrNull(); if (last != null && last.first == l && last.third == pos) out[out.size - 1] = Triple(l, last.second, end) else out.add(Triple(l, pos, end)) }
+            pos = end
+        }
+        return out
+    }
+
     /** d16 / p17: one step up ([steps] > 0) or down the size ladder for each span; a span without a size starts from [baseHp]. */
     fun stepSize(spans: List<Span>, start: Int, end: Int, steps: Int, baseHp: Int): List<Span> =
         restyle(spans, start, end) { it.copy(size = FontSizes.step(it.size ?: baseHp, steps)) }
 
     /** d18: bold, italic, underline, strikethrough, colour, highlight and size all back to the paragraph's own. */
     fun clearFormat(spans: List<Span>, start: Int, end: Int): List<Span> =
-        restyle(spans, start, end) { it.copy(bold = false, italic = false, underline = false, strike = false, color = null, highlight = null, size = null) }
+        restyle(spans, start, end) { it.copy(bold = false, italic = false, underline = it.link != null && it.underline, strike = false, color = if (it.link != null) it.color else null, highlight = null, size = null, vertAlign = null) }
 
     /** The value of [get] when all characters in [start, end) share it, else null; an empty range reads the character before the caret. */
     fun <T> common(spans: List<Span>, start: Int, end: Int, get: (Span) -> T?): T? {
@@ -142,7 +186,7 @@ object RichText {
     }
 
     private fun sameFormat(a: Span, b: Span) = a.bold == b.bold && a.italic == b.italic && a.underline == b.underline && a.strike == b.strike && a.src == b.src &&
-        a.color == b.color && a.highlight == b.highlight && a.size == b.size
+        a.color == b.color && a.highlight == b.highlight && a.size == b.size && a.link == b.link && a.vertAlign == b.vertAlign
     private fun get(s: Span, attr: Attr) = when (attr) { Attr.BOLD -> s.bold; Attr.ITALIC -> s.italic; Attr.UNDERLINE -> s.underline; Attr.STRIKE -> s.strike }
     private fun with(s: Span, attr: Attr, on: Boolean) = when (attr) {
         Attr.BOLD -> s.copy(bold = on); Attr.ITALIC -> s.copy(italic = on); Attr.UNDERLINE -> s.copy(underline = on); Attr.STRIKE -> s.copy(strike = on)

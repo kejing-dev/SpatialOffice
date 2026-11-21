@@ -48,9 +48,21 @@ sealed class UiBlock {
     data class Para(
         override val id: Int, val style: ParaStyle, val spans: List<Span>, val editable: Boolean, val why: String?, val align: Int = 0,
         val level: Int = 0, val indentTw: Int = 0, val lineSpacing: Int? = null, val spaceBefore: Int? = null, val spaceAfter: Int? = null, val baseSizeHp: Int = 22,
-    ) : UiBlock()
+        /** M3 d21: drawn with a horizontal line under it (the file's bottom border). */
+        val rule: Boolean = false,
+    ) : UiBlock() {
+        /** M3 d21: nothing but page breaks: drawn as a page-break marker, not as text. */
+        val pageBreak: Boolean get() = spans.isNotEmpty() && spans.all { sp -> sp.text.all { it == PAGE_BREAK } }
+    }
     /** [widthPct]: share of the text width, 10–100. */
-    data class Table(override val id: Int, val rows: List<List<String>>, val widthPct: Int = 100) : UiBlock()
+    data class Table(
+        override val id: Int, val rows: List<List<String>>, val widthPct: Int = 100,
+        /** M3 d42: merged cells (anchors); a covered cell is drawn as part of its anchor. */
+        val merges: List<io.embodit.spatialoffice.core.docx.CellMerge> = emptyList(),
+    ) : UiBlock() {
+        fun covered(r: Int, c: Int): Boolean = merges.any { it.covers(r, c) && !(it.row == r && it.col == c) }
+        fun mergeAt(r: Int, c: Int): io.embodit.spatialoffice.core.docx.CellMerge? = merges.firstOrNull { it.row == r && it.col == c }
+    }
     /** [widthEmu] / [heightEmu]: the size the file gives the picture (0 = unknown, shown at the text width). */
     data class Image(override val id: Int, val bitmap: Bitmap?, val widthEmu: Long = 0, val heightEmu: Long = 0) : UiBlock()
     data class Opaque(override val id: Int, val kind: String) : UiBlock()
@@ -63,6 +75,9 @@ sealed class UiBlock {
  * speaker notes. [start] / [len]: the characters matched in that text.
  */
 data class FindHit(val a: Int, val b: Int = 0, val c: Int = 0, val start: Int, val len: Int)
+
+/** The character a page break is held as in paragraph text (`w:br w:type="page"`). */
+const val PAGE_BREAK = '\u000C'
 
 /** d17: one step of [Increase indent] for a paragraph that is not a list item: 420 twips (two characters of 10.5 pt). */
 const val INDENT_STEP_TW = 420
@@ -210,10 +225,10 @@ class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File)
             return d.blocks.map { b ->
                 when (b) {
                     is Paragraph -> UiBlock.Para(
-                        b.id, b.style, b.runs.map { Span(it.text, it.bold, it.italic, it.underline, it.src, it.strike, it.color, it.highlight, it.size) }, b.editable, b.readOnlyWhy, b.align,
-                        b.level, b.indentTw, b.lineSpacing, b.spaceBefore, b.spaceAfter, b.baseSizeHp,
+                        b.id, b.style, b.runs.map { Span(it.text, it.bold, it.italic, it.underline, it.src, it.strike, it.color, it.highlight, it.size, it.link, it.vertAlign) }, b.editable, b.readOnlyWhy, b.align,
+                        b.level, b.indentTw, b.lineSpacing, b.spaceBefore, b.spaceAfter, b.baseSizeHp, b.rule,
                     )
-                    is TableBlock -> UiBlock.Table(b.id, b.rows, b.widthPct)
+                    is TableBlock -> UiBlock.Table(b.id, b.rows, b.widthPct, b.merges)
                     is ImageBlock -> UiBlock.Image(b.id, images.getOrPut(b.part) { d.partBytes(b.part)?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() } }, b.widthEmu, b.heightEmu)
                     is OpaqueBlock -> UiBlock.Opaque(b.id, b.kind)
                 }
@@ -234,7 +249,7 @@ class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File)
 
     init { counted() }
 
-    private fun runs(spans: List<Span>) = spans.map { Run(it.text, it.bold, it.italic, it.underline, it.src, it.strike, it.color, it.highlight, it.size) }
+    private fun runs(spans: List<Span>) = spans.map { Run(it.text, it.bold, it.italic, it.underline, it.src, it.strike, it.color, it.highlight, it.size, it.link, it.vertAlign) }
 
     private fun para(id: Int): Paragraph? = docx?.blocks?.firstOrNull { it.id == id } as? Paragraph
 
@@ -369,6 +384,123 @@ class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File)
         return id
     }
 
+    // ---- M3 d20: links ----
+
+    /**
+     * Makes characters [a, b) of paragraph [id] a link to [url] (null takes the link away). One undo step; false when
+     * nothing changed or the paragraph cannot be edited.
+     */
+    fun setLink(id: Int, a: Int, b: Int, url: String?): Boolean {
+        val p = blocks().firstOrNull { it.id == id } as? UiBlock.Para ?: return false
+        if (!richText || !p.editable || readOnly) return false
+        val len = RichText.text(p.spans).length
+        val from = a.coerceIn(0, len); val to = b.coerceIn(0, len)
+        if (to <= from) return false
+        val u = url?.let { normalizeUrl(it) }?.takeIf { it.isNotEmpty() }
+        if (url != null && u == null) return false
+        val next = RichText.setLink(p.spans, from, to, u)
+        if (next == p.spans) return false
+        // its own undo step (setParagraph would join it to typing in the same paragraph)
+        mark(""); docx?.setParagraph(p.id, runs(next), p.style); changed()
+        android.util.Log.i(TAG, "DOCLINK ${if (u == null) "remove" else "set"} para=$id range=$from..$to url=$u")
+        return true
+    }
+
+    /** Puts [text] (the address itself when blank) at [at] in paragraph [id] as a link to [url]; returns the range it took. */
+    fun insertLink(id: Int, at: Int, text: String, url: String): IntRange? {
+        val p = blocks().firstOrNull { it.id == id } as? UiBlock.Para ?: return null
+        if (!richText || !p.editable || readOnly) return null
+        val u = normalizeUrl(url)
+        val shown = text.ifBlank { url.trim() }
+        if (shown.isEmpty() || u.isEmpty()) return null
+        val old = RichText.text(p.spans)
+        val pos = at.coerceIn(0, old.length)
+        val typed = RichText.applyEdit(p.spans, old.substring(0, pos) + shown + old.substring(pos))
+        mark(""); docx?.setParagraph(p.id, runs(RichText.setLink(typed, pos, pos + shown.length, u)), p.style); changed()
+        android.util.Log.i(TAG, "DOCLINK insert para=$id at=$pos len=${shown.length} url=$u")
+        return pos until pos + shown.length
+    }
+
+    /** The links of paragraph [id]: URL and character range, in order. */
+    fun linksOf(id: Int): List<Triple<String, Int, Int>> = (blocks().firstOrNull { it.id == id } as? UiBlock.Para)?.let { RichText.links(it.spans) } ?: emptyList()
+
+    // ---- M3 d21: horizontal line, page break ----
+
+    /** Inserts a horizontal line (an empty paragraph with a bottom border) after block [afterId]; returns its id. */
+    fun insertRule(afterId: Int): Int {
+        val d = docx ?: return -1
+        if (readOnly) return -1
+        mark("")
+        val id = d.insertRuleAfter(afterId)
+        changed()
+        android.util.Log.i(TAG, "DOCINSERT rule after=$afterId id=$id")
+        return id
+    }
+
+    /**
+     * Inserts a page break after block [afterId] and returns the paragraph to type in after it: the next editable
+     * paragraph, or a new empty one when there is none.
+     */
+    fun insertPageBreak(afterId: Int): Int {
+        val d = docx ?: return -1
+        if (readOnly) return -1
+        mark("")
+        val id = d.insertPageBreakAfter(afterId)
+        val all = d.blocks
+        val i = all.indexOfFirst { it.id == id }
+        val next = all.getOrNull(i + 1) as? Paragraph
+        val typeIn = if (next != null && next.editable && !next.pageBreak) next.id else d.insertParagraphAfter(id, emptyList(), ParaStyle.BODY)
+        changed()
+        android.util.Log.i(TAG, "DOCINSERT pagebreak after=$afterId id=$id next=$typeIn")
+        return typeIn
+    }
+
+    // ---- M3 d42: table rows and columns, merging ----
+
+    /** The table with the caret and the caret cell (table id, row, grid column), if the caret is in a table that exists. */
+    fun caretCell(): Triple<Int, Int, Int>? = caretTable()?.first
+
+    /**
+     * [op] on the table with the caret: "row-above", "row-below", "row-delete", "col-left", "col-right", "col-delete",
+     * "merge-right", "merge-down". One undo step; the caret stays on the same cell (or the nearest one left). False when
+     * nothing changed (no caret cell, nothing to merge with).
+     */
+    fun tableOp(op: String): Boolean {
+        val d = docx ?: return false
+        if (readOnly) return false
+        val (t, _) = caretTable() ?: return false
+        val (id, r, c) = t
+        val before = runCatching { serialize() }.getOrNull() ?: return false
+        val ok = runCatching {
+            when (op) {
+                "row-above" -> d.insertTableRow(id, r, below = false)
+                "row-below" -> d.insertTableRow(id, r, below = true)
+                "row-delete" -> d.deleteTableRow(id, r)
+                "col-left" -> d.insertTableColumn(id, c, right = false)
+                "col-right" -> d.insertTableColumn(id, c, right = true)
+                "col-delete" -> d.deleteTableColumn(id, c)
+                "merge-right" -> d.mergeTableRight(id, r, c)
+                "merge-down" -> d.mergeTableDown(id, r, c)
+                else -> false
+            }
+        }.onFailure { android.util.Log.w(TAG, "DOCTABLE $op failed: ${it.message}") }.getOrDefault(false)
+        if (!ok) { android.util.Log.i(TAG, "DOCTABLE $op table=$id cell=$r,$c changed=false"); return false }
+        pushUndo(before)
+        val now = d.blocks.firstOrNull { it.id == id } as? TableBlock
+        if (now == null) { tableCaret = null; picked = -1 }
+        else {
+            val nr = when (op) { "row-above" -> r + 1; "row-delete" -> r.coerceAtMost(now.rows.size - 1); else -> r }
+            val cols = now.rows.maxOfOrNull { it.size } ?: 1
+            val nc = when (op) { "col-left" -> c + 1; "col-delete" -> c.coerceAtMost(cols - 1); else -> c }
+            // a caret left under a merge goes to the merged cell's top-left
+            val m = now.merges.firstOrNull { it.covers(nr, nc) }
+            focusCell(id, m?.row ?: nr, m?.col ?: nc)
+        }
+        changed()
+        android.util.Log.i(TAG, "DOCTABLE $op table=$id cell=$r,$c -> rows=${now?.rows?.size ?: 0} cols=${now?.rows?.maxOfOrNull { it.size } ?: 0} merges=${now?.merges ?: emptyList<Any>()} caret=$tableCaret")
+        return true
+    }
+
     fun setTableCell(id: Int, row: Int, col: Int, text: String) {
         val d = docx ?: return
         val cur = (d.blocks.firstOrNull { it.id == id } as? io.embodit.spatialoffice.core.docx.TableBlock)?.rows?.getOrNull(row)?.getOrNull(col)
@@ -436,6 +568,19 @@ class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File)
     }
 
     fun cancelResize() { resizing = null; resizeStart = null }
+
+    companion object {
+        private val SCHEME = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*:")
+        private val EMAIL = Regex("^[^@\\s/]+@[^@\\s/]+\\.[^@\\s/]+$")
+
+        /** A typed address without a scheme gets one: "example.com" → "https://example.com"; "x@y.z" → "mailto:x@y.z". */
+        fun normalizeUrl(url: String): String {
+            val u = url.trim()
+            if (u.isEmpty() || SCHEME.containsMatchIn(u)) return u
+            if (EMAIL.matches(u)) return "mailto:$u"
+            return "https://$u"
+        }
+    }
 
     /** Matches of [find] in editable paragraphs: (paragraph id, offset). */
     fun find(find: String): List<Pair<Int, Int>> = blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }

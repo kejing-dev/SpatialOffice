@@ -597,4 +597,29 @@
     <string name="size_menu" formatted="false">字号</string>
     <string name="hl_menu" formatted="false">高亮</string>
     <string name="hl_none" formatted="false">清除高亮</string>
+    <string name="ins_link" formatted="false">链接… Ctrl+K</string>
+    <string name="ins_rule" formatted="false">分隔线</string>
+    <string name="ins_pagebreak" formatted="false">分页符</string>
+    <string name="link_title" formatted="false">加链接</string>
+    <string name="link_edit_title" formatted="false">改链接</string>
+    <string name="link_url" formatted="false">地址</string>
+    <string name="link_text" formatted="false">显示的文字</string>
+    <string name="link_remove" formatted="false">去掉链接</string>
+    <string name="link_need_url" formatted="false">先填一个地址</string>
+    <string name="link_open" formatted="false">打开</string>
+    <string name="link_edit" formatted="false">改</string>
+    <string name="pagebreak_label" formatted="false">分页符，后面的内容从新的一页开始</string>
+    <string name="pagebreak_remove" formatted="false">去掉</string>
+    <string name="fmt_sup" formatted="false">上标</string>
+    <string name="fmt_sub" formatted="false">下标</string>
+    <string name="tbl_menu" formatted="false">表格行列</string>
+    <string name="tbl_row_above" formatted="false">在上方插入一行</string>
+    <string name="tbl_row_below" formatted="false">在下方插入一行</string>
+    <string name="tbl_col_left" formatted="false">在左侧插入一列</string>
+    <string name="tbl_col_right" formatted="false">在右侧插入一列</string>
+    <string name="tbl_row_delete" formatted="false">删掉这一行</string>
+    <string name="tbl_col_delete" formatted="false">删掉这一列</string>
+    <string name="tbl_merge_right" formatted="false">与右侧合并</string>
+    <string name="tbl_merge_down" formatted="false">与下方合并</string>
+    <string name="tbl_merge_none" formatted="false">这里没有能合并的格子</string>
 </resources>

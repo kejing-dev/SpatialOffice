@@ -130,7 +130,7 @@ object Rels {
     fun of(pkg: OoxmlPackage, part: String): List<Rel> = pkg.text(OoxmlPackage.relsOf(part))?.let { parse(it) } ?: emptyList()
 
     /** Appends a relationship to [part]'s .rels (creating it) and returns the new id. */
-    fun add(pkg: OoxmlPackage, part: String, type: String, target: String): String {
+    fun add(pkg: OoxmlPackage, part: String, type: String, target: String, external: Boolean = false): String {
         val relsName = OoxmlPackage.relsOf(part)
         val xml = pkg.text(relsName)
             ?: "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"></Relationships>"
@@ -138,7 +138,7 @@ object Rels {
         var n = used.size + 1
         while ("rId$n" in used) n++
         val id = "rId$n"
-        val tag = "<Relationship Id=\"$id\" Type=\"${Xml.escape(type)}\" Target=\"${Xml.escape(target)}\"/>"
+        val tag = "<Relationship Id=\"$id\" Type=\"${Xml.escape(type)}\" Target=\"${Xml.escape(target)}\"" + (if (external) " TargetMode=\"External\"" else "") + "/>"
         pkg.putText(relsName, Xml.appendChild(xml, tag))
         return id
     }

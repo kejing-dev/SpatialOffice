@@ -22,6 +22,10 @@ data class Run(
     val highlight: String? = null,
     /** M2: the run's own `w:sz` in half-points; null = the paragraph's ([Paragraph.baseSizeHp]). */
     val size: Int? = null,
+    /** M3 (d20): URL of the external hyperlink the run sits in (`w:hyperlink r:id`); null = not a link. */
+    val link: String? = null,
+    /** M3 (d22): the run's own `w:vertAlign`: "superscript" | "subscript"; null = baseline. */
+    val vertAlign: String? = null,
 )
 
 sealed class DocBlock { abstract val id: Int }
@@ -46,8 +50,17 @@ data class Paragraph(
     val spaceAfter: Int? = null,
     /** M2: effective size in half-points of a run without its own `w:sz` (paragraph style chain, then document defaults, else 20). */
     val baseSizeHp: Int = 22,
+    /** M3 (d21): the paragraph has a bottom border (`w:pBdr/w:bottom`): drawn as a horizontal line under it. */
+    val rule: Boolean = false,
 ) : DocBlock() {
     val text: String get() = runs.joinToString("") { it.text }
+    /** M3 (d21): a paragraph that holds nothing but page breaks. */
+    val pageBreak: Boolean get() = runs.isNotEmpty() && text.all { it == '\u000C' }
+}
+
+/** M3 (d42): a merged table cell: its top-left grid position and how many rows / grid columns it covers. */
+data class CellMerge(val row: Int, val col: Int, val rows: Int, val cols: Int) {
+    fun covers(r: Int, c: Int): Boolean = r in row until row + rows && c in col until col + cols
 }
 
 /** Cell text, row by row. A horizontally merged cell is followed by empty strings so every row lines up with the grid. */
@@ -55,7 +68,13 @@ data class TableBlock(
     override val id: Int, val rows: List<List<String>>,
     /** Width as a share of the text width, 10–100 (v0.2.5: tables can be made narrower or wider). */
     val widthPct: Int = 100,
-) : DocBlock()
+    /** M3 (d42): merged cells (`w:gridSpan`, `w:vMerge`), anchors only; covered cells are "" in [rows] (or their own text for vertical ones). */
+    val merges: List<CellMerge> = emptyList(),
+) : DocBlock() {
+    /** True for a cell hidden under a merge (inside one but not its top-left). */
+    fun covered(r: Int, c: Int): Boolean = merges.any { it.covers(r, c) && !(it.row == r && it.col == c) }
+    fun mergeAt(r: Int, c: Int): CellMerge? = merges.firstOrNull { it.row == r && it.col == c }
+}
 
 data class ImageBlock(override val id: Int, val part: String, val widthEmu: Long, val heightEmu: Long) : DocBlock()
 

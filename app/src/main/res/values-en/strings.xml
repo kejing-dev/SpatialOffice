@@ -597,4 +597,29 @@
     <string name="size_menu" formatted="false">Size</string>
     <string name="hl_menu" formatted="false">Highlight</string>
     <string name="hl_none" formatted="false">No highlight</string>
+    <string name="ins_link" formatted="false">Link… Ctrl+K</string>
+    <string name="ins_rule" formatted="false">Horizontal line</string>
+    <string name="ins_pagebreak" formatted="false">Page break</string>
+    <string name="link_title" formatted="false">Add a link</string>
+    <string name="link_edit_title" formatted="false">Edit link</string>
+    <string name="link_url" formatted="false">Address</string>
+    <string name="link_text" formatted="false">Text to show</string>
+    <string name="link_remove" formatted="false">Remove link</string>
+    <string name="link_need_url" formatted="false">Type an address first</string>
+    <string name="link_open" formatted="false">Open</string>
+    <string name="link_edit" formatted="false">Edit</string>
+    <string name="pagebreak_label" formatted="false">Page break: what follows starts on a new page</string>
+    <string name="pagebreak_remove" formatted="false">Remove</string>
+    <string name="fmt_sup" formatted="false">Superscript</string>
+    <string name="fmt_sub" formatted="false">Subscript</string>
+    <string name="tbl_menu" formatted="false">Table rows &amp; columns</string>
+    <string name="tbl_row_above" formatted="false">Insert row above</string>
+    <string name="tbl_row_below" formatted="false">Insert row below</string>
+    <string name="tbl_col_left" formatted="false">Insert column left</string>
+    <string name="tbl_col_right" formatted="false">Insert column right</string>
+    <string name="tbl_row_delete" formatted="false">Delete row</string>
+    <string name="tbl_col_delete" formatted="false">Delete column</string>
+    <string name="tbl_merge_right" formatted="false">Merge with right</string>
+    <string name="tbl_merge_down" formatted="false">Merge with below</string>
+    <string name="tbl_merge_none" formatted="false">Nothing to merge with here</string>
 </resources>

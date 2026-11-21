@@ -117,7 +117,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
         val newAlign = align ?: old.align
         if (newAlign != alignOf(newPPr)) newPPr = withAlign(newPPr, newAlign)
 
-        val firstRun = kids.indexOfFirst { it.name == "w:r" }
+        val firstRun = kids.indexOfFirst { it.name == "w:r" || it.name == "w:hyperlink" }
         val lead = StringBuilder()
         val trail = StringBuilder()
         kids.forEachIndexed { i, k ->
@@ -250,6 +250,238 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
         replaceEntry(idx, seg)
         e.block = parseTable(id, Xml.elemAt(xml, e.start)!!)
         changedIds.add(id)
+    }
+
+    // ---- M3 (d21): horizontal line, page break ----
+
+    /** Inserts an empty paragraph with a bottom border (Word's horizontal line) after block [id]; returns its id. */
+    fun insertRuleAfter(id: Int): Int {
+        if (bodyStart < 0) throw IllegalStateException("document has no body")
+        val pPr = "<w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:space=\"1\" w:color=\"auto\"/></w:pBdr></w:pPr>"
+        return insertRaw(id, "<w:p>$pPr</w:p>") { nid -> paraOf(nid, ParaStyle.BODY, emptyList(), true, null, pPr) }
+    }
+
+    /** Inserts a paragraph holding one page break (`w:br w:type="page"`) after block [id]; returns its id. */
+    fun insertPageBreakAfter(id: Int): Int {
+        if (bodyStart < 0) throw IllegalStateException("document has no body")
+        return insertRaw(id, "<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>") { nid -> paraOf(nid, ParaStyle.BODY, listOf(Run("\u000C", src = 0)), true, null, "") }
+    }
+
+    // ---- M3 (d42): table rows and columns, merging ----
+
+    private class Tc(val el: Xml.Elem, val grid: Int, val span: Int, val vMerge: String?)
+
+    /** The cells of row [tr] of table text [t] with their grid column, `w:gridSpan` and `w:vMerge` ("restart" / "continue"). */
+    private fun tcs(t: String, tr: Xml.Elem): List<Tc> {
+        var g = 0
+        val out = ArrayList<Tc>()
+        for (tc in Xml.children(t, tr, "w:tc")) {
+            val pr = Xml.child(t, tc, "w:tcPr")
+            val span = pr?.let { Xml.child(t, it, "w:gridSpan") }?.let { Xml.attr(t, it, "w:val")?.toIntOrNull() }?.coerceAtLeast(1) ?: 1
+            val vm = pr?.let { Xml.child(t, it, "w:vMerge") }?.let { if (Xml.attr(t, it, "w:val") == "restart") "restart" else "continue" }
+            out.add(Tc(tc, g, span, vm))
+            g += span
+        }
+        return out
+    }
+
+    private fun covering(cells: List<Tc>, col: Int): Tc? = cells.firstOrNull { col >= it.grid && col < it.grid + it.span }
+
+    /** `w:tcPr` text of a cell ("" = none). */
+    private fun tcPrOf(t: String, tc: Xml.Elem): String = Xml.child(t, tc, "w:tcPr")?.let { XmlEx.src(t, it) } ?: ""
+
+    /** [tcPr] with child [name] replaced by [el] (null = removed), in schema order; "" when nothing is left. */
+    private fun tcPrSet(tcPr: String, name: String, el: String?): String {
+        var out = if (tcPr.isEmpty()) "<w:tcPr></w:tcPr>" else XmlEx.removeChildren(tcPr, setOf(name))
+        if (el != null) out = XmlEx.insertChild(out, el, name, TCPR_ORDER)
+        return if (XmlEx.isEmpty(out)) "" else out
+    }
+
+    private fun spanEl(n: Int): String? = if (n > 1) "<w:gridSpan w:val=\"$n\"/>" else null
+    private fun vMergeEl(v: String?): String? = when (v) { "restart" -> "<w:vMerge w:val=\"restart\"/>"; "continue" -> "<w:vMerge/>"; else -> null }
+
+    /** Everything inside a cell after its `w:tcPr`. */
+    private fun cellBody(t: String, tc: Xml.Elem): String {
+        if (tc.selfClosing) return ""
+        val pr = Xml.child(t, tc, "w:tcPr")
+        return t.substring(pr?.end ?: tc.openEnd, tc.closeStart)
+    }
+
+    private fun cellHasText(t: String, tc: Xml.Elem): Boolean = Xml.findAll(t, tc, "w:t").any { Xml.text(t, it).isNotBlank() }
+
+    /** A cell with [tcPr] and the same body. */
+    private fun cellWith(t: String, tc: Xml.Elem, tcPr: String, body: String = cellBody(t, tc)): String = XmlEx.openTag(t, tc) + tcPr + body.ifEmpty { "<w:p/>" } + "</w:tc>"
+
+    /** An empty cell made like [tc]: its properties without the merge marks (unless given), one empty paragraph with the first paragraph's properties. */
+    private fun blankCell(t: String, tc: Xml.Elem, span: Int, vMerge: String?): String {
+        var pr = tcPrSet(tcPrOf(t, tc), "w:gridSpan", spanEl(span))
+        pr = tcPrSet(pr, "w:vMerge", vMergeEl(vMerge))
+        val pPr = Xml.child(t, tc, "w:p")?.let { Xml.child(t, it, "w:pPr") }?.let { XmlEx.src(t, it) } ?: ""
+        return "<w:tc>$pr<w:p>$pPr</w:p></w:tc>"
+    }
+
+    /** Rewrites table [id] with [f] (table text → new table text, null = not possible); true when it changed. */
+    private fun editTable(id: Int, f: (String) -> String?): Boolean {
+        val idx = indexOf(id)
+        val e = entries[idx]
+        if (e.block !is TableBlock) throw IllegalStateException("block $id is not a table")
+        val seg = xml.substring(e.start, e.end)
+        val out = f(seg) ?: return false
+        if (out == seg) return false
+        replaceEntry(idx, out)
+        e.block = parseTable(id, Xml.elemAt(xml, e.start)!!)
+        changedIds.add(id)
+        return true
+    }
+
+    private fun rowsOf(t: String): List<Xml.Elem> = Xml.children(t, Xml.root(t)!!, "w:tr")
+
+    /** Inserts an empty row above or below row [row] (cells shaped like that row's; a vertical merge running through the gap goes on). */
+    fun insertTableRow(id: Int, row: Int, below: Boolean): Boolean = editTable(id) { t ->
+        val trs = rowsOf(t)
+        val tr = trs.getOrNull(row) ?: return@editTable null
+        val next = trs.getOrNull(row + 1)?.let { tcs(t, it) }
+        val sb = StringBuilder(XmlEx.openTag(t, tr))
+        Xml.child(t, tr, "w:trPr")?.let { sb.append(XmlEx.src(t, it)) }
+        for (c in tcs(t, tr)) {
+            val goesOn = if (below) c.vMerge != null && next?.any { it.grid == c.grid && it.vMerge == "continue" } == true else c.vMerge == "continue"
+            sb.append(blankCell(t, c.el, c.span, if (goesOn) "continue" else null))
+        }
+        sb.append("</w:tr>")
+        val pos = if (below) tr.end else tr.start
+        t.substring(0, pos) + sb + t.substring(pos)
+    }
+
+    /** Deletes row [row]; a vertical merge that started there starts on the next row instead. The last row takes the table with it. */
+    fun deleteTableRow(id: Int, row: Int): Boolean {
+        val tb = entries[indexOf(id)].block as? TableBlock ?: throw IllegalStateException("block $id is not a table")
+        if (row !in tb.rows.indices) return false
+        if (tb.rows.size == 1) { deleteBlock(id); return true }
+        return editTable(id) { t ->
+            val trs = rowsOf(t)
+            val tr = trs[row]
+            val edits = ArrayList<Triple<Int, Int, String>>()
+            edits.add(Triple(tr.start, tr.end, ""))
+            val next = trs.getOrNull(row + 1)
+            if (next != null) {
+                val below = tcs(t, next)
+                for (c in tcs(t, tr)) if (c.vMerge == "restart") below.firstOrNull { it.grid == c.grid && it.vMerge == "continue" }?.let { b ->
+                    // the row after continued this one: is it the last of the merge, or does the merge go on below it?
+                    val after = trs.getOrNull(row + 2)?.let { tcs(t, it) }?.any { it.grid == c.grid && it.vMerge == "continue" } == true
+                    edits.add(Triple(b.el.start, b.el.end, cellWith(t, b.el, tcPrSet(tcPrOf(t, b.el), "w:vMerge", if (after) vMergeEl("restart") else null))))
+                }
+            }
+            Xml.splice(t, edits.sortedBy { it.first })
+        }
+    }
+
+    /** Grid column widths (`w:gridCol w:w`), null when one has none. */
+    private fun gridWidths(t: String): List<Int>? {
+        val grid = Xml.child(t, Xml.root(t)!!, "w:tblGrid") ?: return null
+        return Xml.children(t, grid, "w:gridCol").map { Xml.attr(t, it, "w:w")?.toIntOrNull() ?: return null }
+    }
+
+    /** [t] with the grid widths [w] (rescaled to keep the table's total) and every cell's `dxa` width matching the columns it covers. */
+    private fun withGrid(t: String, w: List<Int>, oldTotal: Int?): String {
+        val total = oldTotal ?: w.sum()
+        val sum = w.sum().coerceAtLeast(1)
+        val scaled = w.map { Math.round(it.toDouble() * total / sum).toInt().coerceAtLeast(1) }
+        val root = Xml.root(t)!!
+        val grid = Xml.child(t, root, "w:tblGrid") ?: return t
+        val newGrid = XmlEx.openTag(t, grid) + scaled.joinToString("") { "<w:gridCol w:w=\"$it\"/>" } + "</w:tblGrid>"
+        var out = t.substring(0, grid.start) + newGrid + t.substring(grid.end)
+        // cell widths follow
+        val edits = ArrayList<Triple<Int, Int, String>>()
+        for (tr in rowsOf(out)) for (c in tcs(out, tr)) {
+            val pr = Xml.child(out, c.el, "w:tcPr") ?: continue
+            val tcW = Xml.child(out, pr, "w:tcW") ?: continue
+            val type = Xml.attr(out, tcW, "w:type")
+            if (type != null && type != "dxa") continue
+            val want = (c.grid until c.grid + c.span).sumOf { scaled.getOrElse(it) { 0 } }
+            if (Xml.attr(out, tcW, "w:w") != want.toString()) edits.add(Triple(tcW.start, tcW.openEnd, XmlEx.withAttr(out, tcW, "w:w", want.toString())))
+        }
+        out = Xml.splice(out, edits)
+        return out
+    }
+
+    /** Inserts an empty column left or right of grid column [col]; a cell merged across the gap just gets wider. */
+    fun insertTableColumn(id: Int, col: Int, right: Boolean): Boolean = editTable(id) { t ->
+        val widths = gridWidths(t)
+        if (widths != null && col !in widths.indices) return@editTable null
+        val edits = ArrayList<Triple<Int, Int, String>>()
+        for (tr in rowsOf(t)) {
+            val c = covering(tcs(t, tr), col) ?: continue
+            val inside = if (right) col < c.grid + c.span - 1 else col > c.grid
+            if (inside) edits.add(Triple(c.el.start, c.el.end, cellWith(t, c.el, tcPrSet(tcPrOf(t, c.el), "w:gridSpan", spanEl(c.span + 1)))))
+            else {
+                val cell = blankCell(t, c.el, 1, c.vMerge)
+                val pos = if (right) c.el.end else c.el.start
+                edits.add(Triple(pos, pos, cell))
+            }
+        }
+        var out = Xml.splice(t, edits.sortedBy { it.first })
+        if (widths != null) {
+            val w = widths.toMutableList()
+            w.add(if (right) col + 1 else col, widths[col])
+            out = withGrid(out, w, widths.sum())
+        }
+        out
+    }
+
+    /** Deletes grid column [col]; a merged cell across it gets narrower. The last column takes the table with it. */
+    fun deleteTableColumn(id: Int, col: Int): Boolean {
+        val tb = entries[indexOf(id)].block as? TableBlock ?: throw IllegalStateException("block $id is not a table")
+        val cols = tb.rows.maxOfOrNull { it.size } ?: 0
+        if (col !in 0 until cols) return false
+        if (cols <= 1) { deleteBlock(id); return true }
+        return editTable(id) { t ->
+            val widths = gridWidths(t)
+            val edits = ArrayList<Triple<Int, Int, String>>()
+            for (tr in rowsOf(t)) {
+                val cells = tcs(t, tr)
+                val c = covering(cells, col) ?: continue
+                if (c.span > 1) edits.add(Triple(c.el.start, c.el.end, cellWith(t, c.el, tcPrSet(tcPrOf(t, c.el), "w:gridSpan", spanEl(c.span - 1)))))
+                else if (cells.size > 1) edits.add(Triple(c.el.start, c.el.end, ""))
+                else edits.add(Triple(tr.start, tr.end, ""))
+            }
+            var out = Xml.splice(t, edits.sortedBy { it.first })
+            if (widths != null && col in widths.indices) out = withGrid(out, widths.filterIndexed { i, _ -> i != col }, widths.sum())
+            out
+        }
+    }
+
+    /**
+     * Merges the cell at ([row], [col]) with the cell to its right (`w:gridSpan` = both spans); the right cell's text
+     * goes after the left one's. False when there is no cell to the right or either is part of a vertical merge.
+     */
+    fun mergeTableRight(id: Int, row: Int, col: Int): Boolean = editTable(id) { t ->
+        val tr = rowsOf(t).getOrNull(row) ?: return@editTable null
+        val cells = tcs(t, tr)
+        val a = covering(cells, col) ?: return@editTable null
+        val b = cells.getOrNull(cells.indexOf(a) + 1) ?: return@editTable null
+        if (a.vMerge != null || b.vMerge != null) return@editTable null
+        val body = cellBody(t, a.el) + (if (cellHasText(t, b.el)) cellBody(t, b.el) else "")
+        val merged = cellWith(t, a.el, tcPrSet(tcPrOf(t, a.el), "w:gridSpan", spanEl(a.span + b.span)), body)
+        val out = t.substring(0, a.el.start) + merged + t.substring(b.el.end)
+        gridWidths(out)?.let { withGrid(out, it, null) } ?: out
+    }
+
+    /**
+     * Merges the cell at ([row], [col]) with the cell below it (`w:vMerge` restart / continue); the lower cell's text
+     * goes after the upper one's. False when there is no row below or the cell below is not the same width.
+     */
+    fun mergeTableDown(id: Int, row: Int, col: Int): Boolean = editTable(id) { t ->
+        val trs = rowsOf(t)
+        val tr = trs.getOrNull(row) ?: return@editTable null
+        val nx = trs.getOrNull(row + 1) ?: return@editTable null
+        val a = covering(tcs(t, tr), col) ?: return@editTable null
+        val b = tcs(t, nx).firstOrNull { it.grid == a.grid && it.span == a.span } ?: return@editTable null
+        val move = cellHasText(t, b.el)
+        val aPr = if (a.vMerge == null) tcPrSet(tcPrOf(t, a.el), "w:vMerge", vMergeEl("restart")) else tcPrOf(t, a.el)
+        val newA = cellWith(t, a.el, aPr, cellBody(t, a.el) + (if (move) cellBody(t, b.el) else ""))
+        val pPr = Xml.child(t, b.el, "w:p")?.let { Xml.child(t, it, "w:pPr") }?.let { XmlEx.src(t, it) } ?: ""
+        val newB = cellWith(t, b.el, tcPrSet(tcPrOf(t, b.el), "w:vMerge", vMergeEl("continue")), if (move) "<w:p>$pPr</w:p>" else cellBody(t, b.el))
+        Xml.splice(t, listOf(Triple(a.el.start, a.el.end, newA), Triple(b.el.start, b.el.end, newB)))
     }
 
     /** Width of a table as a share of the text width: `pct` as written, `dxa` against a 6.5 in text column, else 100. */
@@ -569,9 +801,29 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
      * A run as the model shows it. Bold / italic / underline are the run's own formatting (set on the run or by
      * its character style); what the paragraph style adds on top is not a run flag — the style is.
      */
-    private fun modelRun(r: Xml.Elem, src: Int): Run {
+    private fun modelRun(r: Xml.Elem, src: Int, link: String? = null): Run {
         val rPr = rPrOf(r)
-        return Run(runText(r), runToggle(rPr, "w:b"), runToggle(rPr, "w:i"), runToggle(rPr, "w:u"), src, runToggle(rPr, "w:strike"), colorOf(rPr), highlightOf(rPr), sizeOf(rPr))
+        return Run(runText(r), runToggle(rPr, "w:b"), runToggle(rPr, "w:i"), runToggle(rPr, "w:u"), src, runToggle(rPr, "w:strike"), colorOf(rPr), highlightOf(rPr), sizeOf(rPr), link, vertAlignOf(rPr))
+    }
+
+    /** M3 d20: URL of an external hyperlink element (`r:id` → a TargetMode="External" relationship); null for anchors and broken ids. */
+    private fun linkUrl(h: Xml.Elem): String? {
+        val rid = Xml.attr(xml, h, "r:id") ?: return null
+        return Rels.of(pkg, docPart).firstOrNull { it.id == rid && it.external }?.target
+    }
+
+    /** M3 d20: a hyperlink this model can edit: an external link holding only plain runs (and proofing marks / bookmarks). */
+    private fun isSimpleLink(h: Xml.Elem): Boolean {
+        if (linkUrl(h) == null) return false
+        val kids = Xml.children(xml, h)
+        return kids.isNotEmpty() && kids.all { it.name == "w:r" || it.name == "w:proofErr" } && isSimple(kids)
+    }
+
+    /** M3 d20: id of the external hyperlink relationship to [url], adding one when the document has none yet. */
+    private fun linkRid(url: String): String {
+        Rels.of(pkg, docPart).firstOrNull { it.external && it.type == HYPERLINK_REL && it.target == url }?.let { return it.id }
+        auxChanged = true
+        return Rels.add(pkg, docPart, HYPERLINK_REL, url, external = true)
     }
 
     /**
@@ -594,6 +846,8 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
             spaceBefore = sp?.let { Xml.attr(pPr, it, "w:before")?.toIntOrNull() },
             spaceAfter = sp?.let { Xml.attr(pPr, it, "w:after")?.toIntOrNull() },
             baseSizeHp = styles().sizeHp(pStyle),
+            rule = (if (pPr.isEmpty()) null else XmlEx.childOf(pPr, "w:pBdr"))?.let { b -> Xml.child(pPr, b, "w:bottom") }
+                ?.let { Xml.attr(pPr, it, "w:val") }?.let { it != "none" && it != "nil" } ?: false,
         )
     }
 
@@ -606,6 +860,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
     private fun colorOf(rPr: String): Int? = rPrVal(rPr, "w:color")?.takeIf { it.length == 6 && it != "auto" }?.toIntOrNull(16)
     private fun highlightOf(rPr: String): String? = rPrVal(rPr, "w:highlight")?.takeIf { it.isNotEmpty() && it != "none" }
     private fun sizeOf(rPr: String): Int? = rPrVal(rPr, "w:sz")?.toIntOrNull()?.takeIf { it > 0 }
+    private fun vertAlignOf(rPr: String): String? = rPrVal(rPr, "w:vertAlign")?.takeIf { it == "superscript" || it == "subscript" }
 
     private fun runToggle(rPr: String, prop: String): Boolean =
         DocxStyles.toggle(rPr, prop) ?: styles().charToggle(prop, DocxStyles.rStyle(rPr)) ?: false
@@ -624,6 +879,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
         for (k in kids) {
             when (k.name) {
                 "w:pPr", "w:proofErr", "w:bookmarkStart", "w:bookmarkEnd" -> {}
+                "w:hyperlink" -> if (!isSimpleLink(k)) return false
                 "w:r" -> for (c in Xml.children(xml, k)) {
                     when (c.name) {
                         "w:rPr", "w:t", "w:tab", "w:cr", "w:noBreakHyphen", "w:softHyphen", "w:lastRenderedPageBreak" -> {}
@@ -657,12 +913,17 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
             val runs = ArrayList<Run>()
             val srcRPr = ArrayList<String>()
             var i = 0
-            for (k in kids) {
-                if (k.name != "w:r") continue
+            fun take(k: Xml.Elem, link: String?) {
                 srcRPr.add(rPrOf(k))
-                val r = modelRun(k, i)
+                val r = modelRun(k, i, link)
                 if (r.text.isNotEmpty()) runs.add(r)
                 i++
+            }
+            for (k in kids) {
+                when (k.name) {
+                    "w:r" -> take(k, null)
+                    "w:hyperlink" -> { val url = linkUrl(k); for (r in Xml.children(xml, k, "w:r")) take(r, url) }
+                }
             }
             return Entry(id, p.start, p.end, paraOf(id, style, runs, true, null, pPr), srcRPr, false)
         }
@@ -709,6 +970,20 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
 
     private fun parseTable(id: Int, tbl: Xml.Elem): TableBlock {
         val rows = ArrayList<List<String>>()
+        // M3 d42: merged cells, horizontal (gridSpan) and vertical (vMerge restart … continue)
+        val merges = ArrayList<CellMerge>()
+        val open = HashMap<Int, Int>()
+        for ((r, tr) in Xml.children(xml, tbl, "w:tr").withIndex()) {
+            val seen = HashSet<Int>()
+            for (c in tcs(xml, tr)) {
+                when (c.vMerge) {
+                    "continue" -> open[c.grid]?.let { k -> merges[k] = merges[k].copy(rows = merges[k].rows + 1); seen.add(c.grid) }
+                    "restart" -> { merges.add(CellMerge(r, c.grid, 1, c.span)); open[c.grid] = merges.size - 1; seen.add(c.grid) }
+                    else -> if (c.span > 1) merges.add(CellMerge(r, c.grid, 1, c.span))
+                }
+            }
+            open.keys.retainAll(seen)
+        }
         for (tr in Xml.children(xml, tbl, "w:tr")) {
             val row = ArrayList<String>()
             for (tc in Xml.children(xml, tr, "w:tc")) {
@@ -723,7 +998,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
             }
             rows.add(row)
         }
-        return TableBlock(id, rows, tableWidthPct(tbl))
+        return TableBlock(id, rows, tableWidthPct(tbl), merges.filter { it.rows > 1 || it.cols > 1 })
     }
 
     // ------------------------------------------------------------------------------------------------ writing
@@ -753,8 +1028,18 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
 
     private fun runsXml(runs: List<Run>, srcRPr: List<String>): String {
         val sb = StringBuilder()
+        var openLink: String? = null
         for (r in runs) {
+            // M3 d20: neighbouring runs with the same link share one w:hyperlink element
+            if (r.link != openLink) {
+                if (openLink != null) sb.append("</w:hyperlink>")
+                if (r.link != null) sb.append(if (Xml.root(xml)?.let { Xml.attr(xml, it, "xmlns:r") } != null) "<w:hyperlink r:id=\"" else "<w:hyperlink xmlns:r=\"${DocxTemplates.REL}\" r:id=\"").append(linkRid(r.link)).append("\" w:history=\"1\">")
+                openLink = r.link
+            }
             var rPr = srcRPr.getOrNull(r.src) ?: srcRPr.firstOrNull() ?: ""
+            // a run taken out of a link loses the link's character style too
+            if (r.link == null && rPr.isNotEmpty() && DocxStyles.rStyle(rPr)?.let { it.equals("Hyperlink", true) || it == styles().idForName("Hyperlink") } == true) rPr = XmlEx.removeChildren(rPr, setOf("w:rStyle"))
+            if (vertAlignOf(rPr) != r.vertAlign) rPr = withValue(rPr, setOf("w:vertAlign"), r.vertAlign?.let { listOf("<w:vertAlign w:val=\"$it\"/>" to "w:vertAlign") })
             rPr = withToggle(rPr, "w:b", r.bold)
             rPr = withToggle(rPr, "w:i", r.italic)
             rPr = withToggle(rPr, "w:u", r.underline)
@@ -783,6 +1068,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
             flush()
             sb.append("</w:r>")
         }
+        if (openLink != null) sb.append("</w:hyperlink>")
         return sb.toString()
     }
 
@@ -914,6 +1200,11 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
         const val TEXT_WIDTH_TWIPS = 9000
         /** Text width for pictures: 6 in. */
         const val TEXT_WIDTH_EMU = 5_486_400L
+        private const val HYPERLINK_REL = DocxTemplates.REL + "/hyperlink"
+        private val TCPR_ORDER = listOf(
+            "w:cnfStyle", "w:tcW", "w:gridSpan", "w:hMerge", "w:vMerge", "w:tcBorders", "w:shd", "w:noWrap", "w:tcMar",
+            "w:textDirection", "w:tcFitText", "w:vAlign", "w:hideMark", "w:headers", "w:cellIns", "w:cellDel", "w:cellMerge", "w:tcPrChange",
+        )
         private val NUMPR_ORDER = listOf("w:ilvl", "w:numId", "w:numberingChange", "w:ins")
         private val BARE_TAG = Regex("^<[\\w:.-]+\\s*/?>$")
         private val TBL_PR_ORDER = listOf(

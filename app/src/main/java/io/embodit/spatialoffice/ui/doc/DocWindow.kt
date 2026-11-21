@@ -58,7 +58,15 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pico.spatial.ui.design.Icon
@@ -192,21 +200,35 @@ fun underlined(text: String, start: Int, len: Int, ink: androidx.compose.ui.grap
 
 /** [spans] styled: bold / italic / underline / strikethrough, and (M2) colour, highlight and size relative to [baseHp] at [baseSp]. */
 fun annotated(spans: List<Span>, baseHp: Int = 22, baseSp: Float = 17f): AnnotatedString = buildAnnotatedString {
-    for (s in spans) withStyle(
-        SpanStyle(
-            color = s.color?.let { io.embodit.spatialoffice.ui.TextPalette.rgb(it) } ?: androidx.compose.ui.graphics.Color.Unspecified,
-            background = io.embodit.spatialoffice.ui.TextPalette.highlight(s.highlight) ?: androidx.compose.ui.graphics.Color.Unspecified,
-            fontSize = s.size?.let { (baseSp * it / baseHp.coerceAtLeast(1)).sp } ?: androidx.compose.ui.unit.TextUnit.Unspecified,
-            fontWeight = if (s.bold) FontWeight.Bold else null,
-            fontStyle = if (s.italic) FontStyle.Italic else null,
-            textDecoration = when {
-                s.underline && s.strike -> TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough))
-                s.underline -> TextDecoration.Underline
-                s.strike -> TextDecoration.LineThrough
-                else -> null
-            },
-        ),
-    ) { append(s.text) }
+    for (s in spans) {
+        // M3 d20: a link from a file whose colour comes from its character style still looks like a link
+        val color = s.color ?: s.link?.let { RichText.LINK_RGB }
+        val underline = s.underline || s.link != null
+        // M3 d22: superscript / subscript at 70 % of the size, raised or lowered
+        val small = s.vertAlign != null
+        withStyle(
+            SpanStyle(
+                color = color?.let { io.embodit.spatialoffice.ui.TextPalette.rgb(it) } ?: androidx.compose.ui.graphics.Color.Unspecified,
+                background = io.embodit.spatialoffice.ui.TextPalette.highlight(s.highlight) ?: androidx.compose.ui.graphics.Color.Unspecified,
+                fontSize = s.size?.let { (baseSp * it / baseHp.coerceAtLeast(1) * (if (small) 0.7f else 1f)).sp } ?: if (small) 0.7.em else androidx.compose.ui.unit.TextUnit.Unspecified,
+                fontWeight = if (s.bold) FontWeight.Bold else null,
+                fontStyle = if (s.italic) FontStyle.Italic else null,
+                baselineShift = when (s.vertAlign) { "superscript" -> BaselineShift.Superscript; "subscript" -> BaselineShift.Subscript; else -> null },
+                textDecoration = when {
+                    underline && s.strike -> TextDecoration.combine(listOf(TextDecoration.Underline, TextDecoration.LineThrough))
+                    underline -> TextDecoration.Underline
+                    s.strike -> TextDecoration.LineThrough
+                    else -> null
+                },
+            ),
+        ) { append(s.text) }
+    }
+}
+
+/** M3 d21: a 1.5 dp line along the bottom of the paragraph (its bottom border, Word's horizontal line). */
+fun Modifier.ruleLine(on: Boolean): Modifier = if (!on) this else this.drawBehind {
+    val y = size.height - 1.dp.toPx()
+    drawLine(Ink.TextSoft, androidx.compose.ui.geometry.Offset(0f, y), androidx.compose.ui.geometry.Offset(size.width, y), strokeWidth = 1.5.dp.toPx())
 }
 
 /** W1 document (Planar 1160 × 860 dp; v0.2.1 wider so the English toolbar fits with its longest labels, q1-5): title bar, white paper edited in place, toolbar. */
@@ -218,7 +240,7 @@ fun DocWindow(tag: String? = null) {
         Column(Modifier.fillMaxSize().onPreviewKeyEvent { e -> docKeys(graph, s, focus, e) }) {
             EditorTitleBar(graph, Win.DOC, s)
             Box(Modifier.fillMaxWidth().weight(1f).padding(start = 32.dp, end = 32.dp, bottom = 56.dp), contentAlignment = Alignment.TopCenter) {
-                Paper(s, focus, Modifier.width(760.dp).fillMaxSize()) { graph.windows.focus(graph.refOf(s)) }
+                Paper(s, focus, Modifier.width(760.dp).fillMaxSize(), graph = graph) { graph.windows.focus(graph.refOf(s)) }
             }
         }
         DocToolbar(graph, s, focus)
@@ -233,9 +255,39 @@ private fun docKeys(graph: Graph, s: DocSession, focus: DocFocus, e: androidx.co
         Key.I -> toggle(s, focus, Attr.ITALIC)
         Key.U -> toggle(s, focus, Attr.UNDERLINE)
         Key.F, Key.H -> if (!s.readOnly) graph.show(s, Overlay.Find(Win.DOC))
+        Key.K -> docLinkDialog(graph, s, focus)
         else -> return false
     }
     return true
+}
+
+/**
+ * M3 d20: [Insert ▸ Link…] / Ctrl+K: with the caret in a link, edit that link; with characters selected, link them;
+ * with only a caret, type a new linked text there. False when there is no editable paragraph with the caret.
+ */
+fun docLinkDialog(graph: Graph, s: DocSession, focus: DocFocus): Boolean {
+    if (!s.richText || s.readOnly) return false
+    val p = focused(s, focus)?.takeIf { it.editable && !it.pageBreak } ?: return false
+    val text = RichText.text(p.spans)
+    val len = text.length
+    val a = focus.selection.min.coerceIn(0, len)
+    val b = focus.selection.max.coerceIn(0, len)
+    val hit = RichText.linkAt(p.spans, a)
+    val o = if (hit != null && (b == a || b <= hit.third)) Overlay.Link(Win.DOC, p.id, hit.second, hit.third, hit.first, text.substring(hit.second, hit.third), true)
+        else Overlay.Link(Win.DOC, p.id, a, b, "", if (b > a) text.substring(a, b) else "", false)
+    graph.show(s, o)
+    return true
+}
+
+/** M3 d20: the link the caret of the focused paragraph is in (URL, range), if any. */
+private fun caretLink(b: UiBlock.Para, sel: TextRange): Triple<String, Int, Int>? =
+    if (!sel.collapsed) null else RichText.linkAt(b.spans, sel.start)
+
+/** M3 d42: [op] on the table with the caret ("row-above" … "merge-down"); a merge with nothing to merge says so. */
+fun docTableOp(graph: Graph?, s: DocSession, op: String): Boolean {
+    val ok = s.tableOp(op)
+    if (!ok && op.startsWith("merge") && graph != null) graph.say(s, graph.str(R.string.tbl_merge_none))
+    return ok
 }
 
 private fun focused(s: DocSession, focus: DocFocus): UiBlock.Para? = s.blocks().firstOrNull { it.id == focus.id } as? UiBlock.Para
@@ -280,6 +332,25 @@ fun docSetHighlight(s: DocSession, focus: DocFocus, name: String?) = formatDoc(s
 fun docClearFormat(s: DocSession, focus: DocFocus) = formatDoc(s, focus) { sp, a, b, _ -> RichText.clearFormat(sp, a, b) }
 fun docToggle(s: DocSession, focus: DocFocus, attr: Attr) = toggle(s, focus, attr)
 
+/** M3 d22: superscript / subscript on the selection ([v]); when all of it already is [v], back to the baseline. */
+fun docVertAlign(s: DocSession, focus: DocFocus, v: String) = formatDoc(s, focus) { sp, a, b, _ ->
+    RichText.setVertAlign(sp, a, b, if (RichText.common(sp, a, b) { it.vertAlign } == v) null else v)
+}
+
+/** M3 d21: Insert ▸ Horizontal line after the paragraph with the caret (else at the end); the caret goes into the new line's paragraph. */
+fun docInsertRule(s: DocSession, focus: DocFocus): Int {
+    val id = s.insertRule(insertPoint(s, focus))
+    if (id >= 0) { focus.want = id; focus.wantCaret = 0 }
+    return id
+}
+
+/** M3 d21: Insert ▸ Page break after the paragraph with the caret; the caret goes to the paragraph after the break. */
+fun docInsertPageBreak(s: DocSession, focus: DocFocus): Int {
+    val next = s.insertPageBreak(insertPoint(s, focus))
+    if (next >= 0) { focus.want = next; focus.wantCaret = 0 }
+    return next
+}
+
 private fun hasAttr(s: DocSession, focus: DocFocus, attr: Attr): Boolean {
     val p = focused(s, focus) ?: return false
     val sel = focus.selection
@@ -288,7 +359,7 @@ private fun hasAttr(s: DocSession, focus: DocFocus, attr: Attr): Boolean {
 }
 
 @Composable
-fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks: List<UiBlock>? = null, onWindowFocus: () -> Unit = {}) {
+fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks: List<UiBlock>? = null, graph: Graph? = null, onWindowFocus: () -> Unit = {}) {
     s.version
     s.blockCount
     val all = blocks ?: s.blocks()
@@ -320,7 +391,11 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
         }
         items(all, key = { it.id }) { b ->
             when (b) {
-                is UiBlock.Para -> if (focus != null && b.editable && !s.readOnly) ParaEditor(s, b, focus, all, numbers) else ParaView(b, numbers, s.findHit)
+                is UiBlock.Para -> when {
+                    b.pageBreak -> PageBreakView(s, b, focus != null && b.editable && !s.readOnly)
+                    focus != null && b.editable && !s.readOnly -> ParaEditor(s, b, focus, all, numbers, graph)
+                    else -> ParaView(b, numbers, s.findHit, graph)
+                }
                 is UiBlock.Table -> TableView(b, if (focus != null && s.richText && !s.readOnly) s else null, s) { onWindowFocus() }
                 is UiBlock.Image -> PictureView(s, b, focus != null && s.richText && !s.readOnly)
                 is UiBlock.Page -> Image(bitmap = b.bitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.FillWidth, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).border(1.dp, Ink.Line))
@@ -331,18 +406,54 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
 }
 
 @Composable
-private fun ParaView(b: UiBlock.Para, numbers: Map<Int, Int> = emptyMap(), hit: io.embodit.spatialoffice.platform.FindHit? = null) {
-    Row(Modifier.fillMaxWidth().padding(paraPadding(b))) {
+private fun ParaView(b: UiBlock.Para, numbers: Map<Int, Int> = emptyMap(), hit: io.embodit.spatialoffice.platform.FindHit? = null, graph: Graph? = null) {
+    var layout by remember(b.id) { mutableStateOf<TextLayoutResult?>(null) }
+    val links = graph != null && b.spans.any { it.link != null }
+    Row(Modifier.fillMaxWidth().ruleLine(b.rule).padding(paraPadding(b))) {
         Marker(b, numbers)
-        Text(marked(annotatedOf(b), hit, b.id), style = paraTextStyle(b), modifier = Modifier.weight(1f))
+        Text(
+            marked(annotatedOf(b), hit, b.id), style = paraTextStyle(b), onTextLayout = { layout = it },
+            // M3 d20: a click on a link opens it (read-only paragraphs; an editable one shows the link's [Open] under it)
+            modifier = Modifier.weight(1f).then(if (links) Modifier.pointerInput(b.spans) {
+                detectTapGestures { pos -> layout?.let { l -> RichText.linkAt(b.spans, l.getOffsetForPosition(pos))?.let { graph?.openLink(it.first) } } }
+            } else Modifier),
+        )
         if (b.why != null && b.why != "html") Txt(tr(R.string.ph_readonly), "doc/readonly", Modifier.padding(start = 8.dp), style = PicoTheme.typography.labelMedium, color = Ink.Hint)
+    }
+}
+
+/** M3 d21: a page break: a line across the page with its name, and [Remove] where the document can be edited. */
+@Composable
+private fun PageBreakView(s: DocSession, b: UiBlock.Para, editable: Boolean) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(vertical = 8.dp).semantics { contentDescription = "pagebreak-${b.id}" },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.weight(1f).height(1.dp).background(Ink.Hint))
+        Txt(tr(R.string.pagebreak_label), "doc/pagebreak", Modifier.padding(horizontal = 12.dp), style = PicoTheme.typography.labelLarge, color = Ink.TextSoft, maxLines = 2)
+        Box(Modifier.weight(1f).height(1.dp).background(Ink.Hint))
+        if (editable) io.embodit.spatialoffice.ui.SecondaryButton(tr(R.string.pagebreak_remove), "doc/pagebreak-remove", onClick = { s.delete(b.id) }, modifier = Modifier.padding(start = 12.dp))
+    }
+}
+
+/** M3 d20: under a paragraph whose caret is in a link: the address, [Open] (system browser) and [Edit]. */
+@Composable
+private fun LinkChip(graph: Graph, s: DocSession, focus: DocFocus, link: Triple<String, Int, Int>) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp).clip(RoundedCornerShape(10.dp)).background(Ink.Header).padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(painter = painterResource(R.drawable.ic_link), contentDescription = null, modifier = Modifier.size(20.dp), tint = Ink.TextSoft)
+        Txt(link.first, "doc/link-url", Modifier.weight(1f), style = PicoTheme.typography.bodyMedium, color = Ink.Text, maxLines = 2)
+        io.embodit.spatialoffice.ui.SecondaryButton(tr(R.string.link_open), "doc/link-open", onClick = { graph.openLink(link.first) })
+        io.embodit.spatialoffice.ui.SecondaryButton(tr(R.string.link_edit), "doc/link-edit", onClick = { docLinkDialog(graph, s, focus) })
     }
 }
 
 fun annotatedOf(b: UiBlock.Para): AnnotatedString = annotated(b.spans, b.baseSizeHp, paraStyle(b.style).fontSize.value)
 
 @Composable
-private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: List<UiBlock>, numbers: Map<Int, Int>) {
+private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: List<UiBlock>, numbers: Map<Int, Int>, graph: Graph? = null) {
     val requester = remember(b.id) { FocusRequester() }
     var value by remember(b.id) { mutableStateOf(TextFieldValue(annotatedOf(b))) }
     // model changed underneath (format toggle, undo, style): rebuild the styled text, keep the caret
@@ -360,7 +471,9 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
             focus.want = -1; focus.wantCaret = -1
         }
     }
-    Row(Modifier.fillMaxWidth().padding(paraPadding(b))) {
+    val link = if (graph != null && focus.id == b.id) caretLink(b, focus.selection) else null
+    Column(Modifier.fillMaxWidth()) {
+    Row(Modifier.fillMaxWidth().ruleLine(b.rule).padding(paraPadding(b))) {
         Marker(b, numbers)
         BasicTextField(
             value = value,
@@ -392,7 +505,7 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
                 .onFocusChanged { if (it.isFocused) { focus.id = b.id; s.caretBlock = b.id; focus.selection = value.selection; s.picked = -1 } }
                 .onPreviewKeyEvent { e ->
                     if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                    val editable = all.filterIsInstance<UiBlock.Para>().filter { it.editable }
+                    val editable = all.filterIsInstance<UiBlock.Para>().filter { it.editable && !it.pageBreak }
                     val i = editable.indexOfFirst { it.id == b.id }
                     when {
                         // d17: Tab / Shift+Tab in a list item change its level (the caret stays where it is)
@@ -421,6 +534,8 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
                 }
             },
         )
+    }
+    if (link != null && graph != null) LinkChip(graph, s, focus, link)
     }
 }
 
@@ -518,10 +633,37 @@ private fun TableView(b: UiBlock.Table, edit: DocSession?, s: DocSession? = edit
 private fun TableGrid(b: UiBlock.Table, edit: DocSession?, windowFocus: () -> Unit = {}) {
     Column(Modifier.fillMaxWidth().border(1.dp, Ink.Line).semantics { contentDescription = "table-${b.id}" }) {
         b.rows.forEachIndexed { r, row ->
-            Row(Modifier.fillMaxWidth().background(if (r == 0) Ink.Header else Ink.Paper)) {
-                row.forEachIndexed { c, cell ->
+            Row(Modifier.fillMaxWidth().height(androidx.compose.foundation.layout.IntrinsicSize.Min).background(if (r == 0) Ink.Header else Ink.Paper)) {
+                var c = 0
+                while (c < row.size) {
+                    // M3 d42: a merged cell spans its columns; the rows it covers below show as one blank continuation
+                    val m = b.merges.firstOrNull { it.covers(r, c) }
+                    val span = if (m != null) m.cols - (c - m.col) else 1
+                    val goesOn = m != null && r < m.row + m.rows - 1
+                    val cellMod = Modifier.weight(span.toFloat()).fillMaxHeight().cellLines(bottom = !goesOn).heightIn(min = 48.dp).padding(horizontal = 10.dp, vertical = 12.dp)
+                    if (m != null && m.row < r) {
+                        Box(cellMod.semantics { contentDescription = "table-${b.id}-merged-$r-$c" })
+                        c += span
+                        continue
+                    }
+                    TableCell(b, edit, windowFocus, r, c, row[c], cellMod)
+                    c += span
+                }
+            }
+        }
+    }
+}
+
+/** M3 d42: the right and (unless a merge goes on below) bottom edge of a table cell; the table's own border draws the outside. */
+private fun Modifier.cellLines(bottom: Boolean): Modifier = this.drawBehind {
+    val w = 1.dp.toPx()
+    drawLine(Ink.Line, androidx.compose.ui.geometry.Offset(size.width - w / 2, 0f), androidx.compose.ui.geometry.Offset(size.width - w / 2, size.height), strokeWidth = w)
+    if (bottom) drawLine(Ink.Line, androidx.compose.ui.geometry.Offset(0f, size.height - w / 2), androidx.compose.ui.geometry.Offset(size.width, size.height - w / 2), strokeWidth = w)
+}
+
+@Composable
+private fun TableCell(b: UiBlock.Table, edit: DocSession?, windowFocus: () -> Unit, r: Int, c: Int, cell: String, cellMod: Modifier) {
                     val style = TextStyle(fontSize = 15.sp, lineHeight = 22.sp, color = Ink.Text, fontWeight = if (r == 0) FontWeight.SemiBold else null)
-                    val cellMod = Modifier.weight(1f).border(0.5.dp, Ink.Line).heightIn(min = 48.dp).padding(horizontal = 10.dp, vertical = 12.dp)
                     if (edit == null) Text(cell, style = style, modifier = cellMod)
                     else {
                         var text by remember(b.id, r, c) { mutableStateOf(TextFieldValue(cell)) }
@@ -556,16 +698,12 @@ private fun TableGrid(b: UiBlock.Table, edit: DocSession?, windowFocus: () -> Un
                             modifier = cellMod.focusRequester(requester).typingTarget()
                                 .onFocusChanged {
                                     focused = it.isFocused
-                                    if (it.isFocused) { edit.tableCaret = Triple(b.id, r, c); edit.picked = b.id; text = text.copy(selection = TextRange(text.text.length)) }
+                                    if (it.isFocused) { edit.tableCaret = Triple(b.id, r, c); edit.caretBlock = b.id; edit.picked = b.id; text = text.copy(selection = TextRange(text.text.length)) }
                                 }
                                 .then(if (focused) Modifier.border(2.dp, Ink.Select, RoundedCornerShape(4.dp)) else Modifier)
                                 .semantics { contentDescription = "table-${b.id}-cell-$r-$c" },
                         )
                     }
-                }
-            }
-        }
-    }
 }
 
 @Composable
@@ -586,7 +724,7 @@ private fun OpaqueView(b: UiBlock.Opaque) {
 }
 
 /** Where an inserted picture or table goes: after the paragraph with the caret, else at the end. */
-private fun insertPoint(s: DocSession, focus: DocFocus): Int = focus.id.takeIf { id -> s.blocks().any { it.id == id } } ?: (s.blocks().lastOrNull()?.id ?: -1)
+fun insertPoint(s: DocSession, focus: DocFocus): Int = focus.id.takeIf { id -> s.blocks().any { it.id == id } } ?: (s.blocks().lastOrNull()?.id ?: -1)
 
 @Composable
 private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
@@ -623,6 +761,9 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                         MenuEntry(tr(R.string.hl_color, tr(name)), "doc/highlight-item", checked = docCommon(s, focus) { it.highlight } == v) { docSetHighlight(s, focus, v) }
                     } + listOf(MenuEntry(tr(R.string.hl_none), "doc/highlight-none") { docSetHighlight(s, focus, null) })),
                     MenuEntry(tr(R.string.strike), "doc/strike", checked = hasAttr(s, focus, Attr.STRIKE)) { toggle(s, focus, Attr.STRIKE) },
+                    // M3 d22: superscript / subscript (a second pick of the same one goes back to the baseline)
+                    MenuEntry(tr(R.string.fmt_sup), "doc/sup", checked = docCommon(s, focus) { it.vertAlign } == "superscript") { docVertAlign(s, focus, "superscript") },
+                    MenuEntry(tr(R.string.fmt_sub), "doc/sub", checked = docCommon(s, focus) { it.vertAlign } == "subscript") { docVertAlign(s, focus, "subscript") },
                     MenuEntry(tr(R.string.clear_format), "doc/clear-format") { docClearFormat(s, focus) },
                 ))
                 ToolMenu(tr(R.string.menu_paragraph), "doc/paragraph", enabled = canEdit && s.styled, entries = listOfNotNull(
@@ -644,12 +785,27 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                         if (para != null) { if (para.spaceBefore == 120 && para.spaceAfter == 120) s.setParaSpacing(para.id, null, null) else s.setParaSpacing(para.id, 120, 120); focus.want = para.id }
                     },
                 ) else emptyList())
-                ToolMenu(tr(R.string.menu_insert), "doc/insert", enabled = s.richText, entries = listOf(
+                // M3: link (d20), horizontal line and page break (d21); with the caret in a table, its rows & columns (d42)
+                val inTable = s.caretCell()?.takeIf { it.first == s.caretBlock }
+                ToolMenu(tr(R.string.menu_insert), "doc/insert", enabled = s.richText, entries = listOfNotNull(
+                    if (inTable != null) subMenu(tr(R.string.tbl_menu), "doc/table-rc", listOf(
+                        MenuEntry(tr(R.string.tbl_row_above), "doc/tbl-row-above") { docTableOp(graph, s, "row-above") },
+                        MenuEntry(tr(R.string.tbl_row_below), "doc/tbl-row-below") { docTableOp(graph, s, "row-below") },
+                        MenuEntry(tr(R.string.tbl_col_left), "doc/tbl-col-left") { docTableOp(graph, s, "col-left") },
+                        MenuEntry(tr(R.string.tbl_col_right), "doc/tbl-col-right") { docTableOp(graph, s, "col-right") },
+                        MenuEntry(tr(R.string.tbl_merge_right), "doc/tbl-merge-right") { docTableOp(graph, s, "merge-right") },
+                        MenuEntry(tr(R.string.tbl_merge_down), "doc/tbl-merge-down") { docTableOp(graph, s, "merge-down") },
+                        MenuEntry(tr(R.string.tbl_row_delete), "doc/tbl-row-delete") { docTableOp(graph, s, "row-delete") },
+                        MenuEntry(tr(R.string.tbl_col_delete), "doc/tbl-col-delete") { docTableOp(graph, s, "col-delete") },
+                    )) else null,
+                    MenuEntry(tr(R.string.ins_link), "doc/link") { docLinkDialog(graph, s, focus) },
                     MenuEntry(tr(R.string.ins_picture), "doc/picture") {
                         val at = insertPoint(s, focus)
                         graph.pickImage(s) { b, e, w, h -> s.insertImage(at, b, e, w, h) }
                     },
                     MenuEntry(tr(R.string.ins_table), "doc/table") { graph.show(s, Overlay.InsertTable(Win.DOC)) },
+                    MenuEntry(tr(R.string.ins_rule), "doc/rule") { docInsertRule(s, focus) },
+                    MenuEntry(tr(R.string.ins_pagebreak), "doc/pagebreak") { docInsertPageBreak(s, focus) },
                 ))
                 ToolMenu(tr(R.string.more), "doc/more", entries = listOfNotNull(
                     MenuEntry(tr(R.string.find_replace), "doc/find") { graph.show(s, Overlay.Find(Win.DOC)) },

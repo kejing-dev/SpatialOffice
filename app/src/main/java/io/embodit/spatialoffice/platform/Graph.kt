@@ -62,6 +62,11 @@ sealed class Overlay {
     data class SheetDelete(override val win: Win = Win.SHEET) : Overlay()
     data class WordCount(override val win: Win = Win.DOC) : Overlay()
     data class InsertTable(override val win: Win = Win.DOC) : Overlay()
+    /**
+     * M3 d20: insert / edit a link. [para] and [a]..[b] are the characters it goes on (an empty range: [text] is typed
+     * in at [a]); [existing] when the caret was in a link already ([Remove link] is offered).
+     */
+    data class Link(override val win: Win = Win.DOC, val para: Int, val a: Int, val b: Int, val url: String, val text: String, val existing: Boolean) : Overlay()
     /** Flat preview of the sheet's charts (bar / line / pie). */
     data class ChartView(override val win: Win = Win.SHEET, val index: Int = -1) : Overlay()
     /** Pick a picture for the document or the current slide. */
@@ -137,6 +142,15 @@ class Graph(val app: Application) {
 
     /** Shows [o] in [s]'s own window. */
     fun show(s: Session, o: Overlay) { activate(s); o.tag = s.tag; overlayState = o; BackKeys.sweepSoon("overlay ${o.javaClass.simpleName}") }
+
+    /** M3 d20: opens a document link in the system browser (the same ACTION_VIEW + BROWSABLE path as [Connect]). */
+    fun openLink(url: String): Boolean {
+        val u = DocSession.normalizeUrl(url)
+        if (u.isEmpty()) return false
+        val ok = accounts.launchBrowser(u)
+        android.util.Log.i(TAG, "DOCLINK open $u started=$ok")
+        return ok
+    }
     var toast by mutableStateOf<Toast?>(null)
         private set
     /** Bumped when the set of files on disk may have changed (new, save, rename), so lists re-read. */

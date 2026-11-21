@@ -596,3 +596,29 @@ hist_restored	这一版回来了。保存后才写进文件，撤销能退回。
 size_menu	字号	Size
 hl_menu	高亮	Highlight
 hl_none	清除高亮	No highlight
+# M3 doc
+ins_link	链接… Ctrl+K	Link… Ctrl+K
+ins_rule	分隔线	Horizontal line
+ins_pagebreak	分页符	Page break
+link_title	加链接	Add a link
+link_edit_title	改链接	Edit link
+link_url	地址	Address
+link_text	显示的文字	Text to show
+link_remove	去掉链接	Remove link
+link_need_url	先填一个地址	Type an address first
+link_open	打开	Open
+link_edit	改	Edit
+pagebreak_label	分页符，后面的内容从新的一页开始	Page break: what follows starts on a new page
+pagebreak_remove	去掉	Remove
+fmt_sup	上标	Superscript
+fmt_sub	下标	Subscript
+tbl_menu	表格行列	Table rows & columns
+tbl_row_above	在上方插入一行	Insert row above
+tbl_row_below	在下方插入一行	Insert row below
+tbl_col_left	在左侧插入一列	Insert column left
+tbl_col_right	在右侧插入一列	Insert column right
+tbl_row_delete	删掉这一行	Delete row
+tbl_col_delete	删掉这一列	Delete column
+tbl_merge_right	与右侧合并	Merge with right
+tbl_merge_down	与下方合并	Merge with below
+tbl_merge_none	这里没有能合并的格子	Nothing to merge with here

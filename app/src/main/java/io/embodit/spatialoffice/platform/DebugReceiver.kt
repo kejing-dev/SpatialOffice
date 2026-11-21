@@ -239,10 +239,12 @@ object DebugReceiver {
                     "bold" -> attr(Attr.BOLD)
                     "italic" -> attr(Attr.ITALIC)
                     "underline" -> attr(Attr.UNDERLINE)
+                    // M3 d22: the same toggle as Text ▸ Superscript / Subscript (1 sets, 0 back to the baseline)
+                    "sup", "sub" -> d.formatRange(para.id, a, b) { sp, x0, x1, _ -> RichText.setVertAlign(sp, x0, x1, if (v == "0") null else if (p[2] == "sup") "superscript" else "subscript") }
                     else -> false
                 }
                 val after = d.blocks().firstOrNull { it.id == para.id } as? UiBlock.Para
-                Log.i(TAG, "DOCTEXT debug ${p[2]} ok=$ok spans=" + after?.spans?.joinToString("|") { sp -> sp.text.take(12) + ":c=" + (sp.color?.let { c -> String.format("%06X", c) }) + ":h=" + sp.highlight + ":sz=" + sp.size + ":b=" + sp.bold + ":s=" + sp.strike })
+                Log.i(TAG, "DOCTEXT debug ${p[2]} ok=$ok spans=" + after?.spans?.joinToString("|") { sp -> sp.text.take(12) + ":c=" + (sp.color?.let { c -> String.format("%06X", c) }) + ":h=" + sp.highlight + ":sz=" + sp.size + ":b=" + sp.bold + ":s=" + sp.strike + ":v=" + sp.vertAlign + ":l=" + sp.link })
             }
             // doclevel <i> tab|shift-tab (what the keys do in a list item), docindent <i> more|less, docline <i> <240|276|360|480|none>, docspace <i> <before>,<after>|none
             "doclevel" -> g.doc?.let { d -> val (i, k) = arg.split(" "); val p = d.blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }[i.toInt()]; d.setListLevel(p.id, p.level + if (k == "shift-tab") -1 else 1) }
@@ -253,7 +255,60 @@ object DebugReceiver {
                 val v = k.split(",").map { it.toIntOrNull() }; d.setParaSpacing(p.id, v.getOrNull(0), v.getOrNull(1))
             }
             // history doc|sheet|slides: the version list; hist-restore <win> <n>: [Restore] on the n-th version counted from the oldest (1 = first)
-            "history" -> g.session(win(arg))?.let { g.show(it, Overlay.History(win(arg))) }
+            // ---- M3 documents (v0.5.0): links d20, horizontal line / page break d21, table rows / columns / merge d42 ----
+            // doc-link <i> <a>-<b>|all <url>: link characters a..b of the i-th editable paragraph (what the link sheet's [OK] does)
+            "doc-link" -> g.doc?.let { d ->
+                val p = arg.split(" ", limit = 3)
+                val para = d.blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }[p[0].toInt()]
+                val len = RichText.text(para.spans).length
+                val (a, b) = if (p[1] == "all") 0 to len else p[1].split("-").map { it.toInt() }.let { it[0] to it[1] }
+                Log.i(TAG, "DOCLINK debug set ok=${d.setLink(para.id, a, b, p[2])} links=${d.linksOf(para.id)}")
+            }
+            // doc-link-open <i>: the first link of the i-th editable paragraph, through the function [Open] / a click calls
+            "doc-link-open" -> g.doc?.let { d ->
+                val para = d.blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }[arg.trim().toInt()]
+                val l = d.linksOf(para.id).firstOrNull()
+                if (l == null) Log.i(TAG, "DOCLINK debug open: no link in paragraph ${para.id}") else g.openLink(l.first)
+            }
+            // doc-link-edit <i> <url> / doc-unlink <i>: the first link of the i-th editable paragraph gets a new address / goes
+            "doc-link-edit", "doc-unlink" -> g.doc?.let { d ->
+                val p = arg.split(" ", limit = 2)
+                val para = d.blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }[p[0].toInt()]
+                val l = d.linksOf(para.id).firstOrNull()
+                val ok = l != null && d.setLink(para.id, l.second, l.third, if (cmd == "doc-unlink") null else p.getOrNull(1))
+                Log.i(TAG, "DOCLINK debug $cmd ok=$ok links=${d.linksOf(para.id)}")
+            }
+            // doc-link-sheet <i> [<a>-<b>]: the link sheet as Insert ▸ Link… / Ctrl+K opens it for that paragraph and selection
+            "doc-link-sheet" -> g.doc?.let { d ->
+                val p = arg.split(" ")
+                val para = d.blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }[p[0].toInt()]
+                val f = io.embodit.spatialoffice.ui.doc.DocFocus().apply {
+                    id = para.id
+                    selection = p.getOrNull(1)?.split("-")?.map { it.toInt() }?.let { androidx.compose.ui.text.TextRange(it[0], it[1]) } ?: androidx.compose.ui.text.TextRange(RichText.text(para.spans).length)
+                }
+                io.embodit.spatialoffice.ui.doc.docLinkDialog(g, d, f)
+            }
+            // doc-rule [<i>] / doc-pagebreak [<i>]: Insert ▸ Horizontal line / Page break after the caret paragraph (or the i-th editable one)
+            "doc-rule", "doc-pagebreak" -> g.doc?.let { d ->
+                val after = arg.trim().toIntOrNull()?.let { i -> d.blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }[i].id }
+                    ?: d.caretBlock.takeIf { id -> d.blocks().any { it.id == id } } ?: (d.blocks().lastOrNull()?.id ?: -1)
+                val id = if (cmd == "doc-rule") d.insertRule(after) else d.insertPageBreak(after)
+                Log.i(TAG, "DOCINSERT debug $cmd after=$after -> $id")
+            }
+            // doc-tcell <n> <r>,<c>: the caret into cell r,c of the n-th table (as a click on that cell)
+            "doc-tcell" -> g.doc?.let { d ->
+                val (n, rc) = arg.split(" ")
+                val (r, c) = rc.split(",").map { it.toInt() }
+                val t = d.blocks().filterIsInstance<UiBlock.Table>()[n.toInt()]
+                d.caretBlock = t.id
+                d.focusCell(t.id, r, c)
+                Log.i(TAG, "DOCTABLE debug caret=${d.tableCaret}")
+            }
+            // doc-trow above|below|delete, doc-tcol left|right|delete, doc-tmerge right|down: Insert ▸ Table rows & columns ▸ …
+            "doc-trow" -> g.doc?.let { d -> io.embodit.spatialoffice.ui.doc.docTableOp(g, d, if (arg == "delete") "row-delete" else "row-$arg") }
+            "doc-tcol" -> g.doc?.let { d -> io.embodit.spatialoffice.ui.doc.docTableOp(g, d, if (arg == "delete") "col-delete" else "col-$arg") }
+            "doc-tmerge" -> g.doc?.let { d -> io.embodit.spatialoffice.ui.doc.docTableOp(g, d, "merge-$arg") }
+            "history" ->g.session(win(arg))?.let { g.show(it, Overlay.History(win(arg))) }
             "hist-restore" -> { val (w, n) = arg.split(" "); g.session(win(w))?.let { s -> g.versions(s).reversed().getOrNull(n.toInt() - 1)?.let { v -> g.restoreVersion(s, v) } } }
             // font italic|underline|strike|bold 1|0, font-color RRGGBB|none, font-size <pt>|up|down, font-clear: Text / Colour menus on the selected cells
             "font" -> g.sheet?.let { s -> val (k, v) = arg.split(" "); val on = v != "0"; when (k) { "italic" -> s.setItalic(on); "underline" -> s.setUnderline(on); "strike" -> s.setStrike(on); else -> s.setBold(on) } }

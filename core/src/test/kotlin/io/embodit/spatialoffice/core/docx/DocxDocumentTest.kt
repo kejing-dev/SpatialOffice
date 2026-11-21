@@ -72,7 +72,7 @@ class DocxDocumentTest {
         assertFalse("bold that comes from the heading style is not a run flag", (b[1] as Paragraph).runs[0].bold)
         assertEquals("bold from a character style is", listOf(false, true), (b[25] as Paragraph).runs.map { it.bold })
 
-        assertEquals(TableBlock(14, listOf(listOf("Region totals", "", ""), listOf("Region", "Q1", "Q2"), listOf("East", "120", "144"), listOf("West", "95", "101"))), b[14])
+        assertEquals(TableBlock(14, listOf(listOf("Region totals", "", ""), listOf("Region", "Q1", "Q2"), listOf("East", "120", "144"), listOf("West", "95", "101")), merges = listOf(CellMerge(0, 0, 1, 3))), b[14])
         assertEquals(ImageBlock(16, "word/media/image1.png", 1828800L, 914400L), b[16])
         assertEquals(OpaqueBlock(19, "text-box"), b[19])
         assertEquals(OpaqueBlock(23, "section"), b[23])

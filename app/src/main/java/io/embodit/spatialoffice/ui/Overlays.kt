@@ -73,6 +73,7 @@ fun SharedOverlays(graph: Graph, win: Win, tag: String? = null) {
         is Overlay.SheetDelete -> (s as? SheetSession)?.let { SheetDeleteDialog(graph, it) }
         is Overlay.WordCount -> (s as? DocSession)?.let { WordCountDialog(graph, it) }
         is Overlay.InsertTable -> (s as? DocSession)?.let { InsertTableDialog(graph, it) }
+        is Overlay.Link -> (s as? DocSession)?.let { LinkSheet(graph, it, o) }
         is Overlay.ImagePick -> ImagePickSheet(graph, win)
         is Overlay.SignOut -> SignOutDialog(graph, o.provider)
         is Overlay.ChartView -> (s as? SheetSession)?.let { ChartSheet(graph, it, o.index) }
@@ -571,6 +572,45 @@ private fun InsertTableDialog(graph: Graph, s: DocSession) {
             }
         },
     )
+}
+
+/**
+ * M3 d20: add or edit a link. The address is required; with nothing selected the text to show is typed in at the
+ * caret (the address itself when left blank). An existing link offers [Remove link].
+ */
+@Composable
+private fun LinkSheet(graph: Graph, s: DocSession, o: Overlay.Link) {
+    var url by remember(o) { mutableStateOf(o.url) }
+    var text by remember(o) { mutableStateOf(o.text) }
+    var why by remember(o) { mutableStateOf(false) }
+    val typeText = o.b <= o.a
+    val done: () -> Unit = {
+        if (url.isBlank()) why = true
+        else {
+            graph.overlay = null
+            if (typeText) s.insertLink(o.para, o.a, text, url) else s.setLink(o.para, o.a, o.b, url)
+        }
+    }
+    Sheet(
+        modifier = Modifier.width(640.dp),
+        onDismissRequest = { graph.overlay = null },
+        leadingAction = { SheetClose { graph.overlay = null } },
+        title = { Txt(tr(if (o.existing) R.string.link_edit_title else R.string.link_title), "link/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold) },
+        bottom = {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Txt(if (why) tr(R.string.link_need_url) else "", "link/why", Modifier.weight(1f), style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.error, maxLines = 2)
+                if (o.existing) SecondaryButton(tr(R.string.link_remove), "link/remove", onClick = { graph.overlay = null; s.setLink(o.para, o.a, o.b, null) })
+                SecondaryButton(tr(R.string.cancel), "link/cancel", onClick = { graph.overlay = null })
+                PrimaryButton(tr(R.string.ok), "link/ok", onClick = done)
+            }
+        },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            LabeledField(tr(R.string.link_url), url, "link/url") { url = it; why = false }
+            if (typeText) LabeledField(tr(R.string.link_text), text, "link/text") { text = it }
+            else Txt(o.text, "link/shown", style = PicoTheme.typography.bodyLarge, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
+        }
+    }
 }
 
 @Composable
