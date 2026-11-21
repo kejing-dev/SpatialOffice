@@ -7,6 +7,8 @@ import io.embodit.spatialoffice.core.pkg.ContentTypes
 import io.embodit.spatialoffice.core.pkg.OoxmlPackage
 import io.embodit.spatialoffice.core.pkg.Rels
 import io.embodit.spatialoffice.core.pkg.Xml
+import io.embodit.spatialoffice.core.text.RichText
+import io.embodit.spatialoffice.core.text.Span
 
 /**
  * A presentation opened for patch-only editing.
@@ -80,7 +82,7 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         val sx = pkg.text(part)!!
         val sp = topShapes(sx).firstOrNull { it.name == "p:sp" && shapeId(sx, it) == shapeId }
             ?: throw IllegalStateException("shape $shapeId on slide $slide is read-only")
-        pkg.putText(part, replaceText(sx, sp, paras, styleChain(sx, sp, part)))
+        pkg.putText(part, replaceText(sx, sp, paras, styleChain(sx, sp, part), masterOf(part)))
         slideChanged(part)
     }
 
@@ -101,7 +103,7 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
             nx = insertIntoTree(nx, tree, PptxTemplates.placeholder(id, "Notes Placeholder", "type=\"body\" idx=\"1\""))
             body = notesBody(nx) ?: throw IllegalStateException("notes slide is not readable")
         }
-        pkg.putText(notes, replaceText(nx, body, paras, emptyList()))
+        pkg.putText(notes, replaceText(nx, body, paras, emptyList(), null))
         slideChanged(part)
     }
 
@@ -1018,10 +1020,55 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         return sb.toString()
     }
 
-    private fun paraModel(xml: String, p: Xml.Elem, chain: List<StyleSrc>): TextPara {
+    /** Effective run formatting: what the run's own `a:rPr` says, else the style chain's `a:defRPr` at [level]. */
+    private class RunFmt(val bold: Boolean, val italic: Boolean, val underline: Boolean, val strike: Boolean, val size: Int, val color: Int?)
+
+    private fun runFmt(xml: String, rPr: Xml.Elem?, chain: List<StyleSrc>, level: Int, master: PartDoc?): RunFmt {
+        fun attr(n: String): String? = rPr?.let { Xml.attr(xml, it, n) } ?: fromChain(chain, level) { x, l -> Xml.child(x, l, "a:defRPr")?.let { Xml.attr(x, it, n) } }
+        fun on(v: String?) = v == "1" || v == "true"
+        val u = attr("u"); val st = attr("strike")
+        val sz = attr("sz")?.toFloatOrNull() ?: 1800f
+        val color = rPr?.let { colorOf(xml, it, master) } ?: fromChain(chain, level) { x, l -> Xml.child(x, l, "a:defRPr")?.let { colorOf(x, it, master) } }
+        return RunFmt(on(attr("b")), on(attr("i")), u != null && u != "none", st != null && st != "noStrike", Math.round(sz / 50f), color)
+    }
+
+    private fun spanOf(text: String, f: RunFmt, src: Int) = Span(text, f.bold, f.italic, f.underline, src, f.strike, f.color, null, f.size)
+
+    private fun alignCode(v: String?): Int = when (v) { "ctr" -> 1; "r" -> 2; else -> 0 }
+
+    private fun effectiveAlign(xml: String, pPr: Xml.Elem?, chain: List<StyleSrc>, level: Int): Int =
+        alignCode(pPr?.let { Xml.attr(xml, it, "algn") } ?: fromChain(chain, level) { x, l -> Xml.attr(x, l, "algn") })
+
+    /**
+     * Paragraph [p] as the model shows it. [srcBase] = how many `a:r` of the same text body come before this paragraph,
+     * so every run's [Span.src] counts all runs of the body.
+     */
+    private fun paraModel(xml: String, p: Xml.Elem, chain: List<StyleSrc>, master: PartDoc? = null, srcBase: Int = 0): TextPara {
         val pPr = Xml.child(xml, p, "a:pPr")
         val level = (pPr?.let { Xml.attr(xml, it, "lvl")?.toIntOrNull() } ?: 0).coerceIn(0, 8)
-        return TextPara(paraText(xml, p), level, explicitBullet(xml, pPr) ?: inheritedBullet(chain, level))
+        val runs = ArrayList<Span>()
+        var pending = StringBuilder()
+        var n = srcBase
+        for (c in Xml.children(xml, p)) {
+            when (c.name) {
+                "a:r", "a:fld" -> {
+                    val t = Xml.child(xml, c, "a:t")?.let { Xml.text(xml, it) } ?: ""
+                    val src = if (c.name == "a:r") n++ else -1
+                    val text = pending.toString() + t
+                    pending = StringBuilder()
+                    if (text.isNotEmpty()) runs.add(spanOf(text, runFmt(xml, Xml.child(xml, c, "a:rPr"), chain, level, master), src))
+                }
+                "a:br" -> if (runs.isNotEmpty()) runs[runs.size - 1] = runs.last().let { it.copy(text = it.text + "\n") } else pending.append('\n')
+            }
+        }
+        if (pending.isNotEmpty()) runs.add(spanOf(pending.toString(), runFmt(xml, Xml.child(xml, p, "a:endParaRPr"), chain, level, master), -1))
+        return TextPara(paraText(xml, p), level, explicitBullet(xml, pPr) ?: inheritedBullet(chain, level), runs, effectiveAlign(xml, pPr, chain, level))
+    }
+
+    /** Paragraphs of a text body, with run indexes counted across the whole body. */
+    private fun parasOf(xml: String, ps: List<Xml.Elem>, chain: List<StyleSrc>, master: PartDoc?): List<TextPara> {
+        var base = 0
+        return ps.map { p -> paraModel(xml, p, chain, master, base).also { base += Xml.children(xml, p, "a:r").size } }
     }
 
     private fun simpleText(xml: String, txBody: Xml.Elem): Boolean {
@@ -1091,6 +1138,24 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
     }
 
     private fun readShape(sx: String, e: Xml.Elem, part: String, master: PartDoc?): Shape? {
+        val shape = readShapeBase(sx, e, part, master) ?: return null
+        val ln = (if (e.name == "p:sp" || e.name == "p:pic" || e.name == "p:cxnSp") Xml.child(sx, e, "p:spPr") else null)?.let { Xml.child(sx, it, "a:ln") }
+        val rot = ownXfrm(sx, e)?.let { Xml.attr(sx, it, "rot")?.toLongOrNull() } ?: 0L
+        return shape.copy(
+            lineRgb = ln?.let { colorOf(sx, it, master) }, lineWidthEmu = ln?.let { Xml.attr(sx, it, "w")?.toLongOrNull() },
+            rotation = Math.floorMod(Math.round(rot / 60000.0).toInt(), 360),
+        )
+    }
+
+    /** The `a:xfrm` / `p:xfrm` the top-level element [e] carries itself; null when it inherits its box. */
+    private fun ownXfrm(sx: String, e: Xml.Elem): Xml.Elem? = when (e.name) {
+        "p:sp", "p:pic", "p:cxnSp" -> Xml.child(sx, e, "p:spPr")?.let { Xml.child(sx, it, "a:xfrm") }
+        "p:grpSp" -> Xml.child(sx, e, "p:grpSpPr")?.let { Xml.child(sx, it, "a:xfrm") }
+        "p:graphicFrame" -> Xml.child(sx, e, "p:xfrm")
+        else -> null
+    }
+
+    private fun readShapeBase(sx: String, e: Xml.Elem, part: String, master: PartDoc?): Shape? {
         val id = shapeId(sx, e) ?: return null
         val ph = if (e.name == "p:sp" || e.name == "p:pic" || e.name == "p:graphicFrame") Xml.find(sx, e, "p:ph") else null
         val phType = ph?.let { Xml.attr(sx, it, "type") ?: "obj" }
@@ -1142,7 +1207,7 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
 
         val chain = styleChain(sx, e, part)
         val ps = Xml.children(sx, txBody, "a:p")
-        val paras = ps.map { paraModel(sx, it, chain) }
+        val paras = parasOf(sx, ps, chain, master)
         val first = ps.firstOrNull { p -> Xml.children(sx, p).any { it.name == "a:r" || it.name == "a:fld" } } ?: ps.firstOrNull()
         val pPr = first?.let { Xml.child(sx, it, "a:pPr") }
         val level = (pPr?.let { Xml.attr(sx, it, "lvl")?.toIntOrNull() } ?: 0).coerceIn(0, 8)
@@ -1170,34 +1235,60 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         return xml.substring(0, pos) + shapeXml + xml.substring(pos)
     }
 
+    /** True when [want] asks for nothing [orig] does not already have (null runs / align = as it was). */
+    private fun sameAs(orig: TextPara, want: TextPara): Boolean =
+        orig.text == want.text && orig.level == want.level && orig.bullet == want.bullet &&
+            (want.runs == null || want.runs == orig.runs) && (want.align == null || want.align == orig.align)
+
     /** Returns [xml] with the paragraphs of shape [sp] replaced by [paras]; nothing outside them changes. */
-    private fun replaceText(xml: String, sp: Xml.Elem, paras: List<TextPara>, chain: List<StyleSrc>): String {
+    private fun replaceText(xml: String, sp: Xml.Elem, paras: List<TextPara>, chain: List<StyleSrc>, master: PartDoc?): String {
         val txBody = Xml.child(xml, sp, "p:txBody")
         val ps = txBody?.let { Xml.children(xml, it, "a:p") } ?: emptyList()
-        val orig = ps.map { p ->
+        val models = parasOf(xml, ps, chain, master)
+        val orig = ps.mapIndexed { i, p ->
             val firstRun = Xml.children(xml, p).firstOrNull { it.name == "a:r" }
             OrigPara(
                 src = XmlEx.src(xml, p),
                 pPr = Xml.child(xml, p, "a:pPr")?.let { XmlEx.src(xml, it) } ?: "",
                 rPr = firstRun?.let { Xml.child(xml, it, "a:rPr") }?.let { XmlEx.src(xml, it) } ?: "",
                 endRPr = Xml.child(xml, p, "a:endParaRPr")?.let { XmlEx.src(xml, it) } ?: "",
-                model = paraModel(xml, p, chain),
+                model = models[i],
             )
         }
-        val want = (if (paras.isEmpty()) listOf(TextPara("")) else paras).map { it.copy(text = cleanText(it.text), level = it.level.coerceIn(0, 8)) }
+        // the a:rPr of every run of the body, in order: what a span's src points at
+        val runRPr = ps.flatMap { p -> Xml.children(xml, p, "a:r").map { r -> Xml.child(xml, r, "a:rPr")?.let { XmlEx.src(xml, it) } ?: "" } }
+        val want = (if (paras.isEmpty()) listOf(TextPara("")) else paras).map { tp ->
+            // runs whose text no longer matches the paragraph's (a caller changed only the text): the edit is applied to them, so the formatting follows
+            val given = tp.runs?.let { r -> if (r.joinToString("") { it.text } == tp.text) r else RichText.applyEdit(r, tp.text) }
+            val runs = given?.takeIf { it.isNotEmpty() || tp.text.isEmpty() }?.map { it.copy(text = cleanText(it.text)) }?.filter { it.text.isNotEmpty() }
+            tp.copy(text = runs?.joinToString("") { it.text } ?: cleanText(tp.text), level = tp.level.coerceIn(0, 8), runs = runs)
+        }
         val sb = StringBuilder()
         want.forEachIndexed { i, tp ->
             val same = orig.getOrNull(i)
-            if (same != null && same.model == tp) { sb.append(same.src); return@forEachIndexed }
+            if (same != null && sameAs(same.model, tp)) { sb.append(same.src); return@forEachIndexed }
             val base = same ?: orig.lastOrNull()
             var pPr = withLevel(base?.pPr ?: "", tp.level)
             pPr = withBullet(pPr, tp.bullet, tp.level, chain)
+            if (tp.align != null) pPr = withAlign(pPr, tp.align, tp.level, chain)
             val rPr = base?.rPr?.takeIf { it.isNotEmpty() } ?: base?.endRPr?.takeIf { it.isNotEmpty() }?.let { rename(it, "a:rPr") } ?: ""
             val endRPr = base?.endRPr?.takeIf { it.isNotEmpty() } ?: (if (tp.text.isEmpty() && rPr.isNotEmpty()) rename(rPr, "a:endParaRPr") else "")
             sb.append("<a:p>").append(pPr)
-            tp.text.split('\n').forEachIndexed { k, line ->
-                if (k > 0) sb.append("<a:br/>")
-                if (line.isNotEmpty()) sb.append("<a:r>").append(rPr).append("<a:t>").append(Xml.escape(line)).append("</a:t></a:r>")
+            val runs = tp.runs
+            if (runs == null) {
+                tp.text.split('\n').forEachIndexed { k, line ->
+                    if (k > 0) sb.append("<a:br/>")
+                    if (line.isNotEmpty()) sb.append("<a:r>").append(rPr).append("<a:t>").append(Xml.escape(line)).append("</a:t></a:r>")
+                }
+            } else {
+                for (span in runs) {
+                    val start = if (span.src >= 0) runRPr.getOrNull(span.src) ?: rPr else rPr
+                    val r = reconcileRPr(start, span, chain, tp.level, master)
+                    span.text.split('\n').forEachIndexed { k, line ->
+                        if (k > 0) sb.append("<a:br/>")
+                        if (line.isNotEmpty()) sb.append("<a:r>").append(r).append("<a:t>").append(Xml.escape(line)).append("</a:t></a:r>")
+                    }
+                }
             }
             sb.append(endRPr).append("</a:p>")
         }
@@ -1210,6 +1301,108 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
             ps.isEmpty() -> Xml.appendInto(xml, txBody, sb.toString())
             else -> xml.substring(0, ps.first().start) + sb + xml.substring(ps.last().end)
         }
+    }
+
+    /**
+     * [start] (an `a:rPr` as text, or "") changed only where [span] differs from what it gives at [level]: b, i, u,
+     * strike, sz and the run's own solid fill. Everything else in it stays as written. A span size of null removes
+     * the run's own size (the paragraph's applies); a colour of null removes the run's own fill.
+     */
+    private fun reconcileRPr(start: String, span: Span, chain: List<StyleSrc>, level: Int, master: PartDoc?): String {
+        var r = start.ifEmpty { "<a:rPr/>" }
+        if (Xml.root(r) == null) return start
+        fun fmt(x: String) = runFmt(x, Xml.root(x), chain, level, master)
+        fun withAttr(x: String, name: String, v: String?): String { val root = Xml.root(x)!!; return XmlEx.withAttr(x, root, name, v) + x.substring(root.openEnd) }
+        // a value the run no longer matches: drop the run's own attribute first; set it only when what is inherited still differs
+        fun toggle(name: String, want: Boolean, get: (RunFmt) -> Boolean, on: String, off: String) {
+            if (get(fmt(r)) == want) return
+            r = withAttr(r, name, null)
+            if (get(fmt(r)) != want) r = withAttr(r, name, if (want) on else off)
+        }
+        toggle("b", span.bold, { it.bold }, "1", "0")
+        toggle("i", span.italic, { it.italic }, "1", "0")
+        toggle("u", span.underline, { it.underline }, "sng", "none")
+        toggle("strike", span.strike, { it.strike }, "sngStrike", "noStrike")
+        val sz = span.size
+        if (sz == null) r = withAttr(r, "sz", null)
+        else if (fmt(r).size != sz) { r = withAttr(r, "sz", null); if (fmt(r).size != sz) r = withAttr(r, "sz", (sz * 50).toString()) }
+        if (span.color != fmt(r).color) {
+            r = XmlEx.removeChildren(r, FILL_ELEMS)
+            val c = span.color
+            if (c != null && fmt(r).color != c) r = XmlEx.insertChild(r, "<a:solidFill><a:srgbClr val=\"${hex(c)}\"/></a:solidFill>", "a:solidFill", RPR_ORDER)
+        }
+        Xml.root(r)?.let { root -> if (!root.selfClosing && XmlEx.isEmpty(r)) r = r.substring(0, root.openEnd - 1).trimEnd() + "/>" }
+        if (start.isEmpty() && r == "<a:rPr/>") return ""
+        return r
+    }
+
+    private fun hex(rgb: Int) = "%06X".format(rgb and 0xFFFFFF)
+
+    private fun withAlign(pPrIn: String, align: Int, level: Int, chain: List<StyleSrc>): String {
+        val cur = effectiveAlign(pPrIn, if (pPrIn.isEmpty()) null else Xml.root(pPrIn), chain, level)
+        if (cur == align) return pPrIn
+        val pPr = pPrIn.ifEmpty { "<a:pPr/>" }
+        val root = Xml.root(pPr) ?: return pPrIn
+        return XmlEx.withAttr(pPr, root, "algn", when (align) { 1 -> "ctr"; 2 -> "r"; else -> "l" }) + pPr.substring(root.openEnd)
+    }
+
+    /** Solid fill of a drawn shape (p22); null = no fill. Only the shape's own `p:spPr` changes. */
+    fun setShapeFill(slide: Int, shapeId: Int, rgb: Int?) {
+        val part = slidePart(slide)
+        val sx = pkg.text(part)!!
+        val e = topShapes(sx).firstOrNull { shapeId(sx, it) == shapeId } ?: throw IllegalArgumentException("slide $slide has no shape $shapeId")
+        if (e.name != "p:sp") throw IllegalStateException("shape $shapeId has no fill of its own")
+        val spPr = Xml.child(sx, e, "p:spPr") ?: throw IllegalStateException("shape $shapeId has no shape properties")
+        val fill = if (rgb == null) "<a:noFill/>" else "<a:solidFill><a:srgbClr val=\"${hex(rgb)}\"/></a:solidFill>"
+        var pr = XmlEx.removeChildren(XmlEx.src(sx, spPr), FILL_ELEMS)
+        pr = XmlEx.insertChild(pr, fill, if (rgb == null) "a:noFill" else "a:solidFill", SPPR_ORDER)
+        pkg.putText(part, sx.substring(0, spPr.start) + pr + sx.substring(spPr.end))
+        slideChanged(part)
+    }
+
+    /** Outline of a shape, connector or picture (p22): colour (null = no line) and width in EMU (null = keep the width it has). */
+    fun setShapeLine(slide: Int, shapeId: Int, rgb: Int?, widthEmu: Long?) {
+        val part = slidePart(slide)
+        val sx = pkg.text(part)!!
+        val e = topShapes(sx).firstOrNull { shapeId(sx, it) == shapeId } ?: throw IllegalArgumentException("slide $slide has no shape $shapeId")
+        if (e.name != "p:sp" && e.name != "p:cxnSp" && e.name != "p:pic") throw IllegalStateException("shape $shapeId has no outline of its own")
+        val spPr = Xml.child(sx, e, "p:spPr") ?: throw IllegalStateException("shape $shapeId has no shape properties")
+        val prXml = XmlEx.src(sx, spPr)
+        val fill = if (rgb == null) "<a:noFill/>" else "<a:solidFill><a:srgbClr val=\"${hex(rgb)}\"/></a:solidFill>"
+        val lnEl = XmlEx.childOf(prXml, "a:ln")
+        var ln = lnEl?.let { XmlEx.src(prXml, it) } ?: "<a:ln/>"
+        ln = XmlEx.removeChildren(ln, FILL_ELEMS)
+        ln = XmlEx.insertChild(ln, fill, if (rgb == null) "a:noFill" else "a:solidFill", LN_ORDER)
+        if (widthEmu != null) {
+            val root = Xml.root(ln)!!
+            ln = XmlEx.withAttr(ln, root, "w", widthEmu.coerceIn(0L, 20116800L).toString()) + ln.substring(root.openEnd)
+        }
+        val pr = if (lnEl != null) prXml.substring(0, lnEl.start) + ln + prXml.substring(lnEl.end) else XmlEx.insertChild(prXml, ln, "a:ln", SPPR_ORDER)
+        pkg.putText(part, sx.substring(0, spPr.start) + pr + sx.substring(spPr.end))
+        slideChanged(part)
+    }
+
+    /**
+     * Rotates a top-level object to [degrees] (normalised to 0..359; p24): the `rot` of its own transform, 0 removes it.
+     * An object that inherits its box (a placeholder) is given one of its own first.
+     */
+    fun setShapeRotation(slide: Int, shapeId: Int, degrees: Int) {
+        val part = slidePart(slide)
+        val deg = Math.floorMod(degrees, 360)
+        var sx = pkg.text(part)!!
+        var e = topShapes(sx).firstOrNull { shapeId(sx, it) == shapeId } ?: throw IllegalArgumentException("slide $slide has no shape $shapeId")
+        if (ownXfrm(sx, e) == null) {
+            if (deg == 0) return
+            val sh = slides[slide].shapes.firstOrNull { it.id == shapeId } ?: throw IllegalArgumentException("slide $slide has no shape $shapeId")
+            setShapeBox(slide, shapeId, sh.x, sh.y, sh.w, sh.h)
+            sx = pkg.text(part)!!
+            e = topShapes(sx).first { shapeId(sx, it) == shapeId }
+        }
+        val xf = ownXfrm(sx, e) ?: throw IllegalStateException("shape $shapeId cannot be rotated")
+        val tag = XmlEx.withAttr(sx, xf, "rot", if (deg == 0) null else (deg * 60000L).toString())
+        if (tag == sx.substring(xf.start, xf.openEnd)) return
+        pkg.putText(part, sx.substring(0, xf.start) + tag + sx.substring(xf.openEnd))
+        slideChanged(part)
     }
 
     private fun rename(elemXml: String, name: String): String {
@@ -1260,6 +1453,20 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         private val COPYABLE_REL = listOf("/image", "/hyperlink", "/media", "/video", "/audio", "/slide")
         private val FOOTER_TYPES = setOf("dt", "ftr", "sldNum", "hdr")
         private val BULLET_ELEMS = setOf("a:buNone", "a:buChar", "a:buAutoNum", "a:buBlip")
+        private val FILL_ELEMS = setOf("a:noFill", "a:solidFill", "a:gradFill", "a:blipFill", "a:pattFill", "a:grpFill")
+        private val RPR_ORDER = listOf(
+            "a:ln", "a:noFill", "a:solidFill", "a:gradFill", "a:blipFill", "a:pattFill", "a:grpFill", "a:effectLst", "a:effectDag",
+            "a:highlight", "a:uLnTx", "a:uLn", "a:uFillTx", "a:uFill", "a:latin", "a:ea", "a:cs", "a:sym", "a:hlinkClick",
+            "a:hlinkMouseOver", "a:rtl", "a:extLst",
+        )
+        private val SPPR_ORDER = listOf(
+            "a:xfrm", "a:custGeom", "a:prstGeom", "a:noFill", "a:solidFill", "a:gradFill", "a:blipFill", "a:pattFill", "a:grpFill",
+            "a:ln", "a:effectLst", "a:effectDag", "a:scene3d", "a:sp3d", "a:extLst",
+        )
+        private val LN_ORDER = listOf(
+            "a:noFill", "a:solidFill", "a:gradFill", "a:pattFill", "a:prstDash", "a:custDash", "a:round", "a:bevel", "a:miter",
+            "a:headEnd", "a:tailEnd", "a:extLst",
+        )
         private val APPR_ORDER = listOf(
             "a:lnSpc", "a:spcBef", "a:spcAft", "a:buClrTx", "a:buClr", "a:buSzTx", "a:buSzPct", "a:buSzPts", "a:buFontTx",
             "a:buFont", "a:buNone", "a:buAutoNum", "a:buChar", "a:buBlip", "a:tabLst", "a:defRPr", "a:extLst",

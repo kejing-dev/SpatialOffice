@@ -1,9 +1,20 @@
 package io.embodit.spatialoffice.core.pptx
 
+import io.embodit.spatialoffice.core.text.Span
+
 enum class ShapeKind { TITLE, BODY, TEXT, PICTURE, CHART, OTHER }
 
-/** One paragraph of a shape. A `\n` inside [text] is a line break within the paragraph. */
-data class TextPara(val text: String, val level: Int = 0, val bullet: Boolean = false)
+/**
+ * One paragraph of a shape. A `\n` inside [text] is a line break within the paragraph.
+ * M2 (v0.4.0): read from a file, [runs] holds one [Span] per text run with its effective bold / italic / underline /
+ * strike / size (half-points) / colour, and [Span.src] = the index of that `a:r` among all `a:r` of the shape's text
+ * body as stored when it was read; [align] is the effective alignment (0 left, 1 centre, 2 right). Handed to
+ * [PptxDeck.setShapeText], `runs == null` / `align == null` mean "as the text / as it was".
+ */
+data class TextPara(val text: String, val level: Int = 0, val bullet: Boolean = false, val runs: List<Span>? = null, val align: Int? = null) {
+    /** The paragraph without run formatting and alignment (text, level, bullet), for comparisons that only care about those. */
+    fun plain(): TextPara = TextPara(text, level, bullet)
+}
 
 /**
  * One top-level shape of a slide. x / y / w / h in EMU, resolved through layout and master placeholders when the
@@ -22,6 +33,12 @@ data class Shape(
     val table: List<List<String>>? = null,
     /** A plain table (no merged cells): its cells can be typed into ([editable] stays false: a table has no single text). */
     val cellsEditable: Boolean = false,
+    /** Outline colour 0xRRGGBB from `a:ln`'s own solid fill (null = none or not a plain colour). */
+    val lineRgb: Int? = null,
+    /** Outline width in EMU from `a:ln w` (null = not set). */
+    val lineWidthEmu: Long? = null,
+    /** Rotation in degrees, 0..359, from the shape's own `a:xfrm rot`. */
+    val rotation: Int = 0,
 )
 
 data class Slide(val index: Int, val shapes: List<Shape>, val notes: String, val backgroundRgb: Int?)
