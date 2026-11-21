@@ -129,7 +129,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
         val clean = normRuns(runs)
         val newXml = XmlEx.openTag(xml, p) + newPPr + lead + runsXml(clean, e.srcRPr) + trail + "</w:p>"
         replaceEntry(idx, newXml)
-        e.block = Paragraph(id, style, clean, true, null, newAlign)
+        e.block = paraOf(id, style, clean, true, null, newPPr)
         changedIds.add(id)
     }
 
@@ -316,7 +316,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
         xml = xml.substring(0, pos) + newXml + xml.substring(pos)
         for (k in anchorIdx + 1 until entries.size) { entries[k].start += newXml.length; entries[k].end += newXml.length }
         val newId = nextId++
-        entries.add(anchorIdx + 1, Entry(newId, pos, pos + newXml.length, Paragraph(newId, style, clean, true, null), srcRPr, true))
+        entries.add(anchorIdx + 1, Entry(newId, pos, pos + newXml.length, paraOf(newId, style, clean, true, null, pPr), srcRPr, true))
         changedIds.add(newId)
         touched()
         return newId
@@ -340,6 +340,94 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
         for (k in idx until entries.size) { entries[k].start -= len; entries[k].end -= len }
         if (e.isNew) changedIds.remove(id) else { changedIds.remove(id); deletedCount++ }
         touched()
+    }
+
+    /**
+     * M2 (d17): sets the list level (0–8) of a bulleted or numbered paragraph: `w:ilvl` in its `w:numPr`. When the
+     * list comes from the paragraph style only, a direct `w:numPr` with the style's numId is added. Only `w:pPr` changes.
+     */
+    fun setListLevel(id: Int, level: Int) {
+        val old = editablePara(id)
+        if (old.style != ParaStyle.BULLET && old.style != ParaStyle.NUMBERED) throw IllegalStateException("paragraph $id is not in a list")
+        val lvl = level.coerceIn(0, 8)
+        editPPr(id) { pPrIn ->
+            val pPr = pPrIn.ifEmpty { "<w:pPr></w:pPr>" }
+            val numPr = XmlEx.childOf(pPr, "w:numPr")
+            val ilvl = "<w:ilvl w:val=\"$lvl\"/>"
+            if (numPr != null) {
+                val np = XmlEx.insertChild(XmlEx.removeChildren(XmlEx.src(pPr, numPr), setOf("w:ilvl")), ilvl, "w:ilvl", NUMPR_ORDER)
+                pPr.substring(0, numPr.start) + np + pPr.substring(numPr.end)
+            } else {
+                val numId = styles().num(pStyleOf(pPr))?.first?.takeIf { it != 0 } ?: ownNumId(old.style == ParaStyle.BULLET)
+                XmlEx.insertChild(pPr, "<w:numPr>$ilvl<w:numId w:val=\"$numId\"/></w:numPr>", "w:numPr", PPR_ORDER)
+            }
+        }
+    }
+
+    /** M2 (d17): direct left indent in twips (`w:ind w:left`); 0 removes it. Other `w:ind` attributes stay. */
+    fun setIndent(id: Int, twips: Int) {
+        editablePara(id)
+        val v = twips.coerceAtLeast(0)
+        editPPr(id) { withAttrs(it, "w:ind", listOf("w:start" to null, "w:left" to (if (v == 0) null else v.toString()))) }
+    }
+
+    /** M2 (d19): line spacing in 240ths of a line, auto rule (240 single, 360 one and a half); null removes it. */
+    fun setLineSpacing(id: Int, line: Int?) {
+        editablePara(id)
+        editPPr(id) { withAttrs(it, "w:spacing", listOf("w:line" to line?.coerceAtLeast(1)?.toString(), "w:lineRule" to line?.let { "auto" })) }
+    }
+
+    /** M2 (d19): space before / after the paragraph in twips; null removes that attribute. */
+    fun setParaSpacing(id: Int, beforeTw: Int?, afterTw: Int?) {
+        editablePara(id)
+        editPPr(id) { withAttrs(it, "w:spacing", listOf("w:before" to beforeTw?.coerceAtLeast(0)?.toString(), "w:after" to afterTw?.coerceAtLeast(0)?.toString())) }
+    }
+
+    private fun editablePara(id: Int): Paragraph {
+        val p = entries[indexOf(id)].block as? Paragraph ?: throw IllegalStateException("block $id is not a paragraph")
+        if (!p.editable) throw IllegalStateException("paragraph $id is read-only (${p.readOnlyWhy})")
+        return p
+    }
+
+    /** Rewrites only the `w:pPr` of paragraph [id] ("" = none) and keeps its runs and style. */
+    private fun editPPr(id: Int, f: (String) -> String) {
+        val idx = indexOf(id)
+        val e = entries[idx]
+        val old = e.block as Paragraph
+        val p = Xml.elemAt(xml, e.start) ?: throw IllegalStateException("paragraph $id is not readable")
+        val pPrEl = Xml.child(xml, p, "w:pPr")
+        val oldPPr = pPrEl?.let { XmlEx.src(xml, it) } ?: ""
+        var newPPr = f(oldPPr)
+        if (newPPr.isNotEmpty() && XmlEx.isEmpty(newPPr)) newPPr = ""
+        if (newPPr == oldPPr) return
+        val seg = when {
+            pPrEl != null -> xml.substring(e.start, pPrEl.start) + newPPr + xml.substring(pPrEl.end, e.end)
+            p.selfClosing -> XmlEx.openTag(xml, p) + newPPr + "</w:p>"
+            else -> xml.substring(e.start, p.openEnd) + newPPr + xml.substring(p.openEnd, e.end)
+        }
+        replaceEntry(idx, seg)
+        e.block = paraOf(id, old.style, old.runs, true, null, newPPr)
+        changedIds.add(id)
+    }
+
+    /**
+     * [pPrIn] with attributes of its child [name] set (null = removed). A missing child is added in schema order;
+     * one left with no attributes is dropped.
+     */
+    private fun withAttrs(pPrIn: String, name: String, attrs: List<Pair<String, String?>>): String {
+        val el = if (pPrIn.isEmpty()) null else XmlEx.childOf(pPrIn, name)
+        if (el == null) {
+            val set = attrs.filter { it.second != null }
+            if (set.isEmpty()) return pPrIn
+            val tag = "<$name" + set.joinToString("") { " ${it.first}=\"${Xml.escape(it.second!!)}\"" } + "/>"
+            return XmlEx.insertChild(pPrIn.ifEmpty { "<w:pPr></w:pPr>" }, tag, name, PPR_ORDER)
+        }
+        var tag = pPrIn.substring(el.start, el.openEnd)
+        for ((a, v) in attrs) tag = XmlEx.tagWithAttr(tag, a, v)
+        val bare = BARE_TAG.matches(tag)
+        val out = if (bare && el.selfClosing) pPrIn.substring(0, el.start) + pPrIn.substring(el.end)
+        else pPrIn.substring(0, el.start) + tag + pPrIn.substring(el.openEnd)
+        return if (XmlEx.isEmpty(out)) "" else out
     }
 
     /** What is shown approximately or kept read-only. Counts are occurrences in the document. */
@@ -483,8 +571,41 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
      */
     private fun modelRun(r: Xml.Elem, src: Int): Run {
         val rPr = rPrOf(r)
-        return Run(runText(r), runToggle(rPr, "w:b"), runToggle(rPr, "w:i"), runToggle(rPr, "w:u"), src, runToggle(rPr, "w:strike"))
+        return Run(runText(r), runToggle(rPr, "w:b"), runToggle(rPr, "w:i"), runToggle(rPr, "w:u"), src, runToggle(rPr, "w:strike"), colorOf(rPr), highlightOf(rPr), sizeOf(rPr))
     }
+
+    /**
+     * A paragraph model with its M2 properties read from [pPr]. Read-only paragraphs were always shown with
+     * alignment 0 ([align0]); that stays so.
+     */
+    private fun paraOf(id: Int, style: ParaStyle, runs: List<Run>, editable: Boolean, why: String?, pPr: String, align0: Boolean = false): Paragraph {
+        val numPr = if (pPr.isEmpty()) null else XmlEx.childOf(pPr, "w:numPr")
+        val direct = numPr?.let { Xml.child(pPr, it, "w:ilvl") }?.let { Xml.attr(pPr, it, "w:val")?.toIntOrNull() }
+        val pStyle = pStyleOf(pPr)
+        val level = (direct ?: styles().num(pStyle)?.second ?: 0).coerceIn(0, 8)
+        val ind = if (pPr.isEmpty()) null else XmlEx.childOf(pPr, "w:ind")
+        val indent = ind?.let { (Xml.attr(pPr, it, "w:left") ?: Xml.attr(pPr, it, "w:start"))?.toIntOrNull() } ?: 0
+        val sp = if (pPr.isEmpty()) null else XmlEx.childOf(pPr, "w:spacing")
+        val rule = sp?.let { Xml.attr(pPr, it, "w:lineRule") }
+        val line = sp?.takeIf { rule == null || rule == "auto" }?.let { Xml.attr(pPr, it, "w:line")?.toIntOrNull() }
+        return Paragraph(
+            id, style, runs, editable, why, if (align0) 0 else alignOf(pPr),
+            level = level, indentTw = indent.coerceAtLeast(0), lineSpacing = line,
+            spaceBefore = sp?.let { Xml.attr(pPr, it, "w:before")?.toIntOrNull() },
+            spaceAfter = sp?.let { Xml.attr(pPr, it, "w:after")?.toIntOrNull() },
+            baseSizeHp = styles().sizeHp(pStyle),
+        )
+    }
+
+    private fun rPrVal(rPr: String, prop: String): String? {
+        if (rPr.isEmpty()) return null
+        val e = XmlEx.childOf(rPr, prop) ?: return null
+        return Xml.attr(rPr, e, "w:val")
+    }
+
+    private fun colorOf(rPr: String): Int? = rPrVal(rPr, "w:color")?.takeIf { it.length == 6 && it != "auto" }?.toIntOrNull(16)
+    private fun highlightOf(rPr: String): String? = rPrVal(rPr, "w:highlight")?.takeIf { it.isNotEmpty() && it != "none" }
+    private fun sizeOf(rPr: String): Int? = rPrVal(rPr, "w:sz")?.toIntOrNull()?.takeIf { it > 0 }
 
     private fun runToggle(rPr: String, prop: String): Boolean =
         DocxStyles.toggle(rPr, prop) ?: styles().charToggle(prop, DocxStyles.rStyle(rPr)) ?: false
@@ -543,7 +664,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
                 if (r.text.isNotEmpty()) runs.add(r)
                 i++
             }
-            return Entry(id, p.start, p.end, Paragraph(id, style, runs, true, null, align), srcRPr, false)
+            return Entry(id, p.start, p.end, paraOf(id, style, runs, true, null, pPr), srcRPr, false)
         }
 
         val found = ArrayList<Xml.Elem>()
@@ -551,12 +672,12 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
         val runs = found.mapIndexed { i, r -> modelRun(r, i) }.filter { it.text.isNotEmpty() }
         val blank = runs.all { it.text.isBlank() }
         val block: DocBlock = when {
-            tracked -> Paragraph(id, style, runs, false, "tracked-changes")
+            tracked -> paraOf(id, style, runs, false, "tracked-changes", pPr, align0 = true)
             graphic && blank -> pictureOf(id, p, seg) ?: OpaqueBlock(id, graphicKind(seg))
-            graphic -> Paragraph(id, style, runs, false, "complex")
-            field -> Paragraph(id, style, runs, false, "field")
+            graphic -> paraOf(id, style, runs, false, "complex", pPr, align0 = true)
+            field -> paraOf(id, style, runs, false, "field", pPr, align0 = true)
             section && blank -> OpaqueBlock(id, "section")
-            else -> Paragraph(id, style, runs, false, "complex")
+            else -> paraOf(id, style, runs, false, "complex", pPr, align0 = true)
         }
         return Entry(id, p.start, p.end, block, emptyList(), false)
     }
@@ -638,6 +759,9 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
             rPr = withToggle(rPr, "w:i", r.italic)
             rPr = withToggle(rPr, "w:u", r.underline)
             rPr = withToggle(rPr, "w:strike", r.strike)
+            if (colorOf(rPr) != r.color) rPr = withValue(rPr, setOf("w:color"), r.color?.let { listOf("<w:color w:val=\"%06X\"/>".format(it and 0xFFFFFF) to "w:color") })
+            if (highlightOf(rPr) != r.highlight) rPr = withValue(rPr, setOf("w:highlight"), r.highlight?.let { listOf("<w:highlight w:val=\"${Xml.escape(it)}\"/>" to "w:highlight") })
+            if (sizeOf(rPr) != r.size) rPr = withValue(rPr, setOf("w:sz", "w:szCs"), r.size?.let { listOf("<w:sz w:val=\"$it\"/>" to "w:sz", "<w:szCs w:val=\"$it\"/>" to "w:szCs") })
             sb.append("<w:r>")
             if (rPr.isNotEmpty() && !XmlEx.isEmpty(rPr)) sb.append(rPr)
             val buf = StringBuilder()
@@ -660,6 +784,13 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
             sb.append("</w:r>")
         }
         return sb.toString()
+    }
+
+    /** [rPrIn] without the children [remove], then with each (element text, name) of [add] put in schema order. */
+    private fun withValue(rPrIn: String, remove: Set<String>, add: List<Pair<String, String>>?): String {
+        var rPr = if (rPrIn.isEmpty()) "" else XmlEx.removeChildren(rPrIn, remove)
+        for ((el, name) in add ?: emptyList()) rPr = if (rPr.isEmpty()) "<w:rPr>$el</w:rPr>" else XmlEx.insertChild(rPr, el, name, RPR_ORDER)
+        return rPr
     }
 
     /** Returns [rPrIn] with the run-level toggle [prop] made to read [want], touching nothing else in it. */
@@ -783,6 +914,8 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
         const val TEXT_WIDTH_TWIPS = 9000
         /** Text width for pictures: 6 in. */
         const val TEXT_WIDTH_EMU = 5_486_400L
+        private val NUMPR_ORDER = listOf("w:ilvl", "w:numId", "w:numberingChange", "w:ins")
+        private val BARE_TAG = Regex("^<[\\w:.-]+\\s*/?>$")
         private val TBL_PR_ORDER = listOf(
             "w:tblStyle", "w:tblpPr", "w:tblOverlap", "w:bidiVisual", "w:tblStyleRowBandSize", "w:tblStyleColBandSize", "w:tblW", "w:jc",
             "w:tblCellSpacing", "w:tblInd", "w:tblBorders", "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook", "w:tblCaption", "w:tblDescription",

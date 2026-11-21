@@ -83,11 +83,12 @@ internal object DocxTemplates {
     fun abstractNum(id: Int, bullet: Boolean): String {
         val sb = StringBuilder("<w:abstractNum w:abstractNumId=\"$id\"><w:multiLevelType w:val=\"hybridMultilevel\"/>")
         val glyphs = listOf("•", "◦", "▪")
-        for (lvl in 0..2) {
+        // M2 (d17): all nine levels, so Tab can take a list item down to level 8
+        for (lvl in 0..8) {
             val left = 720 * (lvl + 1)
             sb.append("<w:lvl w:ilvl=\"$lvl\"><w:start w:val=\"1\"/>")
-            if (bullet) sb.append("<w:numFmt w:val=\"bullet\"/><w:lvlText w:val=\"${glyphs[lvl]}\"/>")
-            else sb.append("<w:numFmt w:val=\"${if (lvl == 0) "decimal" else if (lvl == 1) "lowerLetter" else "lowerRoman"}\"/><w:lvlText w:val=\"%${lvl + 1}.\"/>")
+            if (bullet) sb.append("<w:numFmt w:val=\"bullet\"/><w:lvlText w:val=\"${glyphs[lvl % 3]}\"/>")
+            else sb.append("<w:numFmt w:val=\"${when (lvl % 3) { 0 -> "decimal"; 1 -> "lowerLetter"; else -> "lowerRoman" }}\"/><w:lvlText w:val=\"%${lvl + 1}.\"/>")
             sb.append("<w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"$left\" w:hanging=\"360\"/></w:pPr></w:lvl>")
         }
         return sb.append("</w:abstractNum>").toString()

@@ -16,6 +16,12 @@ data class Run(
     val underline: Boolean = false,
     val src: Int = -1,
     val strike: Boolean = false,
+    /** M2: the run's own `w:color` as 0xRRGGBB; null = automatic / absent. */
+    val color: Int? = null,
+    /** M2: the run's own `w:highlight` name ("yellow", "green", "cyan" …); null = none. */
+    val highlight: String? = null,
+    /** M2: the run's own `w:sz` in half-points; null = the paragraph's ([Paragraph.baseSizeHp]). */
+    val size: Int? = null,
 )
 
 sealed class DocBlock { abstract val id: Int }
@@ -29,6 +35,17 @@ data class Paragraph(
     val readOnlyWhy: String?,
     /** 0 start, 1 centre, 2 end, 3 justified. */
     val align: Int = 0,
+    /** M2: list level (`w:ilvl`, direct or from the style), 0–8. */
+    val level: Int = 0,
+    /** M2: direct left indent (`w:ind w:left` / `w:start`) in twips; 0 when absent. */
+    val indentTw: Int = 0,
+    /** M2: direct line spacing (`w:spacing w:line`, auto rule) in 240ths of a line; null = not set here. */
+    val lineSpacing: Int? = null,
+    /** M2: direct space before / after the paragraph (`w:spacing w:before` / `w:after`) in twips; null = not set here. */
+    val spaceBefore: Int? = null,
+    val spaceAfter: Int? = null,
+    /** M2: effective size in half-points of a run without its own `w:sz` (paragraph style chain, then document defaults, else 20). */
+    val baseSizeHp: Int = 22,
 ) : DocBlock() {
     val text: String get() = runs.joinToString("") { it.text }
 }

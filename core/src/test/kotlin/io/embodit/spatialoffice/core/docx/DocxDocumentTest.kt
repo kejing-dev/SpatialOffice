@@ -188,7 +188,7 @@ class DocxDocumentTest {
     @Test fun newRunTakesFormattingFromItsSourceRun() {
         val d = open()
         // split "18%" into two runs that both point at original run 1, and add one with no source
-        d.setParagraph(2, listOf(Run("Up ", src = 0), Run("18", bold = true, src = 1), Run("%", bold = false, src = 1), Run(" total")), ParaStyle.BODY)
+        d.setParagraph(2, listOf(Run("Up ", src = 0), Run("18", bold = true, src = 1, color = 0xC0392B, size = 28), Run("%", bold = false, src = 1, color = 0xC0392B, size = 28), Run(" total")), ParaStyle.BODY)
         val x = text(d.save(), doc)
         val font = "<w:rFonts w:ascii=\"Fixture Sans\" w:hAnsi=\"Fixture Sans\"/>"
         assertTrue(x.contains("<w:r><w:rPr>$font<w:b/><w:color w:val=\"C0392B\"/><w:sz w:val=\"28\"/></w:rPr><w:t>18</w:t></w:r>"))
@@ -198,7 +198,7 @@ class DocxDocumentTest {
 
     @Test fun characterStyleBoldCanBeSwitchedOffAndHeadingRunsStayPlain() {
         val d = open()
-        d.setParagraph(25, listOf(Run("Outlook: ", src = 0), Run("positive", bold = false, italic = true, src = 1)), ParaStyle.BODY)
+        d.setParagraph(25, listOf(Run("Outlook: ", src = 0), Run("positive", bold = false, italic = true, src = 1, color = 0x1E8449)), ParaStyle.BODY)
         d.setParagraph(1, listOf(Run("Overview", src = 0), Run(" (draft)", italic = true, src = 0)), ParaStyle.H1)
         val out = d.save()
         val x = text(out, doc)
@@ -306,8 +306,9 @@ class DocxDocumentTest {
         val d = open()
         // after a numbered item with the same style → same list; after the coloured run → same run formatting
         d.insertParagraphAfter(11, listOf(Run("Review in June")), ParaStyle.NUMBERED)
-        d.setParagraph(2, listOf(Run("Revenue grew "), Run("18%", bold = true, src = 1)), ParaStyle.BODY)
-        d.insertParagraphAfter(2, listOf(Run("and again")), ParaStyle.BODY)
+        // M2: colour and size are model values too, so the continuing run carries them (as the app's spans do)
+        d.setParagraph(2, listOf(Run("Revenue grew "), Run("18%", bold = true, src = 1, color = 0xC0392B, size = 28)), ParaStyle.BODY)
+        d.insertParagraphAfter(2, listOf(Run("and again", color = 0xC0392B, size = 28)), ParaStyle.BODY)
         val x = text(d.save(), doc)
         assertTrue(x.contains("<w:p><w:pPr><w:pStyle w:val=\"ListNumber\"/></w:pPr><w:r><w:t>Review in June</w:t></w:r></w:p>"))
         assertTrue(x.contains("<w:rFonts w:ascii=\"Fixture Sans\" w:hAnsi=\"Fixture Sans\"/><w:color w:val=\"C0392B\"/><w:sz w:val=\"28\"/></w:rPr><w:t>and again</w:t>"))
@@ -444,11 +445,11 @@ class DocxDocumentTest {
         assertEquals("field", (b[5] as Paragraph).readOnlyWhy); assertEquals("today", (b[5] as Paragraph).text)
         assertEquals(ParaStyle.H2, (b[6] as Paragraph).style)
         assertEquals("tracked-changes", (b[7] as Paragraph).readOnlyWhy)
-        assertEquals(Paragraph(8, ParaStyle.BODY, emptyList(), true, null), b[8])
+        assertEquals(Paragraph(8, ParaStyle.BODY, emptyList(), true, null, baseSizeHp = 20), b[8])  // no styles part: 10 pt
         assertAllPartsIdentical(bytes, d.save())
 
         // editing: start-tag attributes and w:pPr stay, spell-check marks (which describe the old text) go
-        d.setParagraph(0, listOf(Run("Hello", bold = true, src = 0), Run(" world", src = 1)), ParaStyle.BODY)
+        d.setParagraph(0, listOf(Run("Hello", bold = true, src = 0, size = 30), Run(" world", src = 1)), ParaStyle.BODY)
         d.setParagraph(2, listOf(Run("one\u000Ctwo")), ParaStyle.BODY)
         d.setParagraph(8, listOf(Run("was empty")), ParaStyle.BODY)
         val out = d.save()

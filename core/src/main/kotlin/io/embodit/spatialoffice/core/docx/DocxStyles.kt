@@ -13,6 +13,9 @@ internal class DocxStyles(xml: String?) {
     val byId = LinkedHashMap<String, Style>()
     var defaultParaId: String? = null
         private set
+    /** `w:docDefaults/w:rPrDefault/w:rPr/w:sz` in half-points, if the file says. */
+    var defaultSizeHp: Int? = null
+        private set
 
     init {
         val root = xml?.let { Xml.root(it) }
@@ -38,6 +41,10 @@ internal class DocxStyles(xml: String?) {
                         )
                         byId[id] = st
                         if (st.isDefault && st.type == "paragraph" && defaultParaId == null) defaultParaId = id
+                    }
+                    "w:docDefaults" -> {
+                        defaultSizeHp = Xml.child(xml, c, "w:rPrDefault")?.let { Xml.child(xml, it, "w:rPr") }
+                            ?.let { Xml.child(xml, it, "w:sz") }?.let { Xml.attr(xml, it, "w:val")?.toIntOrNull() }
                     }
                 }
             }
@@ -76,6 +83,15 @@ internal class DocxStyles(xml: String?) {
             if (n.startsWith("list number")) return ParaStyle.NUMBERED
         }
         return null
+    }
+
+    /** M2: size in half-points of a run without its own `w:sz` in a paragraph of style [paraStyleId]: style chain, document defaults, else 20. */
+    fun sizeHp(paraStyleId: String?): Int {
+        for (s in chain(paraStyleId ?: defaultParaId)) {
+            if (s.rPr.isEmpty()) continue
+            XmlEx.childOf(s.rPr, "w:sz")?.let { Xml.attr(s.rPr, it, "w:val")?.toIntOrNull() }?.let { return it }
+        }
+        return defaultSizeHp ?: 20
     }
 
     /** True when the style on its own (no direct formatting) is plain body text. */
