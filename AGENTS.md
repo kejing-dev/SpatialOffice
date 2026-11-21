@@ -23,7 +23,7 @@ tools/.venv/bin/python tools/fixtures/make_slide_proportions.py <dir>   # v0.2.6
 
 | Path | What |
 |---|---|
-| `core/` | Pure Kotlin/JVM, no Android. `pkg/` OPC package + XML range scanner; `docx/`, `xlsx/`, `pptx/`, `csv/` read / edit / patch-only save; `text/` rich-text spans, plain text / Markdown, web-page text; `layout/` spread rules, layout record, level gate; `files/` naming rules. |
+| `core/` | Pure Kotlin/JVM, no Android. `pkg/` OPC package + XML range scanner; `docx/`, `xlsx/`, `pptx/`, `csv/` read / edit / patch-only save; `text/` rich-text spans, plain text / Markdown, web-page text; `layout/` spread rules, layout record, seat; `files/` naming rules. |
 | `app/…/platform/` | `Graph` (process-wide state and every action), `Sessions` (one open file each), `Storage`, `Stores` (settings, recents, layout records), `WindowCtl`, `Exporter` (save as), `Head`, `DebugReceiver`. |
 | `app/…/ui/` | `home/` (recent, browse, new, accounts, settings), `doc/`, `sheet/`, `slides/` editors, `chart/` 3D chart volume, `space/` Stage (spread layout, rehearsal), `Overlays.kt` (save sheets, dialogs). |
 | `tools/` | `strings.tsv` + `gen_strings.py`, `svg2vd.py`, test-fixture generators and verifiers. |
@@ -132,6 +132,54 @@ signed in → one, last; the removed strings are in no language; only strings dr
 **Rule for anything new that touches accounts or drives:** gate it on `accounts.shown` (offered in this build) or
 `accounts.saveAsDrive` / `connected` (signed in); never draw a disabled row that tells the user to go to a page.
 
+v0.3.0 (M1, design-package roadmap[0]; "Spreadsheet basics, find, never lose work"; no new panels, the toolbars and
+dialogs that were there):
+
+**Spreadsheet.** s17 the selection is a range (`SheetSession.anchorRow/anchorCol` + the active cell; `selection` =
+`core/xlsx/CellRect`): a press-and-drag across cells selects (SheetGrid, pointer events at the Initial pass, so a drag on
+the cells selects and a drag on the row numbers scrolls; log `RANGE drag B2:D5`), a click on a row number / column letter
+selects the row / column (cells in use), the corner selects all; Shift+arrows extend, Ctrl+arrows jump to the data edge
+(`core/xlsx/DataEdge`), Ctrl+Shift+arrows both, Ctrl+A all. Blue 2 dp box + light blue fill; under the grid on the
+sheet row "Sum · Average · Count" (`core/xlsx/RangeStats`; count = non-empty cells). Bold, Fill, number formats,
+alignment, wrap and decimals act on the whole range. s18 [Edit ▾] copy / cut / paste / find (Ctrl+C / X / V / F):
+cells go to the system clipboard as tab-separated text (`core/xlsx/Tsv`) and to `SheetSession.clip` with inputs and
+style indexes; pasting our own clip shifts relative references by the offset (`XlsxWorkbook.pasteRange`,
+`Formula.offset`, absolute parts stay, off-sheet → #REF!), a cut moves the cells unchanged and empties the source,
+any other clipboard text is split at tabs / line breaks; the pasted range is selected (log `CLIP …`). s20 [Rows &
+columns] wider / narrower (±2 characters) / fit to content (`autoFitColumn`) / taller / shorter (±6 pt) for the selected
+columns / rows; the grid draws the file's widths (40–720 dp) and row heights (pt × 2.4). Dragging a header edge is not
+in this version. s21 [⋯] beside the sheet tabs: new / rename (sheet with a name field; Excel's name rules,
+`SheetSession.sheetNameProblem`) / copy / delete (confirm dialog; references to it become #REF!); all sheets are in
+the picker, scrolled sideways. s22 [Format ▾] also has left / centre / right, wrap text, more / fewer decimals.
+
+**Find (d41 / s19 / p21).** One find sheet for the three kinds (`Overlays.FindSheet`, model `Session.findHits /
+showHit / replaceHit / replaceAllHits`, `FindHit`): [Previous] [Next] jump and mark the hit (document: yellow marker on
+the paragraph, scrolled into view; spreadsheet: the cell is selected, other sheets with "All sheets"; slides: the slide
+is shown and the text box picked, a hit in the notes is underlined on the notes label row and the notes field gets a
+blue frame); the sheet also shows the hit with the text around it (it stands in front of the page). [Replace] changes
+only the current hit; [Replace all] is one undo step (snackbar with [Undo]). Match case. Log `FIND n/m FindHit(…)`.
+Search text survives closing the sheet (`FindMemo`).
+
+**Drafts (d27).** Every 3 s each open file with unsaved changes that changed since its last draft is written whole to
+`files/drafts/<sha1 of the file key>.draft` (`platform/Drafts`, `Graph.autosave`; log `DRAFT saved …`). Opening a file
+that has a draft shows the confirm dialog "Recover unsaved changes?" [Recover] [No thanks] (`Overlay.Recover`,
+`Graph.answerRecover`): Recover = `Session.recover(bytes)` (one undo step back to the file on disk, title bar shows
+unsaved); No = draft deleted. Saving, discarding or closing without changes deletes it; a crash / force-stop leaves it.
+
+**Slides (p19 / p20).** [Object ▾] copy / duplicate (Ctrl+C / Ctrl+D) and bring to front / forward / backward / send to
+back (only the moves that can still happen are listed); [Insert ▾] paste (Ctrl+V) puts the copy on the current slide,
+1/40 of the slide right and down, picked at once (`PptxDeck.copyShape / pasteShape / duplicateShape / reorderShape`;
+fresh ids for every element of the copy, pictures share the media part). Charts / diagrams are refused with a
+message. While a text field has the keyboard (`DeckSession.textEditing`) Ctrl+C / V stay the text's.
+
+**Platform.** BACK / controller B (profile D60): `platform/BackKeys` catches them at every window's callback, on every
+root view of the process and in an OnBackPressedCallback; `BackPolicy`: a dialog / sheet open → close it, the home
+window closed → bring it back, else nothing; never exit (log `BACK <where> -> <act>`). Windows open at once, there is no
+level-head gate any more (profile D9 / D10; `core/layout/LevelGate` removed, `Seat` kept in its own file).
+`ui/SafeSound`: SpatialUI 6.2.8 plays its click through `SpaceView.playSoundEffect`, which system images before that
+method lack (the 2026-09-01 PICO 6.1.0 emulator image): there the buttons are silent instead of the app dying on the
+first press (log `SOUND system click …`).
+
 ## The save rule
 
 Opening never changes a file. Saving rewrites only the parts that hold an edit, and inside such a part only the
@@ -173,7 +221,7 @@ Each command calls the same function as the control it stands for; the app logs 
 | `table`, `table-cell` | `rows,cols` / `r,c=text` | insert a table after the caret paragraph / set a cell of the last table |
 | `para` | `<i> style <body|h1|h2|h3|bullet|numbered>`, `<i> align <0-3>`, `<i> strike <0|1>`, `<i> bold <0|1>` | format the i-th editable paragraph |
 | `addpara` | `<style> <text>` | append a paragraph |
-| `find`, `replace`, `wordcount`, `inserttable` | — / `old=new` / — / — | find-and-replace sheet, replace all, word count, insert-table dialog |
+| `replace`, `wordcount`, `inserttable` | `old=new` / — / — | replace all in the document, word count, insert-table dialog |
 | `fill`, `fmt`, `bold` | `RRGGBB`/`none` · `general` `other` `currency` `percent` `date` · `1`/`0` | selected cell |
 | `freeze`, `filter`, `filter-clear`, `sort` | — / — / — / `asc` `desc` | Data ▸ … on the selected cell's column |
 | `row-ins`, `row-del`, `col-ins`, `col-del` | — | Rows & columns ▸ … at the selection |
@@ -188,6 +236,17 @@ Each command calls the same function as the control it stands for; the app logs 
 | `conflict` | `doc` `sheet` `slides` | the "changed in the cloud" dialog of that window (what a cloud save shows on a version mismatch) |
 | `conflict-answer` | `<win> overwrite|copy|cancel` | answer it (same function as the buttons) |
 | `inbox` | — | check the Feishu inbox now |
+| `range` | `B2:D5` or `B2` | select a range (as a drag from the first to the last cell); `range-row` n, `range-col` letter, `extend` up/down/left/right, `jump` dir[`+shift`] |
+| `copy` `cut` `paste` | — | Edit ▸ Copy / Cut / Paste on the selection |
+| `clip-set` | text (`\t` `\n`) | put text on the system clipboard (to prepare an outside paste only) |
+| `align` `wrap` `decimals` | `left` `center` `right` · `1`/`0` · `1`/`-1` | Format ▸ … on the selection |
+| `col-wider` `col-narrower` `col-autofit` `row-taller` | — | Rows & columns ▸ … on the selected columns / rows |
+| `sheet-new` `sheet-copy` `sheet-rename` `sheet-rename-ask` `sheet-delete` `sheet-delete-now` | name for `sheet-rename` | the [⋯] menu (`-ask` / `sheet-delete` show the dialogs) |
+| `find` | `doc` `sheet` `slides` | the find sheet of that window; `find-q` text [`case`], `find-with` text, `find-scope` `sheet`/`all` fill it |
+| `recover` | `yes` `no` | answer "Recover unsaved changes?"; `draft-now` runs one autosave round |
+| `obj-copy` `obj-paste` `obj-dup` `z` | `front` `back` `forward` `backward` for `z` | Object ▸ … / Insert ▸ Paste on the picked slide object |
+| `notes` | text | the current slide's speaker notes |
+| `back` | — | what BACK / controller B does (BackPolicy) |
 | `dump` | — | log state only (v0.2.1 adds `tableCaret`, `cols`; v0.2.5 `open=[…]`, `chartOf`, `objBox`) |
 | `objdrag` | `move|top_left|top_right|bottom_left|bottom_right <n>x<dxEmu>,<dyEmu>` | n pointer steps on the picked slide object through the session calls the gesture makes |
 | `slide-table`, `slide-cell` | `rows,cols` / `r,c=text` | insert a table on the slide (picked) / set a cell of the picked table |

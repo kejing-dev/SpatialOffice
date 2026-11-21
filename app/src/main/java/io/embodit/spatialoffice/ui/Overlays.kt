@@ -2,6 +2,7 @@ package io.embodit.spatialoffice.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,7 +65,10 @@ fun SharedOverlays(graph: Graph, win: Win, tag: String? = null) {
         is Overlay.SaveAs -> if (s != null) SaveAsSheet(graph, win, s)
         is Overlay.Shortcuts -> ShortcutsSheet(graph)
         is Overlay.Compat -> if (s != null) CompatPanel(graph, s)
-        is Overlay.Find -> (s as? DocSession)?.let { FindSheet(graph, it) }
+        is Overlay.Find -> if (s != null) FindSheet(graph, s)
+        is Overlay.Recover -> if (s != null) RecoverDialog(graph, s)
+        is Overlay.SheetRename -> (s as? SheetSession)?.let { SheetRenameSheet(graph, it) }
+        is Overlay.SheetDelete -> (s as? SheetSession)?.let { SheetDeleteDialog(graph, it) }
         is Overlay.WordCount -> (s as? DocSession)?.let { WordCountDialog(graph, it) }
         is Overlay.InsertTable -> (s as? DocSession)?.let { InsertTableDialog(graph, it) }
         is Overlay.ImagePick -> ImagePickSheet(graph, win)
@@ -294,32 +298,181 @@ private fun CompatRow(n: CompatNote, kind: FileKind) {
     }
 }
 
+/** What the find sheet remembers between openings (per process), so [Find next] after closing it goes on from there. */
+object FindMemo {
+    var query by mutableStateOf("")
+    var replacement by mutableStateOf("")
+    var matchCase by mutableStateOf(false)
+    var allSheets by mutableStateOf(false)
+}
+
+/**
+ * v0.3.0 (d41 / s19 / p21): one find sheet for documents, spreadsheets and presentations. [Previous] / [Next] jump to a
+ * match and highlight it (page scrolled to it, cell selected, slide shown with the box or the notes picked); [Replace]
+ * changes only the current match, [Replace all] every one in one undo step. Match case; a spreadsheet can search the
+ * current sheet or all of them.
+ */
 @Composable
-private fun FindSheet(graph: Graph, s: DocSession) {
-    var find by remember { mutableStateOf("") }
-    var repl by remember { mutableStateOf("") }
-    val hits = remember(find, s.version) { if (find.isEmpty()) 0 else s.find(find).size }
+private fun FindSheet(graph: Graph, s: Session) {
+    val m = FindMemo
+    var index by remember { mutableStateOf(-1) }
+    val hits = remember(m.query, m.matchCase, m.allSheets, s.version) { runCatching { s.findHits(m.query, m.matchCase, m.allSheets) }.getOrDefault(emptyList()) }
+    fun go(i: Int) {
+        if (hits.isEmpty()) { index = -1; return }
+        index = Math.floorMod(i, hits.size)
+        s.showHit(hits[index])
+        android.util.Log.i(io.embodit.spatialoffice.platform.TAG, "FIND ${index + 1}/${hits.size} ${hits[index]}")
+    }
+    // the hit list changed under the sheet (typing in the field, a replace): keep the position, drop a stale highlight
+    LaunchedEffect(hits) {
+        if (hits.isEmpty()) { index = -1; s.findHit = null } else if (index >= hits.size) index = hits.size - 1
+        if (index >= 0 && hits.isNotEmpty()) s.findHit = hits[index]
+    }
+    val close = { s.findHit = null; graph.overlay = null }
     Sheet(
-        modifier = Modifier.width(680.dp),
-        onDismissRequest = { graph.overlay = null },
-        leadingAction = { SheetClose { graph.overlay = null } },
+        modifier = Modifier.width(760.dp),
+        onDismissRequest = close,
+        leadingAction = { SheetClose(close) },
         title = { Txt(tr(R.string.find_replace), "find/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold) },
         bottom = {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Txt(if (find.isEmpty()) "" else tr(R.string.find_hits, hits), "find/hits", Modifier.weight(1f), style = PicoTheme.typography.bodyLarge, color = PicoTheme.colorScheme.labelSecondary)
-                SecondaryButton(tr(R.string.close), "find/close", onClick = { graph.overlay = null })
-                PrimaryButton(tr(R.string.replace_all), "find/replace", enabled = hits > 0, onClick = {
-                    val n = s.replaceAll(find, repl)
-                    graph.say(s, graph.str(R.string.replaced_n, n))
-                })
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Txt(
+                        when { m.query.isEmpty() -> ""; hits.isEmpty() -> tr(R.string.find_none); index < 0 -> tr(R.string.find_hits, hits.size); else -> tr(R.string.find_pos, index + 1, hits.size) },
+                        "find/hits", Modifier.weight(1f), style = PicoTheme.typography.bodyLarge, color = PicoTheme.colorScheme.labelSecondary,
+                    )
+                    SecondaryButton(tr(R.string.find_prev), "find/prev", enabled = hits.isNotEmpty(), onClick = { go(if (index < 0) hits.size - 1 else index - 1) })
+                    SecondaryButton(tr(R.string.find_next), "find/next", enabled = hits.isNotEmpty(), onClick = { go(index + 1) })
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End)) {
+                    SecondaryButton(tr(R.string.replace_one), "find/replace-one", enabled = hits.isNotEmpty() && !s.readOnly, onClick = {
+                        if (index < 0) { go(0); return@SecondaryButton }
+                        val h = hits[index]
+                        if (s.replaceHit(h, m.query, m.replacement, m.matchCase)) {
+                            graph.say(s, graph.str(R.string.replaced_one))
+                            // the next match is now at the same position in the list (this one is gone, or later when the replacement still matches)
+                            val left = s.findHits(m.query, m.matchCase, m.allSheets)
+                            val next = left.indexOfFirst { after(it, h) }.let { if (it < 0) 0 else it }
+                            if (left.isNotEmpty()) { index = next; s.showHit(left[next]) } else { index = -1; s.findHit = null }
+                        }
+                    })
+                    PrimaryButton(tr(R.string.replace_all), "find/replace", enabled = hits.isNotEmpty() && !s.readOnly, onClick = {
+                        val n = s.replaceAllHits(m.query, m.replacement, m.matchCase, m.allSheets)
+                        index = -1; s.findHit = null
+                        graph.say(s, graph.str(R.string.replaced_n, n), graph.str(R.string.undo_short)) { s.undo() }
+                    })
+                }
             }
         },
     ) {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            LabeledField(tr(R.string.find_label), find, "find/find") { find = it }
-            LabeledField(tr(R.string.replace_label), repl, "find/replace-with") { repl = it }
+            LabeledField(tr(R.string.find_label), m.query, "find/find") { m.query = it; index = -1 }
+            LabeledField(tr(R.string.replace_label), m.replacement, "find/replace-with") { m.replacement = it }
+            // the sheet stands in front of the page: the current hit is shown here too, marked, with what is around it
+            val cur = hits.getOrNull(index)
+            val text = cur?.let { runCatching { s.hitText(it) }.getOrNull() }
+            if (cur != null && text != null && cur.start + cur.len <= text.length) {
+                val from = (cur.start - 28).coerceAtLeast(0); val to = (cur.start + cur.len + 28).coerceAtMost(text.length)
+                val place = if (s is io.embodit.spatialoffice.platform.DeckSession) tr(R.string.find_slide_n, cur.a + 1) + (if (cur.b < 0) " · " + tr(R.string.notes_short) else "") else s.hitPlace(cur)
+                val lead = (place?.let { "$it  " } ?: "") + (if (from > 0) "…" else "")
+                val shown = lead + text.substring(from, to).replace('\n', ' ') + (if (to < text.length) "…" else "")
+                val at = lead.length + cur.start - from
+                com.pico.spatial.ui.design.Text(
+                    io.embodit.spatialoffice.ui.doc.underlined(shown, at, cur.len, PicoTheme.colorScheme.labelPrimary),
+                    style = PicoTheme.typography.bodyLarge, color = PicoTheme.colorScheme.labelPrimary, maxLines = 2,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(PicoTheme.colorScheme.fillSecondary)
+                        .padding(horizontal = 16.dp, vertical = 12.dp).semantics { contentDescription = "find/preview" },
+                )
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                CheckRow(tr(R.string.match_case), m.matchCase, "find/case") { m.matchCase = it; index = -1 }
+                if (s is SheetSession) Segments(
+                    listOf(false to tr(R.string.find_this_sheet), true to tr(R.string.find_all_sheets)), m.allSheets, "find/scope", itemWidth = 150.dp,
+                ) { m.allSheets = it; index = -1 }
+            }
         }
     }
+}
+
+/** True when [h] comes after [ref] in reading order (same text: a later offset). */
+private fun after(h: io.embodit.spatialoffice.platform.FindHit, ref: io.embodit.spatialoffice.platform.FindHit): Boolean =
+    compareValuesBy(h, ref, { it.a }, { it.b }, { it.c }, { it.start }) >= 0
+
+/** A whole row that toggles (the bare switch is far below 48 dp). */
+@Composable
+fun CheckRow(label: String, on: Boolean, tag: String, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.heightIn(min = 56.dp).clip(RoundedCornerShape(16.dp))
+            .toggleable(value = on, role = androidx.compose.ui.semantics.Role.Switch) { onChange(it) }.padding(horizontal = 12.dp)
+            .semantics { contentDescription = tag },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Txt(label, "$tag/label", Modifier.padding(end = 12.dp), style = PicoTheme.typography.bodyLarge)
+        com.pico.spatial.ui.design.Switch(checked = on, onCheckedChange = null)
+    }
+}
+
+/** d27, the existing confirm dialog: the file has changes from an autosaved draft that were never saved. */
+@Composable
+private fun RecoverDialog(graph: Graph, s: Session) {
+    AlertDialog(
+        onDismissRequest = { graph.overlay = null },
+        title = { Txt(tr(R.string.recover_title), "recover/title", style = PicoTheme.typography.headlineSmall, weight = FontWeight.Bold, maxLines = 2) },
+        content = { Txt(tr(R.string.recover_msg, s.ref.name), "recover/msg", style = PicoTheme.typography.bodyLarge, maxLines = 4) },
+        buttons = {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End)) {
+                SecondaryButton(tr(R.string.recover_no), "recover/no", onClick = { graph.answerRecover(false) })
+                PrimaryButton(tr(R.string.recover_yes), "recover/yes", onClick = { graph.answerRecover(true) })
+            }
+        },
+    )
+}
+
+@Composable
+private fun SheetRenameSheet(graph: Graph, s: SheetSession) {
+    var name by remember(s.sheet) { mutableStateOf(s.book.sheetNames.getOrElse(s.sheet) { "" }) }
+    var why by remember { mutableStateOf<String?>(null) }
+    val done = {
+        val r = s.renameSheet(name)
+        if (r == null) { graph.overlay = null; graph.say(s, graph.str(R.string.sheet_renamed, name.trim())) } else why = r
+    }
+    Sheet(
+        modifier = Modifier.width(620.dp),
+        onDismissRequest = { graph.overlay = null },
+        leadingAction = { SheetClose { graph.overlay = null } },
+        title = { Txt(tr(R.string.sheet_rename), "sheetname/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold) },
+        bottom = {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Txt(
+                    when (why) { null -> ""; "empty" -> tr(R.string.sn_empty); "long" -> tr(R.string.sn_long); "char" -> tr(R.string.sn_char); "taken" -> tr(R.string.sn_taken); else -> tr(R.string.sn_char) },
+                    "sheetname/why", Modifier.weight(1f), style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.error, maxLines = 2,
+                )
+                SecondaryButton(tr(R.string.cancel), "sheetname/cancel", onClick = { graph.overlay = null })
+                PrimaryButton(tr(R.string.ok), "sheetname/ok", onClick = done)
+            }
+        },
+    ) {
+        LabeledField(tr(R.string.sheet_name), name, "sheetname/name") { name = it; why = null }
+    }
+}
+
+@Composable
+private fun SheetDeleteDialog(graph: Graph, s: SheetSession) {
+    val name = s.book.sheetNames.getOrElse(s.sheet) { "" }
+    AlertDialog(
+        onDismissRequest = { graph.overlay = null },
+        title = { Txt(tr(R.string.sheet_delete_title, name), "sheetdel/title", style = PicoTheme.typography.headlineSmall, weight = FontWeight.Bold, maxLines = 2) },
+        content = { Txt(tr(R.string.sheet_delete_msg), "sheetdel/msg", style = PicoTheme.typography.bodyLarge, maxLines = 4) },
+        buttons = {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End)) {
+                SecondaryButton(tr(R.string.cancel), "sheetdel/cancel", onClick = { graph.overlay = null })
+                SecondaryButton(tr(R.string.delete), "sheetdel/ok", danger = true, onClick = {
+                    graph.overlay = null
+                    if (s.deleteSheet()) graph.say(s, graph.str(R.string.sheet_deleted, name), graph.str(R.string.undo_short)) { s.undo() }
+                })
+            }
+        },
+    )
 }
 
 @Composable

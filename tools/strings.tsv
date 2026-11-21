@@ -490,3 +490,66 @@ acct_how_sub	在对方的官方登录页里登录、同意，然后自动回到�
 browse_sub_local	这台设备上的文件。打开后保存写回原来的位置	Files on this device. Saving writes back to where the file came from
 about_sub_local	版本 %1$s · 兼容 .docx / .xlsx / .pptx（开放标准）· 本机文件全部离线可用	Version %1$s · compatible with .docx / .xlsx / .pptx (open standard) · local files work fully offline
 set_legal_local	提到的文件格式名称，只用来说明兼容。本应用和这些名称的权利人没有隶属或背书关系。	File format names are used only to describe compatibility. This app is not affiliated with or endorsed by their owners.
+# v0.3.0 (M1)
+undo_short	撤销	Undo
+ok	确定	OK
+delete	删除	Delete
+draft_back	找回了没保存的改动，可以撤销	Your unsaved changes are back; you can undo it
+draft_failed	这份草稿打不开，已经删掉	This draft could not be opened and was removed
+recover_title	找回没保存的改动？	Recover unsaved changes?
+recover_msg	「%1$s」上次有改动没保存就关掉了。要找回吗？	"%1$s" was closed last time with changes that were not saved. Get them back?
+recover_yes	找回	Recover
+recover_no	不要	No thanks
+find_none	没找到	Not found
+find_pos	第 %1$d 处，共 %2$d 处	%1$d of %2$d
+find_prev	上一个	Previous
+find_next	下一个	Next
+replace_one	替换	Replace
+replaced_one	换了一处	Replaced one
+match_case	区分大小写	Match case
+find_this_sheet	这张表	This sheet
+find_all_sheets	全部工作表	All sheets
+find_in_notes	备注里：	In the notes:
+menu_edit	编辑	Edit
+edit_copy	复制 Ctrl+C	Copy Ctrl+C
+edit_cut	剪切 Ctrl+X	Cut Ctrl+X
+edit_paste	粘贴 Ctrl+V	Paste Ctrl+V
+edit_find	查找和替换 Ctrl+F	Find and replace Ctrl+F
+cells_copied	复制了 %1$s	Copied %1$s
+cells_cut	剪切了 %1$s，粘贴后原处清空	Cut %1$s; it is emptied when you paste
+cells_pasted	粘贴到 %1$s	Pasted into %1$s
+nothing_to_paste	没有可以粘贴的内容	Nothing to paste
+range_stats	求和 %1$s · 平均 %2$s · 计数 %3$d	Sum %1$s · Average %2$s · Count %3$d
+wrap_text	自动换行	Wrap text
+dec_more	增加小数位	More decimals
+dec_less	减少小数位	Fewer decimals
+col_wider	列加宽	Wider column
+col_narrower	列变窄	Narrower column
+col_autofit	列宽自适应	Fit column to content
+row_taller	行加高	Taller row
+row_shorter	行变矮	Shorter row
+sheet_new	新建工作表	New sheet
+sheet_rename	重命名工作表	Rename sheet
+sheet_copy	复制工作表	Copy sheet
+sheet_delete	删除工作表	Delete sheet
+sheet_name	工作表名	Sheet name
+sheet_added	加了「%1$s」	Added "%1$s"
+sheet_renamed	改名为「%1$s」	Renamed to "%1$s"
+sheet_deleted	删掉了「%1$s」，可以撤销	Deleted "%1$s"; you can undo it
+sheet_delete_title	删除「%1$s」？	Delete "%1$s"?
+sheet_delete_msg	这张表的内容会一起删掉。别的表里引用它的公式会显示 #REF!。	Everything on this sheet goes with it. Formulas on other sheets that use it will show #REF!.
+sn_empty	名字不能是空的	The name cannot be empty
+sn_long	最多 31 个字	31 characters at most
+sn_char	不能有 [ ] : * ? / \ 这些字符	It cannot contain [ ] : * ? / \
+sn_taken	已经有这个名字的表了	There is a sheet with that name already
+obj_copy	复制 Ctrl+C	Copy Ctrl+C
+obj_paste	粘贴 Ctrl+V	Paste Ctrl+V
+obj_duplicate	重复 Ctrl+D	Duplicate Ctrl+D
+obj_copied	复制好了，换一页按 [插入] › 粘贴	Copied; go to a slide and choose Insert › Paste
+obj_copy_refused	图表这类对象这一版还不能复制	Charts and similar objects cannot be copied in this version
+z_front	置于顶层	Bring to front
+z_forward	上移一层	Bring forward
+z_backward	下移一层	Send backward
+z_back	置于底层	Send to back
+find_slide_n	第 %1$d 页	Slide %1$d
+notes_short	备注	notes

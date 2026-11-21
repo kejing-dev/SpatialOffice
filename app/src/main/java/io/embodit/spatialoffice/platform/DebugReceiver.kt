@@ -1,5 +1,6 @@
 package io.embodit.spatialoffice.platform
 
+import io.embodit.spatialoffice.core.xlsx.A1
 import io.embodit.spatialoffice.core.pptx.SlideLayoutKind
 
 import android.content.BroadcastReceiver
@@ -94,7 +95,7 @@ object DebugReceiver {
             "table" -> g.doc?.let { d -> val (r, c) = arg.split(",").map { it.toInt() }; io.embodit.spatialoffice.ui.doc.docInsertTable(d, r, c) }
             "table-cell" -> g.doc?.let { d -> val (pos, v) = arg.split("=", limit = 2); val (r, c) = pos.split(",").map { it.toInt() }
                 d.blocks().filterIsInstance<UiBlock.Table>().lastOrNull()?.let { d.setTableCell(it.id, r, c, v) } }
-            "find" -> g.overlay = Overlay.Find(Win.DOC)
+            "find" -> g.overlay = Overlay.Find(win(arg.ifEmpty { "doc" }))
             "replace" -> g.doc?.let { d -> val (a, b) = arg.split("=", limit = 2); Log.i(TAG, "REPLACED " + d.replaceAll(a, b)) }
             "wordcount" -> g.overlay = Overlay.WordCount(Win.DOC)
             "inserttable" -> g.overlay = Overlay.InsertTable(Win.DOC)
@@ -170,6 +171,51 @@ object DebugReceiver {
             // cloud-id <service> <client id>: a client id for this run only (debug builds), to walk [Connect] → browser
             // on a machine whose build has none; `cloud-id <service>` takes it away again
             "cloud-id" -> { val p = arg.split(" ", limit = 2); io.embodit.spatialoffice.core.cloud.Provider.of(p[0])?.let { g.accounts.debugClientId(it, p.getOrElse(1) { "" }) } }
+            // ---- v0.3.0 (M1): each command calls the function its menu entry / key calls
+            // range B2:D5 | B2 (s17: as a drag from the first to the last cell); range-row <n>, range-col <letter>, jump <up|down|left|right>[+shift]
+            "range" -> g.sheet?.let { s -> val p = arg.split(":"); A1.parse(p[0])?.let { (r, c) -> s.select(r, c) }; p.getOrNull(1)?.let { A1.parse(it) }?.let { (r, c) -> s.extendTo(r, c) } }
+            "range-row" -> g.sheet?.selectRow(arg.toInt() - 1)
+            "range-col" -> g.sheet?.let { s -> A1.parse(arg + "1")?.let { s.selectColumn(it.second) } }
+            "jump" -> g.sheet?.let { s -> val (dir, sh) = arg.split("+").let { it[0] to (it.getOrNull(1) == "shift") }
+                when (dir) { "up" -> s.jump(-1, 0, sh); "down" -> s.jump(1, 0, sh); "left" -> s.jump(0, -1, sh); else -> s.jump(0, 1, sh) } }
+            "extend" -> g.sheet?.let { s -> when (arg) { "up" -> s.extendTo(s.row - 1, s.col); "down" -> s.extendTo(s.row + 1, s.col); "left" -> s.extendTo(s.row, s.col - 1); else -> s.extendTo(s.row, s.col + 1) } }
+            "copy" -> g.sheet?.let { io.embodit.spatialoffice.ui.sheet.copyCells(g, it, cut = false) }
+            "cut" -> g.sheet?.let { io.embodit.spatialoffice.ui.sheet.copyCells(g, it, cut = true) }
+            "paste" -> g.sheet?.let { io.embodit.spatialoffice.ui.sheet.pasteCells(g, it) }
+            // clip-set <text>: puts text on the system clipboard (QA uses it only to prepare an outside paste); \t and \n are tab / line break
+            "clip-set" -> runCatching {
+                val text = arg.replace("\\t", "\t").replace("\\n", "\n")
+                val cm = g.app.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("debug", text)); Log.i(TAG, "CLIP set ${text.length} chars")
+            }
+            "align" -> g.sheet?.setHAlign(arg.takeIf { it == "left" || it == "center" || it == "right" })
+            "wrap" -> g.sheet?.setWrap(arg != "0")
+            "decimals" -> g.sheet?.adjustDecimals(arg.toIntOrNull() ?: 1)
+            "col-wider" -> g.sheet?.widen(2f)
+            "col-narrower" -> g.sheet?.widen(-2f)
+            "col-autofit" -> g.sheet?.autoFit()
+            "row-taller" -> g.sheet?.taller(6f)
+            "sheet-new" -> g.sheet?.addSheet()
+            "sheet-rename" -> g.sheet?.let { s -> Log.i(TAG, "SHEET rename -> ${s.renameSheet(arg) ?: "ok"}") }
+            "sheet-rename-ask" -> g.sheet?.let { g.show(it, Overlay.SheetRename(Win.SHEET)) }
+            "sheet-copy" -> g.sheet?.copySheet()
+            "sheet-delete" -> g.sheet?.let { g.show(it, Overlay.SheetDelete(Win.SHEET)) }
+            "sheet-delete-now" -> g.sheet?.deleteSheet()
+            // find-q <text> [case], find-with <text>, find-scope sheet|all: fill the find sheet (its buttons are pressed for real)
+            "find-q" -> { val p = arg.split(" "); io.embodit.spatialoffice.ui.FindMemo.query = p[0]; io.embodit.spatialoffice.ui.FindMemo.matchCase = p.getOrNull(1) == "case" }
+            "find-with" -> io.embodit.spatialoffice.ui.FindMemo.replacement = arg
+            "find-scope" -> io.embodit.spatialoffice.ui.FindMemo.allSheets = arg == "all"
+            // recover yes|no: answers "Recover unsaved changes?"; draft-now: one autosave round at once
+            "recover" -> g.answerRecover(arg != "no")
+            "draft-now" -> g.autosave()
+            // obj-copy, obj-paste, obj-dup, z front|back|forward|backward on the picked slide object
+            "obj-copy" -> g.deck?.let { io.embodit.spatialoffice.ui.slides.objCopy(g, it) }
+            "obj-paste" -> g.deck?.let { io.embodit.spatialoffice.ui.slides.objPaste(g, it) }
+            "obj-dup" -> g.deck?.duplicateSelected()
+            "z" -> g.deck?.reorder(io.embodit.spatialoffice.core.pptx.ZOrder.valueOf(when (arg) { "front" -> "FRONT"; "back" -> "BACK"; "forward" -> "FORWARD"; else -> "BACKWARD" }))
+            "back" -> g.onBack("debug")
+            // notes <text>: the current slide's speaker notes, as typed into the notes field
+            "notes" -> g.deck?.let { it.setNotes(it.current, arg) }
             "dump" -> {}
             // v0.2.4 (q4-1): longest main-thread frame gap over <arg> seconds (baseline of the emulator's own load)
             "mainwatch" -> { val w = io.embodit.spatialoffice.ui.chart.MainWatch("baseline"); w.start(); android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ w.stop() }, (arg?.toLongOrNull() ?: 10L) * 1000) }

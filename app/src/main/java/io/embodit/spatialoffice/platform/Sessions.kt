@@ -26,7 +26,12 @@ import io.embodit.spatialoffice.core.pptx.TextPara
 import io.embodit.spatialoffice.core.text.HtmlText
 import io.embodit.spatialoffice.core.text.PlainDoc
 import io.embodit.spatialoffice.core.text.Span
+import io.embodit.spatialoffice.core.xlsx.CellRect
+import io.embodit.spatialoffice.core.xlsx.ClipCell
+import io.embodit.spatialoffice.core.xlsx.DataEdge
 import io.embodit.spatialoffice.core.xlsx.NumFmt
+import io.embodit.spatialoffice.core.xlsx.RangeStats
+import io.embodit.spatialoffice.core.xlsx.Tsv
 import io.embodit.spatialoffice.core.xlsx.XlsxWorkbook
 import java.io.File
 
@@ -41,6 +46,13 @@ sealed class UiBlock {
     data class Opaque(override val id: Int, val kind: String) : UiBlock()
     data class Page(override val id: Int, val bitmap: Bitmap) : UiBlock()
 }
+
+/**
+ * One hit of a find (d41 / s19 / p21), the same shape for all three kinds. Document: [a] = paragraph id. Spreadsheet:
+ * [a] = sheet, [b] = row, [c] = column (of the cell's input). Presentation: [a] = slide, [b] = shape id or −1 for the
+ * speaker notes. [start] / [len]: the characters matched in that text.
+ */
+data class FindHit(val a: Int, val b: Int = 0, val c: Int = 0, val start: Int, val len: Int)
 
 /** One open file. Edits go through the session so dirty state, undo and recomposition stay in one place. */
 abstract class Session(ref: FileRef, val kind: FileKind) {
@@ -90,6 +102,13 @@ abstract class Session(ref: FileRef, val kind: FileKind) {
 
     protected fun changed() { dirty = true; version++; counted() }
 
+    /** An undo step from bytes taken before a change that might not happen (pushed only once it did). */
+    protected fun pushUndo(before: ByteArray) {
+        if (readOnly) return
+        undoStack.addLast(before); while (undoStack.size > 40) undoStack.removeFirst()
+        redoStack.clear(); canUndo = true; canRedo = false; lastTag = ""
+    }
+
     /** Refreshes the observable item counts (slides, blocks, rows) right after a change, so lists update in the same frame. */
     protected open fun counted() {}
 
@@ -110,6 +129,43 @@ abstract class Session(ref: FileRef, val kind: FileKind) {
     }
 
     fun saved() { dirty = false; isNew = false; version++ }
+
+    // ---- find (v0.3.0: one find sheet for all three kinds)
+
+    /** The hit the find sheet points at: the window scrolls to it and highlights it ([findTick] bumps on every jump). */
+    var findHit by mutableStateOf<FindHit?>(null)
+    var findTick by mutableIntStateOf(0)
+        private set
+    /** Every match of [q], in reading order. [allSheets]: spreadsheets only, every worksheet instead of the current one. */
+    open fun findHits(q: String, matchCase: Boolean, allSheets: Boolean = false): List<FindHit> = emptyList()
+    /** The whole text a hit sits in (paragraph, cell input, text box or notes), for the find sheet's preview line. */
+    open fun hitText(h: FindHit): String? = null
+    /** Where a hit is, as the find sheet names it ("Sheet1!B3", "Slide 2 · notes"); null for documents. */
+    open fun hitPlace(h: FindHit): String? = null
+    /** Jumps to [h]: the page / sheet / slide that holds it comes up and the match is highlighted. */
+    open fun showHit(h: FindHit) { findHit = h; findTick++ }
+    /** [Replace]: only this one match, one undo step. False when the text there is no longer [q]. */
+    open fun replaceHit(h: FindHit, q: String, repl: String, matchCase: Boolean): Boolean = false
+    /** [Replace all]: every match, one undo step; returns how many were replaced. */
+    open fun replaceAllHits(q: String, repl: String, matchCase: Boolean, allSheets: Boolean = false): Int = 0
+
+    protected fun same(text: String, at: Int, q: String, matchCase: Boolean): Boolean =
+        q.isNotEmpty() && at >= 0 && at + q.length <= text.length && text.regionMatches(at, q, 0, q.length, !matchCase)
+
+    // ---- d27 drafts
+
+    /** Takes back an autosaved draft found when the file was opened: one undo step returns to the file as it is on disk. */
+    fun recover(bytes: ByteArray): Boolean {
+        if (readOnly) return false
+        val before = runCatching { serialize() }.getOrNull() ?: return false
+        if (before.contentEquals(bytes)) return false
+        val ok = runCatching { restore(bytes) }.onFailure { e -> android.util.Log.w(TAG, "DRAFT restore failed: $e"); runCatching { restore(before) } }.isSuccess
+        if (!ok) return false
+        undoStack.addLast(before); while (undoStack.size > 40) undoStack.removeFirst()
+        redoStack.clear(); canUndo = true; canRedo = false; lastTag = ""
+        dirty = true; version++; counted()
+        return true
+    }
 }
 
 class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File) : Session(ref, kind) {
@@ -316,13 +372,35 @@ class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File)
     fun find(find: String): List<Pair<Int, Int>> = blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }
         .flatMap { p -> io.embodit.spatialoffice.core.text.RichText.matches(io.embodit.spatialoffice.core.text.RichText.text(p.spans), find).map { p.id to it } }
 
+    override fun findHits(q: String, matchCase: Boolean, allSheets: Boolean): List<FindHit> = if (q.isEmpty()) emptyList()
+        else blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }.flatMap { p ->
+            io.embodit.spatialoffice.core.text.RichText.matches(io.embodit.spatialoffice.core.text.RichText.text(p.spans), q, !matchCase).map { FindHit(p.id, start = it, len = q.length) }
+        }
+
+    override fun showHit(h: FindHit) { caretBlock = h.a; super.showHit(h) }
+    override fun hitText(h: FindHit): String? = (blocks().firstOrNull { it.id == h.a } as? UiBlock.Para)?.let { io.embodit.spatialoffice.core.text.RichText.text(it.spans) }
+
+    override fun replaceHit(h: FindHit, q: String, repl: String, matchCase: Boolean): Boolean {
+        if (readOnly) return false
+        val p = blocks().filterIsInstance<UiBlock.Para>().firstOrNull { it.id == h.a && it.editable } ?: return false
+        if (!same(io.embodit.spatialoffice.core.text.RichText.text(p.spans), h.start, q, matchCase)) return false
+        mark("")
+        val out = io.embodit.spatialoffice.core.text.RichText.replaceAt(p.spans, h.start, q.length, repl)
+        docx?.setParagraph(p.id, runs(out), p.style)
+        plain?.setParagraph(p.id, out.joinToString("") { it.text }, p.style)
+        changed()
+        return true
+    }
+
+    override fun replaceAllHits(q: String, repl: String, matchCase: Boolean, allSheets: Boolean): Int = replaceAll(q, repl, matchCase)
+
     /** Replaces every match in the editable paragraphs as one undo step; returns how many were replaced. */
-    fun replaceAll(find: String, replacement: String): Int {
+    fun replaceAll(find: String, replacement: String, matchCase: Boolean = false): Int {
         if (find.isEmpty() || readOnly) return 0
         var total = 0
         var marked = false
         for (p in blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }) {
-            val (out, n) = io.embodit.spatialoffice.core.text.RichText.replaceAll(p.spans, find, replacement)
+            val (out, n) = io.embodit.spatialoffice.core.text.RichText.replaceAll(p.spans, find, replacement, !matchCase)
             if (n == 0) continue
             if (!marked) { mark(""); marked = true }
             docx?.setParagraph(p.id, runs(out), p.style)
@@ -406,7 +484,41 @@ class SheetSession(ref: FileRef, kind: FileKind, bytes: ByteArray) : Session(ref
 
     val isCsv: Boolean get() = kind == FileKind.CSV
 
-    fun select(r: Int, c: Int) { row = r.coerceIn(0, 9999); col = c.coerceIn(0, 701) }
+    /** The other corner of the selected range (s17); equal to (row, col) when one cell is selected. */
+    var anchorRow by mutableIntStateOf(0)
+        private set
+    var anchorCol by mutableIntStateOf(0)
+        private set
+
+    /** One cell: the range collapses onto it. */
+    fun select(r: Int, c: Int) { row = r.coerceIn(0, MAX_R); col = c.coerceIn(0, MAX_C); anchorRow = row; anchorCol = col }
+    /** Shift+arrow / drag: the active corner moves, the anchor stays. */
+    fun extendTo(r: Int, c: Int) { row = r.coerceIn(0, MAX_R); col = c.coerceIn(0, MAX_C) }
+    /** Click on a row number: the row's cells in use (at least A); the first cell is the active one. */
+    fun selectRow(r: Int) { select(r, 0); anchorCol = (colCount - 1).coerceAtLeast(0) }
+    /** Click on a column letter: the column's rows in use (at least row 1). */
+    fun selectColumn(c: Int) { select(0, c); anchorRow = (rowCount - 1).coerceAtLeast(0) }
+    fun selectAll() { select(0, 0); anchorRow = (rowCount - 1).coerceAtLeast(0); anchorCol = (colCount - 1).coerceAtLeast(0) }
+    val selection: CellRect get() = CellRect.of(anchorRow, anchorCol, row, col)
+    val isRange: Boolean get() = anchorRow != row || anchorCol != col
+
+    /** Ctrl+arrow (Shift too = extend): to the edge of the data in that direction. */
+    fun jump(dr: Int, dc: Int, extend: Boolean) {
+        val maxR = maxOf(rowCount + 50, row + 1).coerceAtMost(MAX_R); val maxC = maxOf(colCount + 10, col + 1).coerceAtMost(MAX_C)
+        val (r, c) = DataEdge.jump({ rr, cc -> book.cell(sheet, rr, cc).input.isNotEmpty() }, row, col, dr, dc, maxR, maxC)
+        if (extend) extendTo(r, c) else select(r, c)
+    }
+
+    /** Sum / average / count of the selection (status line under the toolbar). */
+    fun stats(): RangeStats {
+        val r = selection
+        if (r.size > 200_000) return RangeStats(0.0, null, 0, 0)
+        val cells = ArrayList<io.embodit.spatialoffice.core.xlsx.Cell>()
+        for (rr in r.r1..minOf(r.r2, rowCount)) for (cc in r.c1..minOf(r.c2, colCount)) cells.add(book.cell(sheet, rr, cc))
+        return RangeStats.of(cells)
+    }
+
+    private inline fun eachSelected(f: (Int, Int) -> Unit) { val r = selection; for (rr in r.r1..r.r2) for (cc in r.c1..r.c2) f(rr, cc) }
 
     fun setCell(r: Int, c: Int, input: String) {
         if (book.cell(sheet, r, c).input == input) return
@@ -428,7 +540,11 @@ class SheetSession(ref: FileRef, kind: FileKind, bytes: ByteArray) : Session(ref
     var filterValue by mutableStateOf<String?>(null)
 
     override fun counted() {
-        runCatching { rowCount = book.rows(sheet); colCount = book.cols(sheet); sheetCount = book.sheetNames.size }
+        runCatching {
+            sheetCount = book.sheetNames.size
+            if (sheet >= sheetCount) sheet = (sheetCount - 1).coerceAtLeast(0)
+            rowCount = book.rows(sheet); colCount = book.cols(sheet)
+        }
     }
 
     init { counted() }
@@ -443,8 +559,140 @@ class SheetSession(ref: FileRef, kind: FileKind, bytes: ByteArray) : Session(ref
     /** Distinct values below the header in column [c] (filter choices). */
     fun columnValues(c: Int): List<String> = (1 until rowCount).map { book.cell(sheet, it, c).display }.distinct().take(30)
 
-    fun setBold(bold: Boolean) { mark(""); book.setBold(sheet, row, col, bold); changed() }
-    fun setFill(rgb: Int?) { if (isCsv) return; mark(""); book.setFill(sheet, row, col, rgb); changed() }
+    // formats act on the whole selection (s17: "fill + bold on B2:D5 reads back on 12 cells")
+    fun setBold(bold: Boolean) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setBold(sheet, r, c, bold) }; changed() }
+    fun setFill(rgb: Int?) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setFill(sheet, r, c, rgb) }; changed() }
+    /** s22: "left" / "center" / "right" / null (general). */
+    fun setHAlign(align: String?) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setHAlign(sheet, r, c, align) }; changed() }
+    fun setWrap(wrap: Boolean) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setWrap(sheet, r, c, wrap) }; changed() }
+    fun adjustDecimals(delta: Int) { if (isCsv) return; mark(""); eachSelected { r, c -> book.adjustDecimals(sheet, r, c, delta) }; changed() }
+
+    // ---- s20 column widths / row heights (the selected columns / rows)
+    fun widen(deltaChars: Float) {
+        if (isCsv) return
+        mark(""); val r = selection
+        for (c in r.c1..r.c2) book.setColWidth(sheet, c, (book.colWidthChars(sheet, c) + deltaChars).coerceIn(2f, 120f))
+        changed()
+    }
+    fun autoFit() { if (isCsv) return; mark(""); val r = selection; for (c in r.c1..r.c2) book.autoFitColumn(sheet, c); changed() }
+    fun taller(deltaPt: Float) {
+        if (isCsv) return
+        mark(""); val r = selection
+        for (rr in r.r1..minOf(r.r2, r.r1 + 500)) book.setRowHeight(sheet, rr, (book.rowHeightPt(sheet, rr) + deltaPt).coerceIn(9f, 200f))
+        changed()
+    }
+
+    // ---- s18 copy / cut / paste
+
+    /** Copies (or cuts) the selection; returns the tab-separated text for the system clipboard. */
+    fun copy(cut: Boolean): String {
+        val r = selection
+        val cells = book.copyRange(sheet, r.r1, r.c1, r.r2, r.c2)
+        val text = Tsv.write((r.r1..r.r2).map { rr -> (r.c1..r.c2).map { cc -> book.cell(sheet, rr, cc).display } })
+        clip = SheetClip(cells, r, sheet, book, cut, text)
+        return text
+    }
+
+    /**
+     * Pastes at the selected cell. When [systemText] is what this app put on the clipboard (or there is no text), the
+     * cells are pasted with their formulas moved by the offset (and their formats, same file); a cut moves them and
+     * empties the source. Other text is split at tabs and line breaks. The pasted range is selected.
+     */
+    fun paste(systemText: String?): CellRect? {
+        if (readOnly) return null
+        val c = clip
+        val own = c != null && (systemText == null || systemText.replace("\r", "") == c.text)
+        val h: Int
+        val w: Int
+        if (own && c != null) {
+            h = c.cells.size; w = c.cells.firstOrNull()?.size ?: 0
+            if (h == 0 || w == 0) return null
+            mark("")
+            if (c.cut && c.book === book) {
+                // a move: the formulas stay as they were written (every spreadsheet does this on cut)
+                book.clearRange(c.sheet, c.rect.r1, c.rect.c1, c.rect.r2, c.rect.c2, true)
+                book.pasteRange(sheet, row, col, c.cells, 0, 0, true)
+                clip = null
+            } else book.pasteRange(sheet, row, col, c.cells, row - c.rect.r1, col - c.rect.c1, c.book === book && !isCsv)
+        } else {
+            val rows = Tsv.parse(systemText ?: return null)
+            h = rows.size; w = rows.maxOfOrNull { it.size } ?: 0
+            if (h == 0 || w == 0) return null
+            mark("")
+            rows.forEachIndexed { i, cells -> cells.forEachIndexed { j, v -> book.setCell(sheet, row + i, col + j, v) } }
+        }
+        anchorRow = (row + h - 1).coerceAtMost(MAX_R); anchorCol = (col + w - 1).coerceAtMost(MAX_C)
+        csvEdits++; changed()
+        return selection
+    }
+
+    /** Delete key on a range: empties the cells, keeps their formats. */
+    fun clearSelection() { mark(""); val r = selection; book.clearRange(sheet, r.r1, r.c1, r.r2, r.c2, false); csvEdits++; changed() }
+
+    // ---- s21 worksheets
+
+    fun addSheet() { if (isCsv) return; mark(""); sheet = book.addSheet(); select(0, 0); changed() }
+    /** Null when done, else why not ("empty", "long", "char", "taken"). */
+    fun renameSheet(name: String): String? {
+        if (isCsv) return "csv"
+        val n = name.trim()
+        val why = sheetNameProblem(book.sheetNames, sheet, n)
+        if (why != null) return why
+        if (n == book.sheetNames[sheet]) return null
+        mark("")
+        return runCatching { book.renameSheet(sheet, n) }.fold({ changed(); null }, { it.message ?: "invalid" })
+    }
+    fun copySheet() { if (isCsv) return; mark(""); sheet = book.copySheet(sheet); select(0, 0); changed() }
+    fun deleteSheet(): Boolean {
+        if (isCsv || book.sheetNames.size <= 1) return false
+        mark(""); book.deleteSheet(sheet); sheet = (sheet - 1).coerceAtLeast(0); select(0, 0); changed(); return true
+    }
+
+    // ---- s19 find / replace (cell inputs: what was typed, formulas included)
+
+    override fun findHits(q: String, matchCase: Boolean, allSheets: Boolean): List<FindHit> {
+        if (q.isEmpty()) return emptyList()
+        val out = ArrayList<FindHit>()
+        val list = if (allSheets) book.sheetNames.indices.toList() else listOf(sheet)
+        for (si in list) for (r in 0 until book.rows(si)) for (c in 0 until book.cols(si)) {
+            val t = book.cell(si, r, c).input
+            if (t.isEmpty()) continue
+            for (at in io.embodit.spatialoffice.core.text.RichText.matches(t, q, !matchCase)) { out.add(FindHit(si, r, c, at, q.length)); if (out.size >= 5000) return out }
+        }
+        return out
+    }
+
+    override fun hitText(h: FindHit): String? = book.cell(h.a, h.b, h.c).input
+    override fun hitPlace(h: FindHit): String? = book.sheetNames.getOrNull(h.a)?.let { it + "!" + io.embodit.spatialoffice.core.xlsx.A1.name(h.b, h.c) }
+
+    override fun showHit(h: FindHit) {
+        if (sheet != h.a) { sheet = h.a; counted() }
+        select(h.b, h.c)
+        super.showHit(h)
+    }
+
+    override fun replaceHit(h: FindHit, q: String, repl: String, matchCase: Boolean): Boolean {
+        if (readOnly) return false
+        val t = book.cell(h.a, h.b, h.c).input
+        if (!same(t, h.start, q, matchCase)) return false
+        mark("")
+        book.setCell(h.a, h.b, h.c, t.substring(0, h.start) + repl + t.substring(h.start + q.length))
+        csvEdits++; changed()
+        return true
+    }
+
+    override fun replaceAllHits(q: String, repl: String, matchCase: Boolean, allSheets: Boolean): Int {
+        if (readOnly) return 0
+        val hits = findHits(q, matchCase, allSheets)
+        if (hits.isEmpty()) return 0
+        mark("")
+        for (cell in hits.map { Triple(it.a, it.b, it.c) }.distinct()) {
+            val t = book.cell(cell.first, cell.second, cell.third).input
+            book.setCell(cell.first, cell.second, cell.third, t.replace(q, repl, ignoreCase = !matchCase))
+        }
+        csvEdits++; changed()
+        return hits.size
+    }
     fun deleteRow() { mark(""); book.deleteRow(sheet, row); csvEdits++; changed() }
     /** D57: the new column is picked at once (same row), so typing goes into it. */
     fun insertColumn() { mark(""); book.insertColumnRight(sheet, col); col = (col + 1).coerceAtMost(701); csvEdits++; changed() }
@@ -454,7 +702,7 @@ class SheetSession(ref: FileRef, kind: FileKind, bytes: ByteArray) : Session(ref
         mark(""); val on = book.frozenRows(sheet) == 0; book.setFrozenRows(sheet, if (on) 1 else 0); changed(); return on
     }
     val frozen: Int get() = if (isCsv) 0 else book.frozenRows(sheet)
-    fun setFmt(fmt: NumFmt) { mark(""); book.setFmt(sheet, row, col, fmt); changed() }
+    fun setFmt(fmt: NumFmt) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setFmt(sheet, r, c, fmt) }; changed() }
     /** D57: the new row is picked at once (same column), so typing goes into it. */
     fun insertRowBelow() { mark(""); book.insertRowBelow(sheet, row); row = (row + 1).coerceAtMost(9999); csvEdits++; changed() }
     fun autoSum(): String? { mark(""); val f = book.autoSum(sheet, row, col); if (f != null) { csvEdits++; changed() }; return f }
@@ -483,7 +731,26 @@ class SheetSession(ref: FileRef, kind: FileKind, bytes: ByteArray) : Session(ref
     /** Column blocks of the current sheet: three columns per panel. */
     override val pieceCount: Int get() = ((book.cols(sheet) + COLS_PER_PIECE - 1) / COLS_PER_PIECE).coerceAtLeast(1)
 
+    /** What was copied or cut: the cells with their formats, where they came from, and the text put on the clipboard. */
+    class SheetClip(val cells: List<List<ClipCell>>, val rect: CellRect, val sheet: Int, val book: XlsxWorkbook, val cut: Boolean, val text: String)
+
     companion object {
+        const val MAX_R = 9999
+        const val MAX_C = 701
+        /** Shared by every sheet window, so cells copied in one file paste into another (values and formulas; formats only in the same file). */
+        var clip: SheetClip? = null
+
+        private const val BAD_CHARS = "[]:*?/" + "\\"
+
+        /** Excel's rules for a worksheet name; [self] is the sheet being renamed. */
+        fun sheetNameProblem(names: List<String>, self: Int, n: String): String? = when {
+            n.isEmpty() -> "empty"
+            n.length > 31 -> "long"
+            n.any { it in BAD_CHARS } || n.startsWith("'") || n.endsWith("'") -> "char"
+            names.withIndex().any { (i, o) -> i != self && o.equals(n, ignoreCase = true) } -> "taken"
+            else -> null
+        }
+
         const val COLS_PER_PIECE = 3
         private fun fromCsv(text: String): XlsxWorkbook {
             val b = XlsxWorkbook.blank()
@@ -492,6 +759,12 @@ class SheetSession(ref: FileRef, kind: FileKind, bytes: ByteArray) : Session(ref
         }
     }
 }
+
+/** An object copied on a slide, with the deck it belongs to (pasting is for the same file: the copy points at its pictures). */
+class ObjClip(val from: DeckSession, val clip: io.embodit.spatialoffice.core.pptx.ShapeClip)
+
+/** Shared by every slides window; only the window of the deck it came from pastes it. */
+var objClip: ObjClip? = null
 
 class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES) {
     var deck: PptxDeck = PptxDeck.open(bytes)
@@ -656,6 +929,118 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
         mark("")
         // D57: the new text box is picked at once, so the object tools act on it (as with shapes and pictures)
         selected = deck.addTextBox(current, deck.widthEmu / 4, deck.heightEmu * 2 / 5, deck.widthEmu / 2, deck.heightEmu / 6, text); edits++; changed()
+    }
+
+    // ---- p19 object copy / paste / duplicate, p20 layer order
+
+    /** Bumped when text changes from outside the text fields (find / replace), so the notes field takes the new text. */
+    var outsideEdits by mutableIntStateOf(0)
+        private set
+
+    /** A text field on the slide or the notes has the keyboard: Ctrl+C / V / D are its own, not the object's. */
+    var textEditing by mutableStateOf(false)
+
+    /** [Copy] on the picked object; false (with nothing kept) for a chart or diagram, which this version cannot copy. */
+    fun copySelected(): Boolean {
+        val id = selected.takeIf { it >= 0 } ?: return false
+        val c = runCatching { deck.copyShape(current, id) }.onFailure { android.util.Log.i(TAG, "OBJCOPY refused: ${it.message}") }.getOrNull() ?: return false
+        objClip = ObjClip(this, c)
+        android.util.Log.i(TAG, "OBJCOPY slide=$current id=$id")
+        return true
+    }
+
+    val canPaste: Boolean get() = objClip?.from === this
+
+    /** [Paste] on the current slide: a little down and right of where it was copied, picked at once (D57). */
+    fun pasteObject(): Boolean {
+        val c = objClip?.takeIf { it.from === this }?.clip ?: return false
+        val step = deck.widthEmu / 40
+        val before = runCatching { serialize() }.getOrNull() ?: return false
+        val id = runCatching { deck.pasteShape(current, c, step, step) }.onFailure { android.util.Log.w(TAG, "OBJPASTE refused: ${it.message}") }.getOrNull() ?: return false
+        pushUndo(before); edits++; changed(); selected = id
+        android.util.Log.i(TAG, "OBJPASTE slide=$current id=$id")
+        return true
+    }
+
+    /** [Duplicate] (Ctrl+D): a copy beside the picked object on the same slide, picked at once. */
+    fun duplicateSelected(): Boolean {
+        val src = selected.takeIf { it >= 0 } ?: return false
+        val before = runCatching { serialize() }.getOrNull() ?: return false
+        val id = runCatching { deck.duplicateShape(current, src) }.onFailure { android.util.Log.w(TAG, "OBJDUP refused: ${it.message}") }.getOrNull() ?: return false
+        pushUndo(before); edits++; changed(); selected = id
+        return true
+    }
+
+    /** Whether the picked object can still move that way (the menu greys out the rest). */
+    fun canReorder(op: io.embodit.spatialoffice.core.pptx.ZOrder): Boolean {
+        val shapes = deck.slides.getOrNull(current)?.shapes ?: return false
+        val i = shapes.indexOfFirst { it.id == selected }
+        if (i < 0) return false
+        return when (op) {
+            io.embodit.spatialoffice.core.pptx.ZOrder.FRONT, io.embodit.spatialoffice.core.pptx.ZOrder.FORWARD -> i < shapes.size - 1
+            else -> i > 0
+        }
+    }
+
+    fun reorder(op: io.embodit.spatialoffice.core.pptx.ZOrder): Boolean {
+        val id = selected.takeIf { it >= 0 } ?: return false
+        if (!canReorder(op)) return false
+        mark("")
+        val ok = runCatching { deck.reorderShape(current, id, op) }.getOrDefault(false)
+        if (ok) { edits++; changed(); selected = id }
+        return ok
+    }
+
+    // ---- p21 find / replace over every slide, notes included
+
+    private fun shapeText(sh: io.embodit.spatialoffice.core.pptx.Shape) = sh.paras.joinToString("\n") { it.text }
+
+    override fun findHits(q: String, matchCase: Boolean, allSheets: Boolean): List<FindHit> {
+        if (q.isEmpty()) return emptyList()
+        val out = ArrayList<FindHit>()
+        deck.slides.forEachIndexed { i, sl ->
+            for (sh in sl.shapes) if (sh.editable) for (at in io.embodit.spatialoffice.core.text.RichText.matches(shapeText(sh), q, !matchCase)) out.add(FindHit(i, sh.id, 0, at, q.length))
+            for (at in io.embodit.spatialoffice.core.text.RichText.matches(sl.notes, q, !matchCase)) out.add(FindHit(i, -1, 0, at, q.length))
+        }
+        return out
+    }
+
+    override fun hitText(h: FindHit): String? = deck.slides.getOrNull(h.a)?.let { sl -> if (h.b < 0) sl.notes else sl.shapes.firstOrNull { it.id == h.b }?.let { shapeText(it) } }
+
+    override fun showHit(h: FindHit) {
+        current = h.a.coerceIn(0, (slideCount - 1).coerceAtLeast(0))
+        selected = if (h.b >= 0) h.b else -1
+        super.showHit(h)
+    }
+
+    private fun parasFor(old: io.embodit.spatialoffice.core.pptx.Shape, text: String): List<TextPara> = text.split('\n').mapIndexed { i, t ->
+        TextPara(t, old.paras.getOrNull(i)?.level ?: old.paras.lastOrNull()?.level ?: 0, old.paras.getOrNull(i)?.bullet ?: old.paras.lastOrNull()?.bullet ?: false)
+    }
+
+    override fun replaceHit(h: FindHit, q: String, repl: String, matchCase: Boolean): Boolean {
+        val sl = deck.slides.getOrNull(h.a) ?: return false
+        if (h.b < 0) {
+            if (!same(sl.notes, h.start, q, matchCase)) return false
+            mark(""); deck.setNotes(h.a, sl.notes.substring(0, h.start) + repl + sl.notes.substring(h.start + q.length)); edits++; outsideEdits++; changed(); return true
+        }
+        val sh = sl.shapes.firstOrNull { it.id == h.b && it.editable } ?: return false
+        val t = shapeText(sh)
+        if (!same(t, h.start, q, matchCase)) return false
+        mark(""); deck.setShapeText(h.a, sh.id, parasFor(sh, t.substring(0, h.start) + repl + t.substring(h.start + q.length))); edits++; changed()
+        return true
+    }
+
+    override fun replaceAllHits(q: String, repl: String, matchCase: Boolean, allSheets: Boolean): Int {
+        val hits = findHits(q, matchCase)
+        if (hits.isEmpty()) return 0
+        mark("")
+        for ((slide, shapeId) in hits.map { it.a to it.b }.distinct()) {
+            val sl = deck.slides[slide]
+            if (shapeId < 0) deck.setNotes(slide, sl.notes.replace(q, repl, ignoreCase = !matchCase))
+            else sl.shapes.firstOrNull { it.id == shapeId }?.let { sh -> deck.setShapeText(slide, sh.id, parasFor(sh, shapeText(sh).replace(q, repl, ignoreCase = !matchCase))) }
+        }
+        edits++; outsideEdits++; changed()
+        return hits.size
     }
 
     override fun serialize(): ByteArray = deck.save()

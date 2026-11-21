@@ -131,4 +131,15 @@ object RichText {
         }
         return cur to hits.size
     }
+
+    /** Replaces the [len] characters at [at] by [replacement] (one hit of a find); the new text takes the format of the first replaced character. */
+    fun replaceAt(spans: List<Span>, at: Int, len: Int, replacement: String): List<Span> {
+        val total = text(spans).length
+        if (at < 0 || len < 0 || at + len > total) return spans
+        val fmt = formatAt(spans, at) ?: spans.lastOrNull()?.copy(text = "") ?: Span("")
+        val (left, rest) = split(spans, at)
+        val (_, right) = split(rest, len)
+        val mid = if (replacement.isEmpty()) emptyList() else listOf(fmt.copy(text = replacement))
+        return normalize(left + mid + right)
+    }
 }

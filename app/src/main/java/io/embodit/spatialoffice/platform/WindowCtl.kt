@@ -9,7 +9,6 @@ import androidx.compose.runtime.mutableStateMapOf
 import com.pico.spatial.ui.platform.containers.SpatialNavigator
 import com.pico.spatial.ui.platform.containers.StageStyle
 import io.embodit.spatialoffice.core.layout.ChartOpenGate
-import io.embodit.spatialoffice.core.layout.LevelGate
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
@@ -411,8 +410,8 @@ class WindowCtl(private val graph: Graph) {
      * and the system hides the one underneath, so the order decides what the user sees: the other files first, then
      * [back] (the file that was spread out / rehearsed), on top. When the 3D chart was up, its sheet goes last
      * instead, so the sheet is the one in view, and the chart comes back after it, over it (v0.2.3 q3-2, v0.2.4 q4-2;
-     * with one window of each kind this is the order v0.2.4 had after a rehearsal: slides, sheet, chart). The first
-     * window waits for a level head (LevelGate).
+     * with one window of each kind this is the order v0.2.4 had after a rehearsal: slides, sheet, chart). v0.3.0: the
+     * windows open at once, the first one too (profile D9 / D10: a window never waits for the head to be level).
      */
     fun stageClosed(back: WinRef?) {
         val chartWas = chart in closedForStage
@@ -425,18 +424,10 @@ class WindowCtl(private val graph: Graph) {
         closedForStage.clear()
         main.postDelayed({
             val first = order.firstOrNull()
-            if (first != null && first.editor && !isOpen(first)) {
-                // a window opened while the head is pitched can come up tilted: wait for a level head (LevelGate),
-                // at most 3 s, or 0.6 s when no head pose is available outside the Stage
-                gate.ask("reopen-$first", SystemClock.elapsedRealtime())
-                gateWin = first
-                gateThen = order.drop(1)
-                main.post(gateTick)
-            } else reopenOthers(order)
+            if (first != null && first.editor && !isOpen(first)) { Log.i(TAG, "STAGE reopen $first"); open(first); reopenOthers(order.drop(1)) }
+            else reopenOthers(order)
         }, 600)
     }
-
-    private var gateThen: List<WinRef> = emptyList()
 
     /** The other windows, one after another (each opens over the one before it). */
     private fun reopenOthers(list: List<WinRef>) {
@@ -445,20 +436,6 @@ class WindowCtl(private val graph: Graph) {
                 if (w.win == Win.CHART) { if (graph.chartSheet != null && !isOpen(w)) { Log.i(TAG, "STAGE reopen $w"); openChartWhenSheetIsUp() } }
                 else if (graph.sessionByTag(w.tag) != null && !isOpen(w)) { Log.i(TAG, "STAGE reopen $w"); open(w) }
             }, 700L * (i + 1))
-        }
-    }
-
-    private val gate = LevelGate()
-    private var gateWin: WinRef? = null
-    private val gateTick = object : Runnable {
-        override fun run() {
-            val why = gate.step(SystemClock.elapsedRealtime(), Head.sample()?.pitchDeg)
-            if (why == null) { main.postDelayed(this, 50); return }
-            Log.i(TAG, "LEVEL gate open why=$why")
-            gateWin?.let { open(it) }
-            gateWin = null
-            val then = gateThen; gateThen = emptyList()
-            reopenOthers(then)
         }
     }
 

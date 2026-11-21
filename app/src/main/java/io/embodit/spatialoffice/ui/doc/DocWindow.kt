@@ -131,6 +131,21 @@ private fun Marker(b: UiBlock.Para, numbers: Map<Int, Int>) {
     }
 }
 
+/** Colour of a find hit (d41): a yellow marker, black text stays ≥ 4.5:1 on it. */
+val HitMark = androidx.compose.ui.graphics.Color(0xFFFFE066)
+
+/** [text] with the find hit of paragraph [id] marked, if the find sheet points into it. */
+fun marked(text: AnnotatedString, hit: io.embodit.spatialoffice.platform.FindHit?, id: Int): AnnotatedString {
+    if (hit == null || hit.a != id || hit.start < 0 || hit.start + hit.len > text.length) return text
+    return AnnotatedString.Builder(text).apply { addStyle(SpanStyle(background = HitMark), hit.start, hit.start + hit.len) }.toAnnotatedString()
+}
+
+/** A hit inside a sheet or a label (the find sheet's preview, the notes line): bold, underlined, in [ink]; a background colour there draws black. */
+fun underlined(text: String, start: Int, len: Int, ink: androidx.compose.ui.graphics.Color): AnnotatedString {
+    if (start < 0 || start + len > text.length) return AnnotatedString(text)
+    return AnnotatedString.Builder(text).apply { addStyle(SpanStyle(color = ink, fontWeight = FontWeight.Bold, textDecoration = TextDecoration.Underline), start, start + len) }.toAnnotatedString()
+}
+
 fun annotated(spans: List<Span>): AnnotatedString = buildAnnotatedString {
     for (s in spans) withStyle(
         SpanStyle(
@@ -210,6 +225,12 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
         val i = all.indexOfFirst { it.id == id }
         if (i >= 0 && list.layoutInfo.visibleItemsInfo.none { it.key == id }) runCatching { list.scrollToItem(i) }
     }
+    // d41: [Next] / [Previous] bring the paragraph with the hit into view
+    LaunchedEffect(s.findTick) {
+        val id = s.findHit?.a ?: return@LaunchedEffect
+        val i = all.indexOfFirst { it.id == id }
+        if (i >= 0) runCatching { list.scrollToItem((i - 1).coerceAtLeast(0) + if (all.isEmpty() && focus != null) 1 else 0) }
+    }
     LazyColumn(
         modifier.clip(RoundedCornerShape(12.dp)).background(Ink.Paper).padding(horizontal = 44.dp),
         state = list,
@@ -223,7 +244,7 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
         }
         items(all, key = { it.id }) { b ->
             when (b) {
-                is UiBlock.Para -> if (focus != null && b.editable && !s.readOnly) ParaEditor(s, b, focus, all, numbers) else ParaView(b, numbers)
+                is UiBlock.Para -> if (focus != null && b.editable && !s.readOnly) ParaEditor(s, b, focus, all, numbers) else ParaView(b, numbers, s.findHit)
                 is UiBlock.Table -> TableView(b, if (focus != null && s.richText && !s.readOnly) s else null, s) { onWindowFocus() }
                 is UiBlock.Image -> PictureView(s, b, focus != null && s.richText && !s.readOnly)
                 is UiBlock.Page -> Image(bitmap = b.bitmap.asImageBitmap(), contentDescription = null, contentScale = ContentScale.FillWidth, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp).border(1.dp, Ink.Line))
@@ -234,10 +255,10 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
 }
 
 @Composable
-private fun ParaView(b: UiBlock.Para, numbers: Map<Int, Int> = emptyMap()) {
+private fun ParaView(b: UiBlock.Para, numbers: Map<Int, Int> = emptyMap(), hit: io.embodit.spatialoffice.platform.FindHit? = null) {
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Marker(b, numbers)
-        Text(annotated(b.spans), style = aligned(paraStyle(b.style), b.align), modifier = Modifier.weight(1f))
+        Text(marked(annotated(b.spans), hit, b.id), style = aligned(paraStyle(b.style), b.align), modifier = Modifier.weight(1f))
         if (b.why != null && b.why != "html") Txt(tr(R.string.ph_readonly), "doc/readonly", Modifier.padding(start = 8.dp), style = PicoTheme.typography.labelMedium, color = Ink.Hint)
     }
 }
@@ -248,7 +269,7 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
     var value by remember(b.id) { mutableStateOf(TextFieldValue(annotated(b.spans))) }
     // model changed underneath (format toggle, undo, style): rebuild the styled text, keep the caret
     val text = RichText.text(b.spans)
-    val styled = annotated(b.spans)
+    val styled = marked(annotated(b.spans), s.findHit, b.id)
     if (value.annotatedString != styled) {
         // same text: only the styling moved, so the caret and the input method's composing range stay as they are
         value = if (value.text == text) value.copy(annotatedString = styled) else TextFieldValue(styled, TextRange(text.length))
@@ -282,6 +303,7 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
                     s.setParagraph(b.id, spans, b.style)
                     // keep what the input method handed over (caret, composing range); only the styling is ours
                     value = nv.copy(annotatedString = annotated(spans))
+                    if (s.findHit?.a == b.id) s.findHit = null
                     focus.selection = nv.selection
                 }
             },

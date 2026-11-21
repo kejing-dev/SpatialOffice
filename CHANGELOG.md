@@ -1,5 +1,22 @@
 # Changelog · 更新记录
 
+## v0.3.0 · 2026-11-21
+
+- 表格：拖一下选一片（也可以点行号、列号，Shift+方向键加选，Ctrl+方向键跳到数据边上），选中的地方蓝框标出，下面一行显示求和 · 平均 · 计数；加粗、填充、数字格式对整片生效
+- 表格 [编辑 ▾]：复制、剪切、粘贴（Ctrl+C / X / V），公式粘过去引用跟着挪；从别的应用复制来的表格文字按制表符拆成格
+- 表格：列加宽 / 变窄 / 按内容自适应、行加高 / 变矮；工作表 [⋯] 新建、重命名、复制、删除；[格式 ▾] 加了左中右对齐、自动换行、增减小数位
+- 查找和替换三类都有：[上一个] [下一个] 跳到那一处并标出来，[替换] 只换这一处，[全部替换] 一次撤销全回来，可以区分大小写；演示连备注一起找
+- 改了没存就关掉或崩了：每 3 秒自动记一份草稿，下次打开问「找回没保存的改动？」
+- 演示：选中的对象可以复制、粘到别的页、重复，可以置于顶层 / 底层 / 上移 / 下移一层
+- 手柄 B / 返回键：关掉打开的弹层，主窗口关了就叫回来，不会退出应用
+- Sheets: drag to select a range (or click row numbers / column letters, Shift+arrows, Ctrl+arrows to the data edge); the range has a blue box and the status line shows sum · average · count; bold, fill and formats apply to all of it
+- Sheets Edit ▾: copy, cut, paste (Ctrl+C / X / V); pasted formulas move their references; tab-separated text from other apps splits into cells
+- Sheets: wider / narrower / fit columns, taller / shorter rows; [⋯] new, rename, copy, delete sheet; Format ▾ has align left / centre / right, wrap text, more / fewer decimals
+- Find and replace in all three: Previous / Next jump to the hit and mark it, Replace changes only that one, Replace all undoes in one step, Match case; slides include the notes
+- Unsaved changes survive a crash: a draft every 3 s, and the next opening asks "Recover unsaved changes?"
+- Slides: copy, paste on another slide, duplicate the picked object; bring to front / send to back / forward / backward
+- Controller B / Back closes the open dialog or brings the home window back; it never leaves the app
+
 ## v0.2.7 · 2026-11-18
 
 - [另存为]：没有登录着的云盘时，对话框里不再有那一行灰掉、点了没反应的「存到云盘」；登录了才出现「存一份到 <云盘>」，出现的每一行都能选

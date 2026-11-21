@@ -12,9 +12,9 @@ data class HeadSample(val x: Float, val y: Float, val z: Float, val fx: Float, v
 }
 
 /**
- * Head pose, used for exactly two things (never to aim, select or place content by gaze): where the spread layout's
- * seat is when the user enters or presses [Bring back to front] (position + yaw only), and the pitch the level gate
- * needs before a window is reopened. The all-zero identity sample the tracker reports before it is ready is ignored.
+ * Head pose, used for exactly one thing (never to aim, select or place content by gaze, and since v0.3.0 never to hold
+ * a window back): where the spread layout's seat is when the user enters or presses [Bring back to front] (position +
+ * yaw only). The all-zero identity sample the tracker reports before it is ready is ignored.
  */
 object Head {
     private var provider: HMDTrackingProvider? = null

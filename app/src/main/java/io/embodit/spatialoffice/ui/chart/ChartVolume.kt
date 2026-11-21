@@ -447,7 +447,7 @@ private fun PanelTheme(graph: Graph, content: @Composable () -> Unit) {
     val base = LocalContext.current
     val lang = graph.settings.value.lang
     val localized = remember(base, lang) { base.localized(lang) }
-    androidx.compose.runtime.CompositionLocalProvider(LocalContext provides localized, io.embodit.spatialoffice.ui.LocalRes provides localized.resources) { PicoTheme { content() } }
+    androidx.compose.runtime.CompositionLocalProvider(LocalContext provides localized, io.embodit.spatialoffice.ui.LocalRes provides localized.resources) { PicoTheme { io.embodit.spatialoffice.ui.SafeClickSound { content() } } }
 }
 
 /** Title, source range and legend (left panel, fixed physical size, q3-1). Dark pill so it reads on any room behind the volume. */

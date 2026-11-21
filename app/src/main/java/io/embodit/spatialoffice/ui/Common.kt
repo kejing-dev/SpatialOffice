@@ -137,14 +137,14 @@ fun WindowFrame(win: Win, tag: String? = null, content: @Composable (Graph) -> U
     val lang = graph.settings.value.lang
     val localized = remember(base, lang) { base.localized(lang) }
     CompositionLocalProvider(LocalContext provides localized, LocalRes provides localized.resources) {
-        PicoTheme {
+        PicoTheme { SafeClickSound {
             SnackbarHost {
                 ToastPump(graph, win, tag)
                 content(graph)
                 SharedOverlays(graph, win, tag)
                 CloudOverlays(graph, win, tag)
             }
-        }
+        } }
     }
 }
 

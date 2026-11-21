@@ -49,8 +49,14 @@ sealed class Overlay {
     data class Compat(override val win: Win) : Overlay()
     data class Exit(override val win: Win = Win.HOME) : Overlay()
     data class HowTo(override val win: Win = Win.HOME) : Overlay()
-    /** Find and replace in the document. */
+    /** Find and replace (v0.3.0: documents, spreadsheets and presentations alike). */
     data class Find(override val win: Win = Win.DOC) : Overlay()
+    /** d27: the file has an autosaved draft with changes that were never saved: take them back? */
+    data class Recover(override val win: Win) : Overlay()
+    /** s21: new name for the current worksheet. */
+    data class SheetRename(override val win: Win = Win.SHEET) : Overlay()
+    /** s21: delete the current worksheet (formulas that point at it turn into #REF!). */
+    data class SheetDelete(override val win: Win = Win.SHEET) : Overlay()
     data class WordCount(override val win: Win = Win.DOC) : Overlay()
     data class InsertTable(override val win: Win = Win.DOC) : Overlay()
     /** Flat preview of the sheet's charts (bar / line / pie). */
@@ -85,6 +91,7 @@ class Graph(val app: Application) {
     val layouts = LayoutStore(app, storage)
     val windows = WindowCtl(this)
     val accounts = Accounts(app, this).also { storage.accounts = it }
+    val drafts = Drafts(app)
 
     var homePage by mutableStateOf(HomePage.RECENT)
     var browseDir by mutableStateOf<File?>(null)
@@ -299,6 +306,7 @@ class Graph(val app: Application) {
             if (c.isEmpty()) say(s, str(R.string.opened, s.ref.name) + if (others > 0) " · " + str(R.string.others_behind, others) else "")
             else say(s, str(R.string.opened, s.ref.name) + " · " + str(R.string.opened_sub, c.approx(), c.held()), str(R.string.view)) { show(s, Overlay.Compat(winOf(s.kind))) }
         }
+        if (!isNew) offerDraft(s)
         val rec = layouts.load(s.ref)
         if (!isNew && (rec?.spread == true || settings.value.openMode == OpenMode.SPREAD)) spread(s)
     }
@@ -413,7 +421,7 @@ class Graph(val app: Application) {
                 else say(s, str(R.string.save_failed, e.message ?: str(R.string.perm_denied)))
             }
                 .onSuccess { b ->
-                    s.saved(); filesVersion++
+                    s.saved(); filesVersion++; dropDraft(s)
                     recents.touch(s.ref, storage.display(s.ref))
                     Log.i(TAG, "SAVE ${s.ref.name} backup=${b?.name}")
                     if (overlay !is Overlay.CopyBeside) say(s, if (b != null) str(R.string.saved_first, storage.display(s.ref)) else str(R.string.saved_to, storage.display(s.ref)))
@@ -446,7 +454,7 @@ class Graph(val app: Application) {
                         layouts.move(old.key, ref.key); recents.rename(old.key, ref, storage.display(ref)); moved(s, ref)
                     }
                     layouts.markBackedUp(s.ref.key, "")   // a file made here has no original to back up
-                    s.saved(); filesVersion++
+                    s.saved(); filesVersion++; dropDraft(s, old.key); dropDraft(s)
                     recents.touch(s.ref, storage.display(s.ref))
                     Log.i(TAG, "SAVE new ${old.name} -> ${f.name}")
                     say(s, if (renamed) str(R.string.renamed, f.name) else str(R.string.saved_to, storage.display(s.ref)))
@@ -490,6 +498,7 @@ class Graph(val app: Application) {
 
     private fun closeNow(s: Session) {
         val hadEmptyNew = s.isNew && !s.dirty
+        if (!s.dirty) dropDraft(s) else { drafted.remove(s.tag); pendingRecover.remove(s.ref.key) }
         discardEmptyNew(s)
         val ref = refOf(s)
         byTag.remove(s.tag); files.close(s.tag); openVersion++
@@ -513,7 +522,7 @@ class Graph(val app: Application) {
             }
             Unit
         }
-        if (answer == "discard") { s.dirty = false; if (s.isNew) (s.ref as? FileRef.Path)?.file?.delete()?.also { recents.remove(s.ref.key); s.isNew = false; filesVersion++ }; go() }
+        if (answer == "discard") { dropDraft(s); s.dirty = false; if (s.isNew) (s.ref as? FileRef.Path)?.file?.delete()?.also { recents.remove(s.ref.key); s.isNew = false; filesVersion++ }; go() }
         else if (s.isNew) saveNew(s, o.win, go)
         else write(s, o.win, backup = settings.value.keepBackup && layouts.backupOf(s.ref.key) == null, after = go)
     }
@@ -650,6 +659,83 @@ class Graph(val app: Application) {
         }, 400)
     }
 
+    // ---------------------------------------------------------------- d27 drafts
+
+    /** Window tag → (file key, session version) of the last draft written. */
+    private val drafted = HashMap<String, Pair<String, Int>>()
+    /** Files whose draft is waiting for the "recover?" answer: their draft is not overwritten or deleted meanwhile. */
+    private val pendingRecover = HashSet<String>()
+
+    init {
+        scope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(Drafts.PERIOD_MS)
+                runCatching { autosave() }.onFailure { Log.w(TAG, "DRAFT round failed: $it") }
+            }
+        }
+    }
+
+    /** One autosave round (every 3 s; the debug command `draft-now` runs one at once). */
+    fun autosave() {
+        for (s in sessions) {
+            val key = s.ref.key
+            val last = drafted[s.tag]
+            if (last != null && last.first != key) { drafts.delete(last.first); drafted.remove(s.tag) }
+            if (key in pendingRecover || s.readOnly) continue
+            if (!s.dirty) { if (drafted.remove(s.tag) != null) drafts.delete(key); continue }
+            if (last?.first == key && last.second == s.version) continue
+            val bytes = runCatching { s.serialize() }.getOrNull() ?: continue
+            drafted[s.tag] = key to s.version
+            scope.launch(Dispatchers.IO) { drafts.write(key, bytes) }
+            Log.i(TAG, "DRAFT saved ${s.ref.name} v${s.version} ${bytes.size} B")
+        }
+    }
+
+    /** Saved, discarded or closed without changes: the draft has nothing left to give back. */
+    private fun dropDraft(s: Session, key: String = s.ref.key) {
+        drafted.remove(s.tag); pendingRecover.remove(key)
+        scope.launch(Dispatchers.IO) { drafts.delete(key) }
+    }
+
+    /** Opening a file that has a draft: the existing confirm dialog asks whether to take the changes back. */
+    private fun offerDraft(s: Session) {
+        if (s.readOnly || !drafts.has(s.ref.key)) return
+        pendingRecover.add(s.ref.key)
+        Log.i(TAG, "DRAFT found for ${s.ref.name}: asking")
+        show(s, Overlay.Recover(winOf(s.kind)))
+    }
+
+    /** Answer to "Recover unsaved changes?": [yes] takes the draft back (one undo step), no deletes it. */
+    fun answerRecover(yes: Boolean) {
+        val o = overlay as? Overlay.Recover ?: return
+        val s = session(o.win)
+        overlay = null
+        s ?: return
+        val key = s.ref.key
+        pendingRecover.remove(key)
+        if (!yes) { dropDraft(s, key); Log.i(TAG, "DRAFT declined ${s.ref.name}"); return }
+        val bytes = drafts.read(key)
+        val ok = bytes != null && s.recover(bytes)
+        Log.i(TAG, "DRAFT recovered ${s.ref.name} ok=$ok dirty=${s.dirty}")
+        if (ok) { drafted[s.tag] = key to s.version; say(s, str(R.string.draft_back)) }
+        else { dropDraft(s, key); say(s, str(R.string.draft_failed)) }
+    }
+
+    // ---------------------------------------------------------------- BACK / controller B (profile D60)
+
+    fun onBack(where: String) {
+        val act = BackPolicy.decide(overlay != null, stageMode != null, windows.isOpen(Win.HOME))
+        Log.i(TAG, "BACK $where -> $act")
+        when (act) {
+            BackAct.CLOSE_OVERLAY -> when (overlay) {
+                is Overlay.Unsaved -> answerUnsaved("cancel")
+                else -> overlay = null
+            }
+            BackAct.REOPEN_HOME -> windows.frontHome()
+            BackAct.NOTHING -> {}
+        }
+    }
+
     fun dump(): String =
         "DUMP page=$homePage lang=${settings.value.lang} doc=${doc?.ref?.name}:${doc?.dirty} sheet=${sheet?.ref?.name}:${sheet?.dirty}@${sheet?.row},${sheet?.col} " +
             "deck=${deck?.ref?.name}:${deck?.dirty}#${deck?.current} overlay=${overlay?.javaClass?.simpleName} stage=$stageMode/$stageKind/$arrangement/$focus " +
@@ -657,7 +743,8 @@ class Graph(val app: Application) {
             "tableCaret=${doc?.tableCaret} cols=${sheet?.colCount} rows=${sheet?.rowCount} frozen=${sheet?.frozen} filter=${sheet?.filterCol}:${sheet?.filterValue} accounts=" +
             io.embodit.spatialoffice.core.cloud.Provider.values().joinToString(",") { it.id + ":" + accounts.state(it) } +
             " open=[" + files.entries.joinToString(",") { e -> "${e.tag}:${e.kind}:${byTag[e.tag]?.ref?.name}:${windows.state[WinRef(winOf(FileKind.valueOf(e.kind)), e.tag)] ?: "-"}" } + "]" +
-            " chartOf=$chartTag objBox=${deck?.dragBox} sel=${deck?.selected} docPicked=${doc?.picked}"
+            " chartOf=$chartTag objBox=${deck?.dragBox} sel=${deck?.selected} docPicked=${doc?.picked}" +
+            " range=${sheet?.selection?.name()} sheets=${sheet?.book?.sheetNames} find=${(doc ?: sheet ?: deck)?.findHit} drafts=${drafts.count()} pending=${pendingRecover.size}"
 
     companion object {
         fun from(context: Context): Graph = (context.applicationContext as SpatialApplication).graph

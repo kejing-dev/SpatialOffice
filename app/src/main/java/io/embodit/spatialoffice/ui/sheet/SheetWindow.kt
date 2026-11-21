@@ -68,6 +68,13 @@ import io.embodit.spatialoffice.R
 import io.embodit.spatialoffice.core.xlsx.A1
 import io.embodit.spatialoffice.core.xlsx.CellKind
 import io.embodit.spatialoffice.core.xlsx.NumFmt
+import io.embodit.spatialoffice.core.xlsx.RangeStats
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import io.embodit.spatialoffice.platform.Graph
 import io.embodit.spatialoffice.platform.SheetSession
 import io.embodit.spatialoffice.platform.Win
@@ -110,7 +117,11 @@ class CellEdit {
 private val ROW_H = 36.dp
 private val HEAD_W = 52.dp
 
-fun colWidth(s: SheetSession, c: Int): Dp = (s.book.colWidthChars(s.sheet, c) * 9f + 14f).coerceIn(76f, 240f).dp
+/** s20: the file's column width (characters) on screen; wide enough to widen and narrow visibly (v0.2.7 clamped 76–240 dp). */
+fun colWidth(s: SheetSession, c: Int): Dp = (s.book.colWidthChars(s.sheet, c) * 9f + 14f).coerceIn(40f, 720f).dp
+
+/** s20: the file's row height (points; 15 pt = the 36 dp row v0.2.7 always drew). */
+fun rowHeight(s: SheetSession, r: Int): Dp = if (s.isCsv) ROW_H else (s.book.rowHeightPt(s.sheet, r) * 2.4f).coerceIn(24f, 480f).dp
 
 /** Rectangle (r0, c0, r1, c1) of the first chart's data on the current sheet, if it has one. */
 fun chartRange(s: SheetSession): IntArray? {
@@ -141,20 +152,33 @@ fun SheetWindow(tag: String? = null) {
     }
 }
 
-/** Keys of the grid: arrows / Tab / Enter move, Enter commits, Esc cancels, F2 edits, Alt+= sums. */
+/**
+ * Keys of the grid: arrows / Tab / Enter move, Shift+arrows extend the range, Ctrl+arrows jump to the edge of the data
+ * (Shift too = extend), Ctrl+A all, Ctrl+C / X / V copy / cut / paste cells, Ctrl+F find, Enter commits, Esc cancels,
+ * F2 edits, Alt+= sums. Every one of them also has a menu entry (rays, gaze + pinch and the emulator have no keyboard).
+ */
 fun sheetKeys(graph: Graph, s: SheetSession, edit: CellEdit, e: KeyEvent): Boolean {
     if (e.type != KeyEventType.KeyDown) return false
     fun move(dr: Int, dc: Int) { edit.commit(s); s.select(s.row + dr, s.col + dc); edit.load(s) }
+    fun extend(dr: Int, dc: Int) { edit.commit(s); s.extendTo(s.row + dr, s.col + dc); edit.load(s) }
+    val arrow = when (e.key) { Key.DirectionUp -> -1 to 0; Key.DirectionDown -> 1 to 0; Key.DirectionLeft -> 0 to -1; Key.DirectionRight -> 0 to 1; else -> null }
     return when {
         e.isAltPressed && e.key == Key.Equals -> { edit.commit(s); if (s.autoSum() == null) graph.say(s, graph.str(R.string.no_num)); edit.load(s); true }
         e.isCtrlPressed && e.key == Key.B -> { s.setBold(!s.book.cell(s.sheet, s.row, s.col).bold); true }
+        e.isCtrlPressed && (e.key == Key.F || e.key == Key.H) -> { edit.commit(s); graph.show(s, Overlay.Find(Win.SHEET)); true }
+        e.isCtrlPressed && !edit.editing && e.key == Key.C -> { copyCells(graph, s, cut = false); true }
+        e.isCtrlPressed && !edit.editing && e.key == Key.X -> { copyCells(graph, s, cut = true); true }
+        e.isCtrlPressed && !edit.editing && e.key == Key.V -> { pasteCells(graph, s); edit.load(s); true }
+        e.isCtrlPressed && !edit.editing && e.key == Key.A -> { s.selectAll(); edit.load(s); true }
+        e.isCtrlPressed && !edit.editing && arrow != null -> { edit.commit(s); s.jump(arrow.first, arrow.second, e.isShiftPressed); edit.load(s); true }
         e.isCtrlPressed || e.isAltPressed -> false
         e.key == Key.Enter || e.key == Key.NumPadEnter -> { move(if (e.isShiftPressed) -1 else 1, 0); true }
         e.key == Key.Tab -> { move(0, if (e.isShiftPressed) -1 else 1); true }
         e.key == Key.Escape -> { if (edit.editing) { edit.load(s); true } else false }
         e.key == Key.F2 -> { edit.editing = true; edit.value = edit.value.copy(selection = TextRange(edit.value.text.length)); true }
-        e.key == Key.Delete && !edit.editing -> { s.setCell(s.row, s.col, ""); edit.load(s); true }
+        e.key == Key.Delete && !edit.editing -> { if (s.isRange) s.clearSelection() else s.setCell(s.row, s.col, ""); edit.load(s); true }
         edit.editing -> false // arrows move the caret while typing
+        e.isShiftPressed && arrow != null -> { extend(arrow.first, arrow.second); true }
         e.key == Key.DirectionUp -> { move(-1, 0); true }
         e.key == Key.DirectionDown -> { move(1, 0); true }
         e.key == Key.DirectionLeft -> { move(0, -1); true }
@@ -196,6 +220,8 @@ fun FormulaBar(s: SheetSession, edit: CellEdit, modifier: Modifier = Modifier) {
 /**
  * The grid. [firstCol] / [colCount] limit it to a block of columns (a spread-out panel); null = all columns with
  * horizontal scrolling. Clicking a cell selects it and returns the keyboard to the formula bar.
+ * v0.3.0 (s17): a press-and-drag across cells selects a range (blue box + light blue fill); a click on a row number or a
+ * column letter selects the row / column. Dragging on the row numbers scrolls (the cells are for selecting).
  */
 @Composable
 fun SheetGrid(
@@ -203,19 +229,77 @@ fun SheetGrid(
     listState: LazyListState = rememberLazyListState(), hScroll: ScrollState = rememberScrollState(),
 ) {
     s.version
-    val book = s.book
     val rows = maxOf(s.rowCount + 12, 24)
-    val lastCol = if (colCount != null) firstCol + colCount else maxOf(s.colCount + 4, 14)
+    val lastCol = if (colCount != null) firstCol + colCount else maxOf(s.colCount + 4, s.col + 2, s.anchorCol + 2, 14)
     val cols = (firstCol until lastCol).toList()
     val range = remember(s.version, s.sheet) { runCatching { chartRange(s) }.getOrNull() }
     val scroll = if (colCount == null) Modifier.horizontalScroll(hScroll) else Modifier
     val frozen = s.frozen.coerceAtMost(rows)
-    val shown = s.visibleRows(rows).filter { it >= frozen }
-    Column(modifier.clip(RoundedCornerShape(12.dp)).background(Ink.Paper).border(1.dp, Ink.Line, RoundedCornerShape(12.dp))) {
+    val shown = s.visibleRows(maxOf(rows, s.row + 2, s.anchorRow + 2)).filter { it >= frozen }
+    val sel = s.selection
+    // the active cell stays in view when the keyboard / a find / a paste moves it
+    LaunchedEffect(s.row, s.col, s.sheet, s.findTick) {
+        val i = shown.indexOf(s.row)
+        if (i >= 0 && listState.layoutInfo.visibleItemsInfo.none { it.key == s.row }) runCatching { listState.scrollToItem((i - 3).coerceAtLeast(0)) }
+    }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val headH = with(density) { ROW_H.toPx() }
+    val headW = with(density) { HEAD_W.toPx() }
+    val colPx = cols.map { with(density) { colWidth(s, it).toPx() } }
+    val frozenPx = (0 until frozen).sumOf { with(density) { rowHeight(s, it).toPx() }.toDouble() }.toFloat() + if (frozen > 0) with(density) { 2.dp.toPx() } else 0f
+    val frozenRowPx = (0 until frozen).map { with(density) { rowHeight(s, it).toPx() } }
+
+    /** The cell under a point of the grid (null over the headers or outside the cells). */
+    fun cellAt(p: androidx.compose.ui.geometry.Offset): Pair<Int, Int>? {
+        if (p.x < headW || p.y < headH) return null
+        var x = p.x - headW + (if (colCount == null) hScroll.value.toFloat() else 0f)
+        var c = -1
+        for ((i, w) in colPx.withIndex()) { if (x < w) { c = cols[i]; break }; x -= w }
+        if (c < 0) c = cols.last()
+        var y = p.y - headH
+        if (y < frozenPx) {
+            for ((i, h) in frozenRowPx.withIndex()) { if (y < h) return i to c; y -= h }
+            return null
+        }
+        y -= frozenPx
+        val items = listState.layoutInfo.visibleItemsInfo
+        val hit = items.firstOrNull { y >= it.offset && y < it.offset + it.size } ?: (if (items.isNotEmpty() && y >= items.last().offset) items.last() else items.firstOrNull())
+        val r = hit?.key as? Int ?: return null
+        return r to c
+    }
+
+    val dragSelect = Modifier.pointerInput(s, cols, frozen, colCount) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            val start = cellAt(down.position) ?: return@awaitEachGesture
+            var dragging = false
+            val slop = viewConfiguration.touchSlop
+            while (true) {
+                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                if (!ch.pressed) { if (dragging) { ch.consume(); android.util.Log.i(io.embodit.spatialoffice.platform.TAG, "RANGE drag ${s.selection.name()}") }; break }
+                if (!dragging && (ch.position - down.position).getDistance() > slop) {
+                    dragging = true
+                    edit?.commit(s); s.select(start.first, start.second)
+                }
+                if (dragging) {
+                    ch.consume()
+                    cellAt(ch.position)?.let { (r, c) -> if (r != s.row || c != s.col) { s.extendTo(r, c); edit?.load(s) } }
+                }
+            }
+            if (dragging) runCatching { edit?.focus?.requestFocus() }
+        }
+    }
+
+    Column(modifier.clip(RoundedCornerShape(12.dp)).background(Ink.Paper).border(1.dp, Ink.Line, RoundedCornerShape(12.dp)).then(dragSelect)) {
         Row(Modifier.fillMaxWidth().height(ROW_H).background(Ink.Header)) {
-            Box(Modifier.width(HEAD_W).height(ROW_H))
+            Box(Modifier.width(HEAD_W).height(ROW_H).clickable { edit?.commit(s); s.selectAll(); edit?.load(s) }.semantics { contentDescription = "sheet-all" })
             Row(scroll) {
-                cols.forEach { c -> HeadCell(A1.colName(c) + (if (c == s.filterCol) " ▾" else ""), colWidth(s, c), c == s.col) }
+                cols.forEach { c ->
+                    HeadCell(A1.colName(c) + (if (c == s.filterCol) " ▾" else ""), colWidth(s, c), ROW_H, c in sel.c1..sel.c2, "col-" + A1.colName(c)) {
+                        edit?.commit(s); s.selectColumn(c); edit?.load(s)
+                    }
+                }
             }
         }
         // frozen top rows stay above the scrolling part
@@ -230,32 +314,40 @@ fun SheetGrid(
 @Composable
 private fun GridRow(s: SheetSession, edit: CellEdit?, r: Int, cols: List<Int>, range: IntArray?, scroll: Modifier, modifier: Modifier) {
     val book = s.book
-    Row(modifier.height(ROW_H)) {
-        HeadCell((r + 1).toString(), HEAD_W, r == s.row)
+    val sel = s.selection
+    val h = rowHeight(s, r)
+    Row(modifier.height(h)) {
+        HeadCell((r + 1).toString(), HEAD_W, h, r in sel.r1..sel.r2, "row-${r + 1}") { edit?.commit(s); s.selectRow(r); edit?.load(s) }
         Row(scroll) {
             cols.forEach { c ->
                 val cell = book.cell(s.sheet, r, c)
-                val selected = r == s.row && c == s.col
+                val active = r == s.row && c == s.col
+                val inSel = sel.contains(r, c)
                 val inRange = range != null && r >= range[0] && r <= range[2] && c >= range[1] && c <= range[3]
                 val fill = if (s.isCsv) null else book.fillRgb(s.sheet, r, c)
+                val base = if (fill != null) Color(0xFF000000 or fill.toLong()) else if (inRange) Ink.Range else Color.Transparent
+                val edges = if (inSel && s.isRange) booleanArrayOf(r == sel.r1, c == sel.c2, r == sel.r2, c == sel.c1) else null
+                val alignEnd = when (cell.hAlign) { "right" -> true; "left", "center" -> false; else -> cell.kind == CellKind.NUMBER }
                 Box(
-                    Modifier.width(colWidth(s, c)).height(ROW_H)
-                        .background(if (selected) Ink.SelectFill else if (fill != null) Color(0xFF000000 or fill.toLong()) else if (inRange) Ink.Range else Color.Transparent)
-                        .border(if (selected) 2.dp else 0.5.dp, if (selected) Ink.Select else Ink.Line)
+                    Modifier.width(colWidth(s, c)).height(h)
+                        .background(base)
+                        .background(if (inSel && (s.isRange || active)) Ink.SelectFill else Color.Transparent)
+                        .border(if (active) 2.dp else 0.5.dp, if (active) Ink.Select else Ink.Line)
+                        .rangeEdges(edges)
                         .clickable {
                             edit?.commit(s); s.select(r, c); edit?.load(s)
                             runCatching { edit?.focus?.requestFocus() }
                         }
                         .semantics { contentDescription = "cell-" + A1.name(r, c) }
                         .padding(horizontal = 8.dp),
-                    contentAlignment = if (cell.kind == CellKind.NUMBER) Alignment.CenterEnd else Alignment.CenterStart,
+                    contentAlignment = when { cell.hAlign == "center" -> Alignment.Center; alignEnd -> Alignment.CenterEnd; else -> Alignment.CenterStart },
                 ) {
-                    // a cell shows what fits, like every spreadsheet; the full value is in the formula bar
+                    // a cell shows what fits, like every spreadsheet; the full value is in the formula bar (wrapped cells: as many lines as the row holds)
                     Text(
-                        if (selected && edit?.editing == true) edit.value.text else cell.display,
-                        style = TextStyle(fontSize = 15.sp, color = if (cell.kind == CellKind.ERROR) Color(0xFFB3261E) else Ink.Text, fontWeight = if (cell.bold) FontWeight.Bold else null),
-                        maxLines = 1, softWrap = false,
-                        textAlign = if (cell.kind == CellKind.NUMBER) TextAlign.End else TextAlign.Start,
+                        if (active && edit?.editing == true) edit.value.text else cell.display,
+                        style = TextStyle(fontSize = 15.sp, lineHeight = 19.sp, color = if (cell.kind == CellKind.ERROR) Color(0xFFB3261E) else Ink.Text, fontWeight = if (cell.bold) FontWeight.Bold else null),
+                        maxLines = if (cell.wrap) 20 else 1, softWrap = cell.wrap,
+                        textAlign = when { cell.hAlign == "center" -> TextAlign.Center; alignEnd -> TextAlign.End; else -> TextAlign.Start },
                     )
                 }
             }
@@ -263,9 +355,24 @@ private fun GridRow(s: SheetSession, edit: CellEdit?, r: Int, cols: List<Int>, r
     }
 }
 
+/** The 2 dp blue box around a selected range: each cell on its edge draws that side (top, right, bottom, left). */
+private fun Modifier.rangeEdges(edges: BooleanArray?): Modifier = if (edges == null) this else drawWithContent {
+    drawContent()
+    val w = 2.dp.toPx()
+    val c = Ink.Select
+    if (edges[0]) drawRect(c, size = androidx.compose.ui.geometry.Size(size.width, w))
+    if (edges[1]) drawRect(c, topLeft = androidx.compose.ui.geometry.Offset(size.width - w, 0f), size = androidx.compose.ui.geometry.Size(w, size.height))
+    if (edges[2]) drawRect(c, topLeft = androidx.compose.ui.geometry.Offset(0f, size.height - w), size = androidx.compose.ui.geometry.Size(size.width, w))
+    if (edges[3]) drawRect(c, size = androidx.compose.ui.geometry.Size(w, size.height))
+}
+
 @Composable
-private fun HeadCell(label: String, width: Dp, active: Boolean) {
-    Box(Modifier.width(width).height(ROW_H).background(if (active) Ink.Range else Ink.Header).border(0.5.dp, Ink.Line), contentAlignment = Alignment.Center) {
+private fun HeadCell(label: String, width: Dp, height: Dp, active: Boolean, name: String, onClick: () -> Unit) {
+    Box(
+        Modifier.width(width).height(height).background(if (active) Ink.Range else Ink.Header).border(0.5.dp, Ink.Line)
+            .clickable(onClick = onClick).semantics { contentDescription = name },
+        contentAlignment = Alignment.Center,
+    ) {
         Text(label, style = TextStyle(fontSize = 14.sp, color = Ink.TextSoft, fontWeight = if (active) FontWeight.Bold else null), maxLines = 1)
     }
 }
@@ -276,20 +383,59 @@ private fun SheetPicker(graph: Graph, s: SheetSession, edit: CellEdit) {
     s.sheetCount
     val names = s.book.sheetNames
     val chart = remember(s.version, s.sheet) { runCatching { s.book.charts().firstOrNull { it.sheet == s.sheet } }.getOrNull() }
+    val sel = s.selection
+    val stats = remember(s.version, s.sheet, sel) { if (s.isRange) runCatching { s.stats() }.getOrNull() else null }
+    val tabs = rememberScrollState()
     Row(Modifier.fillMaxWidth().height(52.dp), verticalAlignment = Alignment.CenterVertically) {
         Txt(tr(R.string.sheet_label), "sheet/picker-label", Modifier.padding(end = 12.dp), style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Segments(names.take(6).mapIndexed { i, n -> i to n }, s.sheet, "sheet/picker", itemWidth = 132.dp) { i ->
+        // every worksheet, scrolled sideways when there are many (s21: a new one is picked and in view at once)
+        LaunchedEffect(s.sheet, names.size) { runCatching { tabs.animateScrollTo((s.sheet * 132 * 2 - 200).coerceAtLeast(0)) } }
+        Box(Modifier.weight(1f, fill = false).widthIn(max = 560.dp).horizontalScroll(tabs)) {
+            Segments(names.mapIndexed { i, n -> i to n }, s.sheet, "sheet/picker", itemWidth = 132.dp) { i ->
                 edit.commit(s); s.sheet = i; s.select(0, 0); edit.load(s)
             }
         }
-        if (chart?.range != null) Txt(
+        Box(Modifier.width(8.dp))
+        ToolMenu("⋯", "sheet/tabs-menu", enabled = !s.isCsv && !s.readOnly, width = 56.dp, entries = listOfNotNull(
+            MenuEntry(tr(R.string.sheet_new), "sheet/tab-new") { edit.commit(s); s.addSheet(); edit.load(s); graph.say(s, graph.str(R.string.sheet_added, s.book.sheetNames[s.sheet])) },
+            MenuEntry(tr(R.string.sheet_rename), "sheet/tab-rename") { edit.commit(s); graph.show(s, Overlay.SheetRename(Win.SHEET)) },
+            MenuEntry(tr(R.string.sheet_copy), "sheet/tab-copy") { edit.commit(s); s.copySheet(); edit.load(s); graph.say(s, graph.str(R.string.sheet_added, s.book.sheetNames[s.sheet])) },
+            if (names.size > 1) MenuEntry(tr(R.string.sheet_delete), "sheet/tab-delete") { edit.commit(s); graph.show(s, Overlay.SheetDelete(Win.SHEET)) } else null,
+        ))
+        if (stats != null) Txt(
+            tr(R.string.range_stats, RangeStats.fmt(stats.sum), stats.average?.let { RangeStats.fmt(it) } ?: "—", stats.count),
+            "sheet/stats", Modifier.weight(1f).padding(start = 16.dp), style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelPrimary,
+            align = TextAlign.End,
+        )
+        else if (chart?.range != null) Txt(
             tr(R.string.range_hint, chart.title.ifEmpty { tr(R.string.chart_3d) }, chart.range ?: "") +
                 // v0.2.3: the chart's "click a bar" hint lives here, under the volume (its panel keeps to value + controls)
                 (if (graph.windows.isOpen(Win.CHART)) "  ·  " + tr(if (graph.chartScatter) R.string.tip_dot else R.string.tip_bar) else ""), "sheet/range-hint",
             Modifier.weight(1f).padding(start = 16.dp), style = PicoTheme.typography.bodySmall, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2,
         )
     }
+}
+
+/** Ctrl+C / Ctrl+X / [Edit ▸ Copy / Cut]: the selection goes to the system clipboard as tab-separated text too. */
+fun copyCells(graph: Graph, s: SheetSession, cut: Boolean) {
+    val text = s.copy(cut)
+    runCatching {
+        val cm = graph.app.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("cells", text))
+    }.onFailure { android.util.Log.w(io.embodit.spatialoffice.platform.TAG, "CLIP set failed: $it") }
+    android.util.Log.i(io.embodit.spatialoffice.platform.TAG, "CLIP ${if (cut) "cut" else "copy"} ${s.selection.name()} ${text.length} chars")
+    graph.say(s, graph.str(if (cut) R.string.cells_cut else R.string.cells_copied, s.selection.name()))
+}
+
+/** Ctrl+V / [Edit ▸ Paste]: cells copied here (formulas moved by the offset), or text from another app split at tabs and line breaks. */
+fun pasteCells(graph: Graph, s: SheetSession) {
+    val text = runCatching {
+        val cm = graph.app.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(graph.app)?.toString()
+    }.getOrNull()
+    val r = s.paste(text)
+    android.util.Log.i(io.embodit.spatialoffice.platform.TAG, "CLIP paste -> ${r?.name()} clipText=${text?.length}")
+    graph.say(s, if (r == null) graph.str(R.string.nothing_to_paste) else graph.str(R.string.cells_pasted, r.name()))
 }
 
 /** The connected block of non-empty cells around the selection, as an A1 range; null when it is smaller than 2 × 2. */
@@ -359,12 +505,27 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
             Box(Modifier.focusRequester(keys).onPreviewKeyEvent { e -> commonKeys(graph, s, e) || sheetKeys(graph, s, edit, e) || typeIntoCell(s, edit, e) }.focusable()) {
             ToolRow {
                 ToolToggle(R.drawable.ic_text_bold, tr(R.string.bold), cell.bold, { on -> edit.commit(s); s.setBold(on) }, enabled = !s.isCsv)
+                // v0.3.0: [Edit ▾] copy / cut / paste / find (each shortcut has its entry here)
+                ToolMenu(tr(R.string.menu_edit), "sheet/edit", entries = listOf(
+                    MenuEntry(tr(R.string.edit_copy), "sheet/copy") { edit.commit(s); copyCells(graph, s, cut = false) },
+                    MenuEntry(tr(R.string.edit_cut), "sheet/cut") { edit.commit(s); copyCells(graph, s, cut = true) },
+                    MenuEntry(tr(R.string.edit_paste), "sheet/paste") { run { pasteCells(graph, s) } },
+                    MenuEntry(tr(R.string.edit_find), "sheet/find") { edit.commit(s); graph.show(s, Overlay.Find(Win.SHEET)) },
+                ))
                 ToolMenu(
                     tr(when (cell.fmt) { NumFmt.CURRENCY -> R.string.fmt_currency; NumFmt.PERCENT -> R.string.fmt_percent; NumFmt.DATE -> R.string.fmt_date; NumFmt.OTHER -> R.string.fmt_number; else -> R.string.fmt_general }),
                     "sheet/fmt", enabled = !s.isCsv,
                     entries = listOf(NumFmt.GENERAL to R.string.fmt_general, NumFmt.OTHER to R.string.fmt_number, NumFmt.CURRENCY to R.string.fmt_currency, NumFmt.PERCENT to R.string.fmt_percent, NumFmt.DATE to R.string.fmt_date).map { (f, label) ->
                         MenuEntry(tr(label), "sheet/fmt-item", checked = cell.fmt == f) { run { s.setFmt(f) } }
-                    },
+                    } + listOf(
+                        // s22: alignment, wrap and decimal places live in the same [Format ▾]
+                        MenuEntry(tr(R.string.align_left), "sheet/align-left", checked = cell.hAlign == "left") { run { s.setHAlign("left") } },
+                        MenuEntry(tr(R.string.align_center), "sheet/align-center", checked = cell.hAlign == "center") { run { s.setHAlign("center") } },
+                        MenuEntry(tr(R.string.align_right), "sheet/align-right", checked = cell.hAlign == "right") { run { s.setHAlign("right") } },
+                        MenuEntry(tr(R.string.wrap_text), "sheet/wrap", checked = cell.wrap) { run { s.setWrap(!cell.wrap) } },
+                        MenuEntry(tr(R.string.dec_more), "sheet/dec-more") { run { s.adjustDecimals(1) } },
+                        MenuEntry(tr(R.string.dec_less), "sheet/dec-less") { run { s.adjustDecimals(-1) } },
+                    ),
                 )
                 ToolMenu(tr(R.string.menu_fill), "sheet/fill", enabled = !s.isCsv, entries = FILLS.map { (label, rgb) ->
                     MenuEntry(tr(label), "sheet/fill-item") { run { s.setFill(rgb) } }
@@ -384,6 +545,13 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
                     MenuEntry(tr(R.string.delete_row), "sheet/delete-row") { run { s.deleteRow() } },
                     MenuEntry(tr(R.string.insert_col), "sheet/insert-col") { run { s.insertColumn() } },
                     MenuEntry(tr(R.string.delete_col), "sheet/delete-col") { run { s.deleteColumn() } },
+                ) + if (s.isCsv) emptyList() else listOf(
+                    // s20: widths and heights of the selected columns / rows
+                    MenuEntry(tr(R.string.col_wider), "sheet/col-wider") { run { s.widen(2f) } },
+                    MenuEntry(tr(R.string.col_narrower), "sheet/col-narrower") { run { s.widen(-2f) } },
+                    MenuEntry(tr(R.string.col_autofit), "sheet/col-autofit") { run { s.autoFit() } },
+                    MenuEntry(tr(R.string.row_taller), "sheet/row-taller") { run { s.taller(6f) } },
+                    MenuEntry(tr(R.string.row_shorter), "sheet/row-shorter") { run { s.taller(-6f) } },
                 ))
                 ToolMenu(tr(R.string.menu_chart), "sheet/chart", icon = R.drawable.ic_chart_3d, enabled = !s.isCsv, entries = listOfNotNull(
                     MenuEntry(tr(R.string.chart_bar), "sheet/chart-bar") { run { makeChart(graph, s, "bar") } },

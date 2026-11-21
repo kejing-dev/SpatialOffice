@@ -129,7 +129,7 @@ private fun Pooled(graph: Graph, scene: StageScene, id: String, content: @Compos
     val lang = graph.settings.value.lang
     val localized = remember(base, lang) { base.localized(lang) }
     CompositionLocalProvider(LocalContext provides localized, io.embodit.spatialoffice.ui.LocalRes provides localized.resources) {
-        key(gen) { PicoTheme { Box(Modifier.onPreviewKeyEvent { e -> stageKeys(graph, e) }) { content() } } }
+        key(gen) { PicoTheme { io.embodit.spatialoffice.ui.SafeClickSound { Box(Modifier.onPreviewKeyEvent { e -> stageKeys(graph, e) }) { content() } } } }
     }
 }
 

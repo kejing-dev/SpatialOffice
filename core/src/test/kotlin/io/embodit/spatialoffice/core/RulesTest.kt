@@ -6,7 +6,6 @@ import io.embodit.spatialoffice.core.layout.Arrangement
 import io.embodit.spatialoffice.core.layout.Json
 import io.embodit.spatialoffice.core.layout.LayoutRecord
 import io.embodit.spatialoffice.core.layout.LayoutRules
-import io.embodit.spatialoffice.core.layout.LevelGate
 import io.embodit.spatialoffice.core.layout.Seat
 import io.embodit.spatialoffice.core.text.Attr
 import io.embodit.spatialoffice.core.text.RichText
@@ -157,37 +156,6 @@ class RulesTest {
     }
 
     // ---- level gate + seat ----
-    @Test fun levelGateWaitsForALevelHead() {
-        val g = LevelGate()
-        assertNull(g.step(0, 0f))                 // nothing asked
-        g.ask("reopen", 1000)
-        assertNull(g.step(1000, -30f))            // looking down at the bar
-        assertNull(g.step(1500, -30f))
-        assertNull(g.step(1600, 4f))              // level, dwell starts
-        assertNull(g.step(1800, 4f))
-        assertEquals("reopen", g.step(1900, 4f))  // 300 ms level
-        assertFalse(g.waiting)
-    }
-
-    @Test fun levelGateDwellRestartsWhenTheHeadTiltsAgain() {
-        val g = LevelGate()
-        g.ask("a", 0)
-        assertNull(g.step(0, 0f)); assertNull(g.step(200, 25f)); assertNull(g.step(300, 0f)); assertNull(g.step(500, 0f))
-        assertEquals("a", g.step(600, 0f))
-    }
-
-    @Test fun levelGateFallbacks() {
-        val g = LevelGate()
-        g.ask("a", 0)
-        assertNull(g.step(100, null)); assertNull(g.step(400, Float.NaN))
-        assertEquals("a/nohead", g.step(700, null))  // no pose for 600 ms after the first frame without one
-        g.ask("b", 1000)
-        assertNull(g.step(2000, 40f))
-        assertEquals("b/timeout", g.step(4000, 40f))
-        g.ask("c", 5000); g.cancel()
-        assertNull(g.step(9000, 0f))
-    }
-
     @Test fun seatUsesYawOnly() {
         val ahead = Seat.fromHead(1f, 1.2f, 2f, 0f, -1f)
         assertEquals(0f, ahead.yawRad, 1e-5f)

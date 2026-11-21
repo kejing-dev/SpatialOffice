@@ -97,6 +97,8 @@ import io.embodit.spatialoffice.platform.Graph
 import io.embodit.spatialoffice.platform.Win
 import io.embodit.spatialoffice.ui.EditorTitleBar
 import io.embodit.spatialoffice.ui.MenuEntry
+import io.embodit.spatialoffice.core.pptx.ZOrder
+import androidx.compose.ui.input.key.isCtrlPressed
 import io.embodit.spatialoffice.ui.ToolMenu
 import io.embodit.spatialoffice.ui.FileTools
 import io.embodit.spatialoffice.ui.Ink
@@ -115,7 +117,7 @@ import io.embodit.spatialoffice.ui.commonKeys
 fun SlidesWindow(tag: String? = null) {
     io.embodit.spatialoffice.ui.EditorWindow(Win.SLIDES, tag) { graph, session ->
         val s = session as? DeckSession ?: return@EditorWindow
-        Column(Modifier.fillMaxSize().onPreviewKeyEvent { e -> commonKeys(graph, s, e) || slideKeys(s, e) }) {
+        Column(Modifier.fillMaxSize().onPreviewKeyEvent { e -> commonKeys(graph, s, e) || slideKeys(graph, s, e) }) {
             EditorTitleBar(graph, Win.SLIDES, s) {
                 ToolButton(tr(R.string.rehearse), "slides/rehearse", icon = R.drawable.ic_play, onClick = { graph.rehearse(s) })
             }
@@ -137,15 +139,29 @@ fun SlidesWindow(tag: String? = null) {
                         ) {
                             Txt(tr(R.string.notes), "slides/notes-label", Modifier.weight(1f), style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
                             // what the corner dots and the round tab of the picked object are for
-                            if (s.selected >= 0 && !s.readOnly) Txt(tr(R.string.obj_hint), "slides/obj-hint", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
+                            val noteHit = s.findHit?.takeIf { it.b < 0 && it.a == s.current }
+                            val noteText = s.deck.slides.getOrNull(s.current)?.notes ?: ""
+                            if (noteHit != null && noteHit.start + noteHit.len <= noteText.length) {
+                                // p21: a hit in the notes is shown here, marked, with a little of the text around it
+                                val from = (noteHit.start - 16).coerceAtLeast(0); val to = (noteHit.start + noteHit.len + 16).coerceAtMost(noteText.length)
+                                val shown = (if (from > 0) "…" else "") + noteText.substring(from, to).replace('\n', ' ') + (if (to < noteText.length) "…" else "")
+                                val at = noteHit.start - from + (if (from > 0) 1 else 0)
+                                Text(
+                                    io.embodit.spatialoffice.ui.doc.underlined(tr(R.string.find_in_notes) + "  " + shown, at + tr(R.string.find_in_notes).length + 2, noteHit.len, PicoTheme.colorScheme.labelPrimary),
+                                    style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelPrimary, maxLines = 1,
+                                    modifier = Modifier.semantics { contentDescription = "slides/notes-hit" },
+                                )
+                            } else if (s.selected >= 0 && !s.readOnly) Txt(tr(R.string.obj_hint), "slides/obj-hint", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
                         }
                         Box(Modifier.height(SlideFit.GAP_LABEL.dp))
                         val slide = s.deck.slides.getOrNull(s.current)
-                        var notes by remember(s.current, s.deck) { mutableStateOf(slide?.notes ?: "") }
+                        var notes by remember(s.current, s.deck, s.outsideEdits) { mutableStateOf(slide?.notes ?: "") }
                         TextArea(
                             value = notes,
                             onValueChange = { notes = it; s.setNotes(s.current, it) },
                             modifier = Modifier.width(rowW).weight(1f).semantics { contentDescription = "notes-input" }
+                                .onFocusChanged { s.textEditing = it.isFocused }
+                                .then(if (s.findHit?.let { it.b < 0 && it.a == s.current } == true) Modifier.border(3.dp, Ink.Select, RoundedCornerShape(12.dp)) else Modifier)
                                 .onGloballyPositioned { report.notes(it.boundsInWindow(), it.findRootCoordinates().size, s, fit) },
                             placeholder = { Txt(tr(R.string.notes_ph), "slides/notes-ph", color = PicoTheme.colorScheme.labelTertiary) },
                         )
@@ -157,8 +173,17 @@ fun SlidesWindow(tag: String? = null) {
     }
 }
 
-fun slideKeys(s: DeckSession, e: KeyEvent): Boolean {
+fun slideKeys(graph: io.embodit.spatialoffice.platform.Graph, s: DeckSession, e: KeyEvent): Boolean {
     if (e.type != KeyEventType.KeyDown) return false
+    if (e.isCtrlPressed) return when {
+        e.key == Key.F || e.key == Key.H -> { graph.show(s, io.embodit.spatialoffice.platform.Overlay.Find(Win.SLIDES)); true }
+        // p19: the picked object's shortcuts; a text field that has the keyboard keeps Ctrl+C / V for its text
+        s.textEditing -> false
+        e.key == Key.C && s.selected >= 0 -> { objCopy(graph, s); true }
+        e.key == Key.V && s.canPaste -> { objPaste(graph, s); true }
+        e.key == Key.D && s.selected >= 0 -> { s.duplicateSelected(); true }
+        else -> false
+    }
     return when (e.key) {
         Key.PageDown -> { s.current = (s.current + 1).coerceAtMost(s.slideCount - 1); true }
         Key.PageUp -> { s.current = (s.current - 1).coerceAtLeast(0); true }
@@ -344,6 +369,7 @@ private fun shapeString(sh: Shape): String = sh.paras.joinToString("\n") { it.te
 private fun TapEdit(
     key: Any, model: String, style: TextStyle, name: String, whole: Modifier, inner: Modifier, align: Alignment,
     hint: String?, editable: Boolean, onPick: () -> Unit, onChange: (String) -> Unit,
+    onEditing: (Boolean) -> Unit = {}, hit: io.embodit.spatialoffice.platform.FindHit? = null,
 ) {
     var editing by remember(key) { mutableStateOf(false) }
     var text by remember(key) { mutableStateOf(model) }
@@ -361,11 +387,12 @@ private fun TapEdit(
                 textStyle = style,
                 cursorBrush = SolidColor(Ink.Select),
                 modifier = Modifier.fillMaxWidth().focusRequester(requester)
-                    .onFocusChanged { if (it.isFocused) { hadFocus = true; onPick() } else if (hadFocus) editing = false }
+                    .onFocusChanged { if (it.isFocused) { hadFocus = true; onPick(); onEditing(true) } else if (hadFocus) { editing = false; onEditing(false) } }
                     .semantics { contentDescription = name },
             )
             LaunchedEffect(key) { repeat(5) { if (runCatching { requester.requestFocus() }.isSuccess) return@LaunchedEffect; kotlinx.coroutines.delay(60) } }
-        } else Text(text, style = style, modifier = Modifier.fillMaxWidth())
+        } else if (hit != null && hit.start + hit.len <= text.length) Text(io.embodit.spatialoffice.ui.doc.marked(androidx.compose.ui.text.AnnotatedString(text), hit, hit.a), style = style, modifier = Modifier.fillMaxWidth())
+        else Text(text, style = style, modifier = Modifier.fillMaxWidth())
     }
 }
 
@@ -391,6 +418,7 @@ private fun ShapeText(s: DeckSession, slide: Int, sh: Shape, box: Modifier, move
         key = slide to sh.id, model = shapeString(sh), style = style, name = "slide-text-${sh.id}", whole = box.then(move), inner = Modifier, align = align,
         hint = if (sh.fillRgb == null) tr(if (sh.kind == ShapeKind.TITLE) R.string.slide_title_ph else R.string.slide_body_ph) else null,
         editable = true, onPick = { s.selected = sh.id }, onChange = { s.setText(slide, sh.id, it) },
+        onEditing = { s.textEditing = it }, hit = s.findHit?.takeIf { it.a == slide && it.b == sh.id },
     )
 }
 
@@ -427,6 +455,16 @@ val THEMES: List<Pair<Int, Map<String, Int>>> = listOf(
 
 val SHAPE_FILL = 0x2563EB
 
+/** [Object ▸ Copy] / Ctrl+C on a picked object. */
+fun objCopy(graph: io.embodit.spatialoffice.platform.Graph, s: DeckSession) {
+    graph.say(s, graph.str(if (s.copySelected()) R.string.obj_copied else R.string.obj_copy_refused))
+}
+
+/** [Insert ▸ Paste] / Ctrl+V: on the current slide, picked at once. */
+fun objPaste(graph: io.embodit.spatialoffice.platform.Graph, s: DeckSession) {
+    if (!s.pasteObject()) graph.say(s, graph.str(R.string.nothing_to_paste))
+}
+
 @Composable
 private fun SlidesToolbar(graph: Graph, s: DeckSession) {
     s.version
@@ -456,6 +494,10 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
                     MenuEntry(tr(R.string.shape_ellipse), "slides/ellipse") { s.addShape("ellipse", SHAPE_FILL) },
                     MenuEntry(tr(R.string.shape_triangle), "slides/triangle") { s.addShape("triangle", SHAPE_FILL) },
                     MenuEntry(tr(R.string.shape_arrow), "slides/arrow") { s.addShape("rightArrow", SHAPE_FILL) },
+                ) + listOfNotNull(
+                    // p19: what was copied goes on the current slide, picked at once
+                    if (s.canPaste) MenuEntry(tr(R.string.obj_paste), "slides/paste") { objPaste(graph, s) } else null,
+                    MenuEntry(tr(R.string.edit_find), "slides/find") { graph.show(s, io.embodit.spatialoffice.platform.Overlay.Find(Win.SLIDES)) },
                 ))
                 ToolMenu(tr(R.string.menu_object), "slides/object", enabled = hasSel, entries = listOf(
                     MenuEntry(tr(R.string.obj_left), "slides/obj-left") { s.nudge(-1, 0) },
@@ -465,7 +507,12 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
                     MenuEntry(tr(R.string.obj_bigger), "slides/obj-bigger") { s.nudge(0, 0, 1.2f) },
                     MenuEntry(tr(R.string.obj_smaller), "slides/obj-smaller") { s.nudge(0, 0, 1f / 1.2f) },
                     MenuEntry(tr(R.string.obj_delete), "slides/obj-delete") { s.deleteSelected() },
-                ))
+                    // p19 copy / paste / duplicate, p20 layer order (only the moves that can still happen)
+                    MenuEntry(tr(R.string.obj_copy), "slides/obj-copy") { objCopy(graph, s) },
+                    MenuEntry(tr(R.string.obj_duplicate), "slides/obj-dup") { s.duplicateSelected() },
+                ) + listOf(
+                    ZOrder.FRONT to R.string.z_front, ZOrder.FORWARD to R.string.z_forward, ZOrder.BACKWARD to R.string.z_backward, ZOrder.BACK to R.string.z_back,
+                ).filter { s.canReorder(it.first) }.map { (op, label) -> MenuEntry(tr(label), "slides/z-" + op.name.lowercase()) { s.reorder(op) } })
                 ToolDivider()
                 UndoRedo(s)
             }

@@ -492,4 +492,66 @@
     <string name="browse_sub_local" formatted="false">这台设备上的文件。打开后保存写回原来的位置</string>
     <string name="about_sub_local">版本 %1$s · 兼容 .docx / .xlsx / .pptx（开放标准）· 本机文件全部离线可用</string>
     <string name="set_legal_local" formatted="false">提到的文件格式名称，只用来说明兼容。本应用和这些名称的权利人没有隶属或背书关系。</string>
+    <string name="undo_short" formatted="false">撤销</string>
+    <string name="ok" formatted="false">确定</string>
+    <string name="delete" formatted="false">删除</string>
+    <string name="draft_back" formatted="false">找回了没保存的改动，可以撤销</string>
+    <string name="draft_failed" formatted="false">这份草稿打不开，已经删掉</string>
+    <string name="recover_title" formatted="false">找回没保存的改动？</string>
+    <string name="recover_msg">「%1$s」上次有改动没保存就关掉了。要找回吗？</string>
+    <string name="recover_yes" formatted="false">找回</string>
+    <string name="recover_no" formatted="false">不要</string>
+    <string name="find_none" formatted="false">没找到</string>
+    <string name="find_pos">第 %1$d 处，共 %2$d 处</string>
+    <string name="find_prev" formatted="false">上一个</string>
+    <string name="find_next" formatted="false">下一个</string>
+    <string name="replace_one" formatted="false">替换</string>
+    <string name="replaced_one" formatted="false">换了一处</string>
+    <string name="match_case" formatted="false">区分大小写</string>
+    <string name="find_this_sheet" formatted="false">这张表</string>
+    <string name="find_all_sheets" formatted="false">全部工作表</string>
+    <string name="find_in_notes" formatted="false">备注里：</string>
+    <string name="menu_edit" formatted="false">编辑</string>
+    <string name="edit_copy" formatted="false">复制 Ctrl+C</string>
+    <string name="edit_cut" formatted="false">剪切 Ctrl+X</string>
+    <string name="edit_paste" formatted="false">粘贴 Ctrl+V</string>
+    <string name="edit_find" formatted="false">查找和替换 Ctrl+F</string>
+    <string name="cells_copied">复制了 %1$s</string>
+    <string name="cells_cut">剪切了 %1$s，粘贴后原处清空</string>
+    <string name="cells_pasted">粘贴到 %1$s</string>
+    <string name="nothing_to_paste" formatted="false">没有可以粘贴的内容</string>
+    <string name="range_stats">求和 %1$s · 平均 %2$s · 计数 %3$d</string>
+    <string name="wrap_text" formatted="false">自动换行</string>
+    <string name="dec_more" formatted="false">增加小数位</string>
+    <string name="dec_less" formatted="false">减少小数位</string>
+    <string name="col_wider" formatted="false">列加宽</string>
+    <string name="col_narrower" formatted="false">列变窄</string>
+    <string name="col_autofit" formatted="false">列宽自适应</string>
+    <string name="row_taller" formatted="false">行加高</string>
+    <string name="row_shorter" formatted="false">行变矮</string>
+    <string name="sheet_new" formatted="false">新建工作表</string>
+    <string name="sheet_rename" formatted="false">重命名工作表</string>
+    <string name="sheet_copy" formatted="false">复制工作表</string>
+    <string name="sheet_delete" formatted="false">删除工作表</string>
+    <string name="sheet_name" formatted="false">工作表名</string>
+    <string name="sheet_added">加了「%1$s」</string>
+    <string name="sheet_renamed">改名为「%1$s」</string>
+    <string name="sheet_deleted">删掉了「%1$s」，可以撤销</string>
+    <string name="sheet_delete_title">删除「%1$s」？</string>
+    <string name="sheet_delete_msg" formatted="false">这张表的内容会一起删掉。别的表里引用它的公式会显示 #REF!。</string>
+    <string name="sn_empty" formatted="false">名字不能是空的</string>
+    <string name="sn_long" formatted="false">最多 31 个字</string>
+    <string name="sn_char" formatted="false">不能有 [ ] : * ? / \\ 这些字符</string>
+    <string name="sn_taken" formatted="false">已经有这个名字的表了</string>
+    <string name="obj_copy" formatted="false">复制 Ctrl+C</string>
+    <string name="obj_paste" formatted="false">粘贴 Ctrl+V</string>
+    <string name="obj_duplicate" formatted="false">重复 Ctrl+D</string>
+    <string name="obj_copied" formatted="false">复制好了，换一页按 [插入] › 粘贴</string>
+    <string name="obj_copy_refused" formatted="false">图表这类对象这一版还不能复制</string>
+    <string name="z_front" formatted="false">置于顶层</string>
+    <string name="z_forward" formatted="false">上移一层</string>
+    <string name="z_backward" formatted="false">下移一层</string>
+    <string name="z_back" formatted="false">置于底层</string>
+    <string name="find_slide_n">第 %1$d 页</string>
+    <string name="notes_short" formatted="false">备注</string>
 </resources>
