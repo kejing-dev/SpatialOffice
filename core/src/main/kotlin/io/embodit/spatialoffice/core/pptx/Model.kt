@@ -39,9 +39,27 @@ data class Shape(
     val lineWidthEmu: Long? = null,
     /** Rotation in degrees, 0..359, from the shape's own `a:xfrm rot`. */
     val rotation: Int = 0,
+    /** M3 p40: merge attributes of every grid cell of a table, row by row (same shape as [table]); null for non-tables. */
+    val tableCells: List<List<TableCell>>? = null,
+    /** M3 p40: the table's column widths (`a:gridCol w`) and row heights (`a:tr h`) in EMU. */
+    val tableColW: List<Long>? = null,
+    val tableRowH: List<Long>? = null,
 )
 
-data class Slide(val index: Int, val shapes: List<Shape>, val notes: String, val backgroundRgb: Int?)
+/**
+ * M3 p40: one grid position of a slide table as stored. The cell that starts a merged area carries [gridSpan] /
+ * [rowSpan] (> 1); the cells it covers carry [hMerge] (same row, further right) and / or [vMerge] (rows below).
+ */
+data class TableCell(val gridSpan: Int = 1, val rowSpan: Int = 1, val hMerge: Boolean = false, val vMerge: Boolean = false) {
+    val covered: Boolean get() = hMerge || vMerge
+}
+
+/**
+ * [backgroundRgb]: the plain background colour in effect (the slide's own, else its layout's, else its master's).
+ * M3 p26: [backgroundImage] = the picture part of a picture background in effect (same chain), [ownBackground] = the
+ * slide sets its own `p:bg`.
+ */
+data class Slide(val index: Int, val shapes: List<Shape>, val notes: String, val backgroundRgb: Int?, val backgroundImage: String? = null, val ownBackground: Boolean = false)
 
 enum class SlideLayoutKind { TITLE, TITLE_BODY, TWO_COLUMN, BLANK }
 

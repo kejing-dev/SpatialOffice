@@ -597,4 +597,19 @@
     <string name="size_menu" formatted="false">Size</string>
     <string name="hl_menu" formatted="false">Highlight</string>
     <string name="hl_none" formatted="false">No highlight</string>
+    <string name="bg_menu" formatted="false">Background</string>
+    <string name="bg_color">Background · %1$s</string>
+    <string name="bg_picture" formatted="false">Picture background…</string>
+    <string name="bg_none" formatted="false">Layout\'s background</string>
+    <string name="bg_all" formatted="false">Apply to all slides</string>
+    <string name="stable_menu">Table rows &amp; columns (row %1$d, col %2$d)</string>
+    <string name="stable_row_above" formatted="false">Insert row above</string>
+    <string name="stable_row_below" formatted="false">Insert row below</string>
+    <string name="stable_col_left" formatted="false">Insert column left</string>
+    <string name="stable_col_right" formatted="false">Insert column right</string>
+    <string name="stable_row_del" formatted="false">Delete row</string>
+    <string name="stable_col_del" formatted="false">Delete column</string>
+    <string name="stable_merge_right" formatted="false">Merge with right</string>
+    <string name="stable_merge_down" formatted="false">Merge with below</string>
+    <string name="stable_merge_no" formatted="false">That neighbour spans different rows or columns, so they can\'t merge.</string>
 </resources>

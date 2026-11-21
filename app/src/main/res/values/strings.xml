@@ -597,4 +597,19 @@
     <string name="size_menu" formatted="false">字号</string>
     <string name="hl_menu" formatted="false">高亮</string>
     <string name="hl_none" formatted="false">清除高亮</string>
+    <string name="bg_menu" formatted="false">背景</string>
+    <string name="bg_color">背景 · %1$s</string>
+    <string name="bg_picture" formatted="false">用图片当背景…</string>
+    <string name="bg_none" formatted="false">用版式的背景</string>
+    <string name="bg_all" formatted="false">所有页都用</string>
+    <string name="stable_menu">表格行列（第 %1$d 行第 %2$d 列）</string>
+    <string name="stable_row_above" formatted="false">上面插一行</string>
+    <string name="stable_row_below" formatted="false">下面插一行</string>
+    <string name="stable_col_left" formatted="false">左边插一列</string>
+    <string name="stable_col_right" formatted="false">右边插一列</string>
+    <string name="stable_row_del" formatted="false">删掉这一行</string>
+    <string name="stable_col_del" formatted="false">删掉这一列</string>
+    <string name="stable_merge_right" formatted="false">和右边合并</string>
+    <string name="stable_merge_down" formatted="false">和下面合并</string>
+    <string name="stable_merge_no" formatted="false">旁边那格高矮或宽窄不一样，合并不了。</string>
 </resources>

@@ -19,7 +19,7 @@ import io.embodit.spatialoffice.core.text.Span
  */
 class PptxDeck private constructor(private val pkg: OoxmlPackage, private var source: ByteArray?) {
 
-    private class SlideData(val shapes: List<Shape>, val notes: String, val backgroundRgb: Int?)
+    private class SlideData(val shapes: List<Shape>, val notes: String, val backgroundRgb: Int?, val backgroundImage: String? = null, val ownBackground: Boolean = false)
 
     /** A layout or master part with its placeholder shapes located. Such parts are never edited here. */
     private class PartDoc(val part: String, val xml: String, val root: Xml.Elem?, val phs: List<Ph>)
@@ -53,7 +53,7 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
     val slides: List<Slide>
         get() = slidesCache ?: slideParts().mapIndexed { i, part ->
             val d = slideCache.getOrPut(part) { readSlide(part) }
-            Slide(i, d.shapes, d.notes, d.backgroundRgb)
+            Slide(i, d.shapes, d.notes, d.backgroundRgb, d.backgroundImage, d.ownBackground)
         }.also { slidesCache = it }
 
     /** Current bytes of a package part (e.g. a [Shape.imagePart]); null when the part does not exist. */
@@ -598,6 +598,8 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         if (tableOf(sx, e)?.second != true) throw IllegalStateException("shape $shapeId is not a plain table")
         val tbl = Xml.find(sx, e, "a:tbl")!!
         val tc = Xml.children(sx, tbl, "a:tr").getOrNull(row)?.let { Xml.children(sx, it, "a:tc").getOrNull(col) } ?: throw IndexOutOfBoundsException("cell $row,$col")
+        // M3: a cell covered by a merged area shows nothing; its text is the area's first cell's
+        Xml.attrs(sx, tc).let { a -> if (a["hMerge"] == "1" || a["vMerge"] == "1" || a["hMerge"] == "true" || a["vMerge"] == "true") throw IllegalStateException("cell $row,$col is covered by a merged cell") }
         val body = Xml.child(sx, tc, "a:txBody")
         val kids = body?.let { Xml.children(sx, it) } ?: emptyList()
         val bodyPr = kids.firstOrNull { it.name == "a:bodyPr" }?.let { XmlEx.src(sx, it) } ?: "<a:bodyPr/>"
@@ -618,21 +620,151 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         slideChanged(part)
     }
 
-    /** Rows of cell text of the table in graphic frame [e], and whether it is plain (no merged cells, text only). */
+    /**
+     * Rows of cell text of the table in graphic frame [e], and whether its cells can be typed into: a full grid (one
+     * `a:tc` per grid column in every row), every cell with a body of its own. Since M3 merged cells are allowed (the
+     * covered ones refuse text, see [setTableCell]).
+     */
     private fun tableOf(sx: String, e: Xml.Elem): Pair<List<List<String>>, Boolean>? {
         if (e.name != "p:graphicFrame") return null
         val tbl = Xml.find(sx, e, "a:tbl") ?: return null
         var plain = true
+        val grid = Xml.child(sx, tbl, "a:tblGrid")?.let { Xml.children(sx, it, "a:gridCol").size } ?: -1
         val rows = Xml.children(sx, tbl, "a:tr").map { tr ->
             Xml.children(sx, tr, "a:tc").map { tc ->
-                val open = sx.substring(tc.start, tc.openEnd)
-                if (open.contains("gridSpan=") || open.contains("rowSpan=") || open.contains("hMerge=") || open.contains("vMerge=") || tc.selfClosing) plain = false
+                if (tc.selfClosing) plain = false
                 val body = Xml.child(sx, tc, "a:txBody")
                 body?.let { b -> Xml.children(sx, b, "a:p").joinToString("\n") { paraText(sx, it) } } ?: ""
             }
         }
-        if (rows.isEmpty() || rows.any { it.size != rows[0].size }) plain = false
+        if (rows.isEmpty() || rows.any { it.size != rows[0].size } || rows[0].size != grid) plain = false
         return rows to plain
+    }
+
+    /** M3 p40: merge attributes of every cell, column widths and row heights of the table in frame [e]. */
+    private fun tableMeta(sx: String, e: Xml.Elem): Triple<List<List<TableCell>>, List<Long>, List<Long>>? {
+        val tbl = Xml.find(sx, e, "a:tbl") ?: return null
+        fun on(v: String?) = v == "1" || v == "true"
+        val trs = Xml.children(sx, tbl, "a:tr")
+        val cells = trs.map { tr ->
+            Xml.children(sx, tr, "a:tc").map { tc ->
+                val a = Xml.attrs(sx, tc)
+                TableCell(a["gridSpan"]?.toIntOrNull() ?: 1, a["rowSpan"]?.toIntOrNull() ?: 1, on(a["hMerge"]), on(a["vMerge"]))
+            }
+        }
+        val colW = Xml.child(sx, tbl, "a:tblGrid")?.let { g -> Xml.children(sx, g, "a:gridCol").map { Xml.attr(sx, it, "w")?.toLongOrNull() ?: 0L } } ?: emptyList()
+        val rowH = trs.map { Xml.attr(sx, it, "h")?.toLongOrNull() ?: 0L }
+        return Triple(cells, colW, rowH)
+    }
+
+    // ---- M3 p40: table rows, columns and merged cells
+
+    /** Runs [op] on the table of frame [shapeId]; false = it did nothing (no neighbour to merge with, the last row / column). */
+    private fun tableEdit(slide: Int, shapeId: Int, op: (TableEdit) -> Boolean): Boolean {
+        val part = slidePart(slide)
+        val sx = pkg.text(part)!!
+        val e = topShapes(sx).firstOrNull { shapeId(sx, it) == shapeId } ?: throw IllegalArgumentException("slide $slide has no shape $shapeId")
+        val tbl = (if (e.name == "p:graphicFrame") Xml.find(sx, e, "a:tbl") else null) ?: throw IllegalStateException("shape $shapeId is not a table")
+        val box = boxOf(sx, e)
+        val t = TableEdit.read(sx, tbl, box?.get(2) ?: 0L)
+        val oldH = t.totalHeight
+        if (!op(t)) return false
+        val edits = ArrayList<Triple<Int, Int, String>>()
+        // a row more or less: the frame grows or shrinks by it (the width stays; the columns were fit to it)
+        val newH = t.totalHeight
+        val ext = Xml.child(sx, e, "p:xfrm")?.let { Xml.child(sx, it, "a:ext") }
+        if (ext != null && newH != oldH) {
+            val cy = Xml.attr(sx, ext, "cy")?.toLongOrNull()
+            if (cy != null) edits.add(Triple(ext.start, ext.openEnd, XmlEx.withAttr(sx, ext, "cy", (cy + newH - oldH).coerceAtLeast(1).toString())))
+        }
+        edits.add(Triple(tbl.start, tbl.end, t.xml()))
+        pkg.putText(part, Xml.splice(sx, edits.sortedBy { it.first }))
+        slideChanged(part)
+        return true
+    }
+
+    /** Inserts a row above ([below] false) or below row [row]; the new row copies its cells' properties, with no text. */
+    fun tableInsertRow(slide: Int, shapeId: Int, row: Int, below: Boolean): Boolean = tableEdit(slide, shapeId) { it.insertRow(row, below); true }
+
+    /** Deletes row [row] (not the last one left); a merged area that started there starts in the next row. */
+    fun tableDeleteRow(slide: Int, shapeId: Int, row: Int): Boolean = tableEdit(slide, shapeId) { it.deleteRow(row) }
+
+    /** Inserts a column left ([right] false) or right of [col]; all column widths are refit to the frame's width. */
+    fun tableInsertCol(slide: Int, shapeId: Int, col: Int, right: Boolean): Boolean = tableEdit(slide, shapeId) { it.insertCol(col, right); true }
+
+    /** Deletes column [col] (not the last one left); the others widen to the frame's width. */
+    fun tableDeleteCol(slide: Int, shapeId: Int, col: Int): Boolean = tableEdit(slide, shapeId) { it.deleteCol(col) }
+
+    /**
+     * Merges the cell (or merged area) at ([row], [col]) with the one to its right ([down] false: `gridSpan` +
+     * `hMerge`) or below it (`rowSpan` + `vMerge`). Both must cover the same rows / columns. The second one's text
+     * goes after the first one's. False when there is nothing to merge with.
+     */
+    fun tableMerge(slide: Int, shapeId: Int, row: Int, col: Int, down: Boolean): Boolean = tableEdit(slide, shapeId) { it.merge(row, col, down) }
+
+    /** The merged area (r1, c1, r2, c2) holding cell ([row], [col]) of a table, as stored now. */
+    fun tableArea(slide: Int, shapeId: Int, row: Int, col: Int): IntArray {
+        val part = slidePart(slide)
+        val sx = pkg.text(part)!!
+        val e = topShapes(sx).firstOrNull { shapeId(sx, it) == shapeId } ?: throw IllegalArgumentException("slide $slide has no shape $shapeId")
+        val tbl = Xml.find(sx, e, "a:tbl") ?: throw IllegalStateException("shape $shapeId is not a table")
+        return TableEdit.read(sx, tbl, 0L).area(row, col)
+    }
+
+    // ---- M3 p26: slide background
+
+    /**
+     * Gives slide [slide] a plain background colour of its own ([rgb] 0xRRGGBB), or with null removes its own
+     * background so the layout's / master's shows again. Written as the first child of `p:cSld`.
+     */
+    fun setSlideBackground(slide: Int, rgb: Int?) {
+        writeBackground(slide, rgb?.let { "<p:bg><p:bgPr><a:solidFill><a:srgbClr val=\"${hex(it)}\"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>" })
+    }
+
+    /** A picture background of its own for slide [slide]; the picture is stored once as a media part, which is returned. */
+    fun setSlideBackgroundPicture(slide: Int, bytes: ByteArray, ext: String): String {
+        val e = ext.lowercase().let { if (it == "jpg") "jpeg" else it }
+        val base = OoxmlPackage.resolve(presPart, "media/x").substringBeforeLast('/')
+        val media = freeName(base, "image", ".$e")
+        pkg.put(media, bytes)
+        ContentTypes.addDefault(pkg, e, "image/$e")
+        setSlideBackgroundPicturePart(slide, media)
+        return media
+    }
+
+    /** A picture background showing the existing media part [media] (Apply to all: one picture, every slide points at it). */
+    fun setSlideBackgroundPicturePart(slide: Int, media: String) {
+        require(pkg.has(media)) { "no part $media" }
+        val part = slidePart(slide)
+        val rid = Rels.of(pkg, part).firstOrNull { !it.external && it.type.endsWith("/image") && OoxmlPackage.resolve(part, it.target) == media }?.id
+            ?: Rels.add(pkg, part, PptxTemplates.REL + "/image", XmlEx.relativize(part, media))
+        val sx = pkg.text(part)!!
+        val decl = Xml.root(sx)?.let { rDecl(sx, it) } ?: ""
+        writeBackground(slide, "<p:bg><p:bgPr><a:blipFill dpi=\"0\" rotWithShape=\"1\"><a:blip$decl r:embed=\"$rid\"/><a:srcRect/><a:stretch><a:fillRect/></a:stretch></a:blipFill><a:effectLst/></p:bgPr></p:bg>")
+    }
+
+    /** Puts [bg] (or nothing) where the slide's `p:bg` goes; a picture the old background used and nothing else does is let go. */
+    private fun writeBackground(slide: Int, bg: String?) {
+        val part = slidePart(slide)
+        val sx = pkg.text(part)!!
+        val root = Xml.root(sx) ?: throw IllegalStateException("slide $slide is not readable")
+        val cSld = Xml.child(sx, root, "p:cSld") ?: throw IllegalStateException("slide $slide has no p:cSld")
+        if (cSld.selfClosing) throw IllegalStateException("slide $slide has an empty p:cSld")
+        val old = Xml.child(sx, cSld, "p:bg")
+        val oldRid = old?.let { o -> Xml.find(sx, o, "a:blip")?.let { b -> Xml.attrs(sx, b).entries.firstOrNull { it.key.endsWith(":embed") }?.value } }
+        val out = when {
+            old != null && bg == null -> sx.substring(0, old.start) + sx.substring(old.end)
+            old != null -> if (XmlEx.src(sx, old) == bg) return else sx.substring(0, old.start) + bg + sx.substring(old.end)
+            bg == null -> return
+            else -> sx.substring(0, cSld.openEnd) + bg + sx.substring(cSld.openEnd)
+        }
+        pkg.putText(part, out)
+        if (oldRid != null && !out.contains("=\"$oldRid\"")) {
+            val media = Rels.of(pkg, part).firstOrNull { it.id == oldRid && !it.external }?.let { OoxmlPackage.resolve(part, it.target) }
+            XmlEx.removeRel(pkg, part, oldRid)
+            if (media != null && media !in XmlEx.referencedParts(pkg)) pkg.remove(media)
+        }
+        slideChanged(part)
     }
 
     /** Theme colours of the first slide master: dk1, lt1, dk2, lt2, accent1–6, hlink, folHlink → 0xRRGGBB. */
@@ -686,7 +818,7 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
             if (sx.contains("<a:fld ")) readOnly["field"] = (readOnly["field"] ?: 0) + Regex("<a:fld[\\s>]").findAll(sx).count()
             if (sx.contains("<p:transition")) approx["transition"] = (approx["transition"] ?: 0) + 1
             if (sx.contains("<p:timing")) approx["animation"] = (approx["animation"] ?: 0) + 1
-            if (Regex("<p:bgPr>\\s*<a:(?:gradFill|blipFill|pattFill)").containsMatchIn(sx)) approx["background"] = (approx["background"] ?: 0) + 1
+            if (Regex("<p:bgPr>\\s*<a:(?:gradFill|pattFill)").containsMatchIn(sx)) approx["background"] = (approx["background"] ?: 0) + 1
             for (m in Regex("<a:(?:latin|ea|cs|sym)\\b[^>]*\\btypeface=\"([^\"]+)\"").findAll(sx)) {
                 val name = Xml.unescape(m.groupValues[1])
                 if (!name.startsWith("+")) fonts[name] = (fonts[name] ?: 0) + 1
@@ -1110,13 +1242,24 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         val shapes = topShapes(sx).mapNotNull { readShape(sx, it, part, master) }
 
         var bg = backgroundOf(sx, root, master)
-        if (bg == null) relTarget(part, "/slideLayout")?.let { doc(it) }?.let { bg = backgroundOf(it.xml, it.root, master) }
-        if (bg == null && master != null) bg = backgroundOf(master.xml, master.root, master)
+        // M3 p26: the part whose p:bg is in effect, for a picture background
+        var bgPart: Pair<String, String>? = if (bg != null) part to sx else null
+        if (bg == null) relTarget(part, "/slideLayout")?.let { doc(it) }?.let { bg = backgroundOf(it.xml, it.root, master); if (bg != null) bgPart = it.part to it.xml }
+        if (bg == null && master != null) { bg = backgroundOf(master.xml, master.root, master); if (bg != null) bgPart = master.part to master.xml }
+        val bgImage = bgPart?.let { (p, x) -> backgroundPicture(p, x) }
 
         val notes = notesPartOf(part)?.let { pkg.text(it) }?.let { nx ->
             notesBody(nx)?.let { sp -> Xml.child(nx, sp, "p:txBody") }?.let { tb -> Xml.children(nx, tb, "a:p").joinToString("\n") { paraText(nx, it) } }
         } ?: ""
-        return SlideData(shapes, notes, bg?.takeIf { it != NO_SOLID })
+        return SlideData(shapes, notes, bg?.takeIf { it != NO_SOLID }, bgImage, backgroundOf(sx, root, master) != null)
+    }
+
+    /** M3 p26: the picture part of the `p:bg` / `p:bgPr` / `a:blipFill` of part [p] (text [x]); null when it has none. */
+    private fun backgroundPicture(p: String, x: String): String? {
+        val bg = Xml.root(x)?.let { Xml.child(x, it, "p:cSld") }?.let { Xml.child(x, it, "p:bg") } ?: return null
+        val blip = Xml.child(x, bg, "p:bgPr")?.let { Xml.child(x, it, "a:blipFill") }?.let { Xml.child(x, it, "a:blip") } ?: return null
+        val rid = Xml.attrs(x, blip).entries.firstOrNull { it.key.endsWith(":embed") }?.value ?: return null
+        return Rels.of(pkg, p).firstOrNull { it.id == rid && !it.external }?.let { OoxmlPackage.resolve(p, it.target) }?.takeIf { pkg.has(it) }
     }
 
     private fun notesBody(nx: String): Xml.Elem? =
@@ -1197,7 +1340,11 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
             else -> kind = ShapeKind.OTHER
         }
         val table = tableOf(sx, e)
-        if (table != null) return Shape(id, kind, b[0], b[1], b[2], b[3], emptyList(), null, false, null, 0, null, false, null, null, table.first, table.second)
+        if (table != null) {
+            val meta = tableMeta(sx, e)
+            return Shape(id, kind, b[0], b[1], b[2], b[3], emptyList(), null, false, null, 0, null, false, null, null, table.first, table.second,
+                tableCells = meta?.first, tableColW = meta?.second, tableRowH = meta?.third)
+        }
 
         if (txBody == null) {
             val isText = kind == ShapeKind.TITLE || kind == ShapeKind.BODY || kind == ShapeKind.TEXT
