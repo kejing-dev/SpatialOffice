@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -51,6 +52,7 @@ import io.embodit.spatialoffice.ui.tr
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
@@ -207,7 +209,11 @@ fun SheetWindow(tag: String? = null) {
                 FormulaBar(s, edit, Modifier.fillMaxWidth())
                 Box(Modifier.height(10.dp))
                 // v0.5.0 (s41): the grid at the window's zoom (frozen rows, headers and hit-testing scale with it)
-                Box(Modifier.fillMaxWidth().weight(1f)) { io.embodit.spatialoffice.ui.Zoomed(s) { SheetGrid(s, edit, 0, null, Modifier.fillMaxSize()) } }
+                Box(Modifier.fillMaxWidth().weight(1f)) {
+                    io.embodit.spatialoffice.ui.Zoomed(s) { SheetGrid(s, edit, 0, null, Modifier.fillMaxSize()) }
+                    // v0.6.0 (s28): function names / arguments while a formula is typed, over the top of the grid
+                    FormulaHint(edit, Modifier.align(if (s.row < 8) Alignment.BottomStart else Alignment.TopStart).padding(start = 94.dp, top = 48.dp, bottom = 12.dp))
+                }
                 Box(Modifier.height(10.dp))
                 SheetPicker(graph, s, edit)
             }
@@ -227,6 +233,8 @@ fun sheetKeys(graph: Graph, s: SheetSession, edit: CellEdit, e: KeyEvent): Boole
     fun extend(dr: Int, dc: Int) { edit.commit(s); s.extendTo(s.row + dr, s.col + dc); edit.load(s) }
     val arrow = when (e.key) { Key.DirectionUp -> -1 to 0; Key.DirectionDown -> 1 to 0; Key.DirectionLeft -> 0 to -1; Key.DirectionRight -> 0 to 1; else -> null }
     return when {
+        // v0.6.0 (s28): Tab takes the first function offered while a formula name is typed
+        e.key == Key.Tab && !e.isShiftPressed && edit.editing && completeFunction(edit) -> true
         e.isAltPressed && e.key == Key.Equals -> { edit.commit(s); if (s.autoSum() == null) graph.say(s, graph.str(R.string.no_num)); edit.load(s); true }
         e.isCtrlPressed && e.key == Key.B -> { s.setBold(!s.book.cell(s.sheet, s.row, s.col).bold); true }
         e.isCtrlPressed && e.key == Key.I -> { s.setItalic(!s.book.cell(s.sheet, s.row, s.col).italic); true }
@@ -252,6 +260,68 @@ fun sheetKeys(graph: Graph, s: SheetSession, edit: CellEdit, e: KeyEvent): Boole
         e.key == Key.DirectionLeft -> { move(0, -1); true }
         e.key == Key.DirectionRight -> { move(0, 1); true }
         else -> false
+    }
+}
+
+/** s28: the name being typed replaced by [name] (default: the first one offered) and "(": `=SU` → `=SUM(`. False when nothing is offered. */
+fun completeFunction(edit: CellEdit, name: String? = null): Boolean {
+    val v = edit.value
+    val pick = name ?: io.embodit.spatialoffice.core.xlsx.FormulaHints.suggest(v.text, v.selection.start).firstOrNull() ?: return false
+    val (text, caret) = io.embodit.spatialoffice.core.xlsx.FormulaHints.complete(v.text, v.selection.start, pick) ?: return false
+    edit.editing = true
+    edit.value = TextFieldValue(text, TextRange(caret))
+    android.util.Log.i(io.embodit.spatialoffice.platform.TAG, "FNHINT complete $pick -> $text")
+    runCatching { edit.focus.requestFocus() }
+    return true
+}
+
+/**
+ * s28: while a formula is typed, the functions whose name starts with what is typed (click one, or Tab for the first),
+ * then, inside a function's brackets, its arguments with the one being typed in bold.
+ */
+@Composable
+fun FormulaHint(edit: CellEdit, modifier: Modifier = Modifier) {
+    val v = edit.value
+    if (!edit.editing || !v.text.startsWith("=")) return
+    val caret = v.selection.start
+    val names = io.embodit.spatialoffice.core.xlsx.FormulaHints.suggest(v.text, caret)
+    val arg = if (names.isEmpty()) io.embodit.spatialoffice.core.xlsx.FormulaHints.argHint(v.text, caret) else null
+    val line = names.joinToString(",") + "|" + arg
+    LaunchedEffect(line) { if (names.isNotEmpty() || arg != null) android.util.Log.i(io.embodit.spatialoffice.platform.TAG, "FNHINT '${v.text}' names=$names arg=$arg") }
+    if (names.isEmpty() && arg == null) return
+    Column(
+        modifier.widthIn(max = 760.dp).clip(RoundedCornerShape(14.dp)).background(Ink.Paper).border(1.5.dp, Ink.Select, RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp).semantics { contentDescription = "formula-hint" },
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+    ) {
+        if (names.isNotEmpty()) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
+                names.forEachIndexed { i, n ->
+                    Box(
+                        Modifier.height(48.dp).clip(RoundedCornerShape(10.dp)).background(if (i == 0) Ink.SelectFill else Ink.Header)
+                            .noKeyFocus().clickable { completeFunction(edit, n) }.padding(horizontal = 12.dp).semantics { contentDescription = "fn-$n" },
+                        contentAlignment = Alignment.Center,
+                    ) { Text(n, style = TextStyle(fontSize = 16.sp, fontWeight = if (i == 0) FontWeight.Bold else null, color = Ink.Text)) }
+                }
+                Txt(tr(R.string.fn_tab), "sheet/fn-tab", style = PicoTheme.typography.labelMedium, color = Ink.TextSoft)
+            }
+            Text(io.embodit.spatialoffice.core.xlsx.FormulaHints.signature(names[0]), style = TextStyle(fontSize = 16.sp, color = Ink.TextSoft))
+        } else if (arg != null) {
+            val parts = io.embodit.spatialoffice.core.xlsx.FormulaHints.argParts(arg.first)
+            val at = if (parts.isEmpty()) -1 else minOf(arg.second, parts.lastIndex).let { if (parts[it] == "…" && it > 0) it - 1 else it }
+            Text(
+                androidx.compose.ui.text.buildAnnotatedString {
+                    append(arg.first + "(")
+                    parts.forEachIndexed { i, p ->
+                        if (i > 0) append(", ")
+                        if (i == at) withStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold, color = Ink.Select)) { append(p) } else append(p)
+                    }
+                    append(")")
+                },
+                style = TextStyle(fontSize = 17.sp, color = Ink.Text),
+                modifier = Modifier.semantics { contentDescription = "fn-args" },
+            )
+        }
     }
 }
 
@@ -304,8 +374,13 @@ fun SheetGrid(
 ) {
     s.version
     val rows = maxOf(s.rowCount + 12, 24)
-    val lastCol = if (colCount != null) firstCol + colCount else maxOf(s.colCount + 4, s.col + 2, s.anchorCol + 2, 14)
-    val cols = (firstCol until lastCol).toList()
+    val hiddenCols = remember(s.version, s.sheet) { s.hiddenCols() }
+    // v0.6.0 (s30): frozen left columns stay put while the rest scrolls sideways (the full grid only, not a spread-out panel)
+    val fc = if (colCount == null) s.frozenCols else 0
+    val lastCol = if (colCount != null) firstCol + colCount else maxOf(s.colCount + 4, s.col + 2, s.anchorCol + 2, 14, fc + 6)
+    // s42: hidden columns are left out
+    val fixedCols = (0 until fc).filter { it !in hiddenCols }
+    val cols = (maxOf(firstCol, fc) until lastCol).filter { it !in hiddenCols }.ifEmpty { listOf(lastCol) }
     val range = remember(s.version, s.sheet) { runCatching { chartRange(s) }.getOrNull() }
     val scroll = if (colCount == null) Modifier.horizontalScroll(hScroll) else Modifier
     val frozen = s.frozen.coerceAtMost(rows)
@@ -320,16 +395,24 @@ fun SheetGrid(
     val headH = with(density) { ROW_H.toPx() }
     val headW = with(density) { HEAD_W.toPx() }
     val colPx = cols.map { with(density) { colWidth(s, it).toPx() } }
+    val fixedPx = fixedCols.map { with(density) { colWidth(s, it).toPx() } }
+    val fixedW = fixedPx.sum()
     val frozenPx = (0 until frozen).sumOf { with(density) { rowHeight(s, it).toPx() }.toDouble() }.toFloat() + if (frozen > 0) with(density) { 2.dp.toPx() } else 0f
     val frozenRowPx = (0 until frozen).map { with(density) { rowHeight(s, it).toPx() } }
 
     /** The cell under a point of the grid (null over the headers or outside the cells). */
     fun cellAt(p: androidx.compose.ui.geometry.Offset): Pair<Int, Int>? {
         if (p.x < headW || p.y < headH) return null
-        var x = p.x - headW + (if (colCount == null) hScroll.value.toFloat() else 0f)
         var c = -1
-        for ((i, w) in colPx.withIndex()) { if (x < w) { c = cols[i]; break }; x -= w }
-        if (c < 0) c = cols.last()
+        if (p.x < headW + fixedW) {
+            var fx = p.x - headW
+            for ((i, w) in fixedPx.withIndex()) { if (fx < w) { c = fixedCols[i]; break }; fx -= w }
+        }
+        if (c < 0) {
+            var x = p.x - headW - fixedW + (if (colCount == null) hScroll.value.toFloat() else 0f)
+            for ((i, w) in colPx.withIndex()) { if (x < w) { c = cols[i]; break }; x -= w }
+            if (c < 0) c = cols.last()
+        }
         var y = p.y - headH
         if (y < frozenPx) {
             for ((i, h) in frozenRowPx.withIndex()) { if (y < h) return i to c; y -= h }
@@ -342,7 +425,7 @@ fun SheetGrid(
         return r to c
     }
 
-    val dragSelect = Modifier.pointerInput(s, cols, frozen, colCount) {
+    val dragSelect = Modifier.pointerInput(s, cols, fixedCols, frozen, colCount) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
             val start = cellAt(down.position) ?: return@awaitEachGesture
@@ -368,30 +451,47 @@ fun SheetGrid(
     Column(modifier.clip(RoundedCornerShape(12.dp)).background(Ink.Paper).border(1.dp, Ink.Line, RoundedCornerShape(12.dp)).then(dragSelect)) {
         Row(Modifier.fillMaxWidth().height(ROW_H).background(Ink.Header)) {
             Box(Modifier.width(HEAD_W).height(ROW_H).noKeyFocus().clickable { edit?.commit(s); s.selectAll(); edit?.load(s) }.semantics { contentDescription = "sheet-all" })
-            Row(scroll) {
-                cols.forEach { c ->
-                    HeadCell(A1.colName(c) + (if (c == s.filterCol) " ▾" else ""), colWidth(s, c), ROW_H, c in sel.c1..sel.c2, "col-" + A1.colName(c)) {
-                        edit?.commit(s); s.selectColumn(c); edit?.load(s)
-                    }
+            @Composable fun head(c: Int) {
+                // s42: a mark on the left edge of a column whose left neighbour is hidden; s29: the filtered column says so
+                HeadCell(A1.colName(c) + (if (c == s.filterCol) " ▾" else ""), colWidth(s, c), ROW_H, c in sel.c1..sel.c2, "col-" + A1.colName(c), hiddenBefore = c - 1 in hiddenCols) {
+                    edit?.commit(s); s.selectColumn(c); edit?.load(s)
                 }
             }
+            fixedCols.forEach { head(it) }
+            if (fixedCols.isNotEmpty()) FreezeLine()
+            Row(scroll) { cols.forEach { head(it) } }
         }
         // frozen top rows stay above the scrolling part
-        for (r in 0 until frozen) GridRow(s, edit, r, cols, range, scroll, Modifier.background(Ink.Header.copy(alpha = 0.35f)))
+        for (r in 0 until frozen) GridRow(s, edit, r, fixedCols, cols, range, scroll, Modifier.background(Ink.Header.copy(alpha = 0.35f)), hiddenCols)
         if (frozen > 0) Box(Modifier.fillMaxWidth().height(2.dp).background(Ink.Select.copy(alpha = 0.6f)))
         LazyColumn(Modifier.fillMaxWidth().weight(1f), state = listState) {
-            items(shown.size, key = { shown[it] }) { i -> GridRow(s, edit, shown[i], cols, range, scroll, Modifier) }
+            items(shown.size, key = { shown[it] }) { i -> GridRow(s, edit, shown[i], fixedCols, cols, range, scroll, Modifier, hiddenCols) }
         }
     }
 }
 
+/** s30: the line between frozen columns and the ones that scroll. */
 @Composable
-private fun GridRow(s: SheetSession, edit: CellEdit?, r: Int, cols: List<Int>, range: IntArray?, scroll: Modifier, modifier: Modifier) {
-    val book = s.book
+private fun FreezeLine() { Box(Modifier.width(2.dp).fillMaxHeight().background(Ink.Select.copy(alpha = 0.6f))) }
+
+@Composable
+private fun GridRow(s: SheetSession, edit: CellEdit?, r: Int, fixedCols: List<Int>, cols: List<Int>, range: IntArray?, scroll: Modifier, modifier: Modifier, hiddenCols: Set<Int> = emptySet()) {
     val sel = s.selection
     val h = rowHeight(s, r)
     Row(modifier.height(h)) {
-        HeadCell((r + 1).toString(), HEAD_W, h, r in sel.r1..sel.r2, "row-${r + 1}") { edit?.commit(s); s.selectRow(r); edit?.load(s) }
+        // s42: a mark on the top edge of a row whose upper neighbour is hidden
+        HeadCell((r + 1).toString(), HEAD_W, h, r in sel.r1..sel.r2, "row-${r + 1}", hiddenAbove = r > 0 && !s.isCsv && s.book.isRowHidden(s.sheet, r - 1)) { edit?.commit(s); s.selectRow(r); edit?.load(s) }
+        if (fixedCols.isNotEmpty()) { CellsRow(s, edit, r, fixedCols, range, h); FreezeLine() }
+        Row(scroll) { CellsRow(s, edit, r, cols, range, h) }
+    }
+}
+
+/** The cells of row [r] in [cols] (one stretch: the frozen columns, or the ones that scroll). */
+@Composable
+private fun CellsRow(s: SheetSession, edit: CellEdit?, r: Int, cols: List<Int>, range: IntArray?, h: Dp) {
+    val book = s.book
+    val sel = s.selection
+    run {
         // v0.5.0 (s25): a merged range is one box across its columns (drawn at its first column in view); its value is
         // the top-left cell's and shows in its top row; the rows below continue the box without inner lines
         val merges = remember(s.version, s.sheet) { if (s.isCsv) emptyList() else runCatching { book.merges(s.sheet) }.getOrDefault(emptyList()) }
@@ -407,7 +507,7 @@ private fun GridRow(s: SheetSession, edit: CellEdit?, r: Int, cols: List<Int>, r
             }
             out
         }
-        Row(scroll) {
+        Row {
             segs.forEach { (span, m) ->
                 val c = span.first()
                 val tRow = m?.get(0) ?: r
@@ -510,10 +610,16 @@ private fun Modifier.rangeEdges(edges: BooleanArray?): Modifier = if (edges == n
 }
 
 @Composable
-private fun HeadCell(label: String, width: Dp, height: Dp, active: Boolean, name: String, onClick: () -> Unit) {
+private fun HeadCell(label: String, width: Dp, height: Dp, active: Boolean, name: String, hiddenBefore: Boolean = false, hiddenAbove: Boolean = false, onClick: () -> Unit) {
     Box(
         Modifier.width(width).height(height).background(if (active) Ink.Range else Ink.Header).border(0.5.dp, Ink.Line)
-            .noKeyFocus().clickable(onClick = onClick).semantics { contentDescription = name },
+            .then(if (hiddenBefore || hiddenAbove) Modifier.drawWithContent {
+                drawContent()
+                val w = 4.dp.toPx()
+                if (hiddenBefore) drawRect(Ink.Select, size = androidx.compose.ui.geometry.Size(w, size.height))
+                if (hiddenAbove) drawRect(Ink.Select, size = androidx.compose.ui.geometry.Size(size.width, w))
+            } else Modifier)
+            .noKeyFocus().clickable(onClick = onClick).semantics { contentDescription = name + if (hiddenBefore || hiddenAbove) "-after-hidden" else "" },
         contentAlignment = Alignment.Center,
     ) {
         Text(label, style = TextStyle(fontSize = 14.sp, color = Ink.TextSoft, fontWeight = if (active) FontWeight.Bold else null), maxLines = 1)
@@ -717,9 +823,18 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
                 ToolMenu(tr(R.string.menu_data), "sheet/data", icon = R.drawable.ic_list_sort_down, entries = listOfNotNull(
                     MenuEntry(tr(R.string.sort_asc), "sheet/sort-asc") { run { graph.say(s, if (s.sortByColumn(true)) graph.str(R.string.sorted, A1.colName(s.col)) else graph.str(R.string.sort_refused)) } },
                     MenuEntry(tr(R.string.sort_desc), "sheet/sort-desc") { run { graph.say(s, if (s.sortByColumn(false)) graph.str(R.string.sorted_desc, A1.colName(s.col)) else graph.str(R.string.sort_refused)) } },
+                    // v0.6.0 (s31): several columns, headings kept on top
+                    MenuEntry(tr(R.string.data_sort), "sheet/sort-dialog") { edit.commit(s); graph.show(s, Overlay.SortData(Win.SHEET)) },
                     MenuEntry(tr(R.string.filter_by, cell.display.ifEmpty { tr(R.string.filter_blank) }), "sheet/filter") { run { sheetFilter(graph, s) } },
-                    if (s.filterCol >= 0) MenuEntry(tr(R.string.filter_clear), "sheet/filter-clear") { s.filterCol = -1; s.filterValue = null } else null,
-                    if (!s.isCsv) MenuEntry(tr(R.string.freeze_top), "sheet/freeze", checked = s.frozen > 0) { run { s.toggleFreeze() } } else null,
+                    // v0.6.0 (s29): greater / less than, contains, several values
+                    MenuEntry(tr(R.string.data_filter, A1.colName(s.col)), "sheet/filter-dialog") { edit.commit(s); graph.show(s, Overlay.FilterData(Win.SHEET, s.col)) },
+                    if (s.filterCol >= 0) MenuEntry(tr(R.string.filter_clear), "sheet/filter-clear") { s.applyFilter(null) } else null,
+                    if (!s.isCsv) MenuEntry(tr(R.string.freeze_top), "sheet/freeze", checked = s.frozen == 1 && s.frozenCols == 0) { run { s.toggleFreeze() } } else null,
+                    // v0.6.0 (s30): the rows above and the columns left of the selected cell
+                    if (!s.isCsv && (s.row > 0 || s.col > 0)) MenuEntry(tr(R.string.freeze_here, A1.name(s.row, s.col)), "sheet/freeze-here", checked = s.frozen == s.row && s.frozenCols == s.col) {
+                        run { val (fr, fcn) = s.freezeHere(); graph.say(s, graph.str(R.string.frozen_at, fr, fcn)) }
+                    } else null,
+                    if (!s.isCsv && (s.frozen > 0 || s.frozenCols > 0)) MenuEntry(tr(R.string.freeze_off), "sheet/unfreeze") { run { s.unfreeze() } } else null,
                 ))
                 ToolMenu(tr(R.string.menu_rows), "sheet/rows", entries = listOf(
                     MenuEntry(tr(R.string.insert_row), "sheet/insert-row") { run { s.insertRowBelow() } },
@@ -737,6 +852,12 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
                     MenuEntry(tr(R.string.col_autofit), "sheet/col-autofit") { run { s.autoFit() } },
                     MenuEntry(tr(R.string.row_taller), "sheet/row-taller") { run { s.taller(6f) } },
                     MenuEntry(tr(R.string.row_shorter), "sheet/row-shorter") { run { s.taller(-6f) } },
+                    // v0.6.0 (s42): hide the selected rows / columns, show hidden ones again
+                    io.embodit.spatialoffice.ui.subMenu(tr(R.string.hide_menu), "sheet/hide", listOfNotNull(
+                        MenuEntry(tr(R.string.hide_rows), "sheet/hide-rows") { run { if (s.hide(cols = false) > 0) graph.say(s, graph.str(R.string.hidden_now, s.selection.name())) } },
+                        MenuEntry(tr(R.string.hide_cols), "sheet/hide-cols") { run { if (s.hide(cols = true) > 0) graph.say(s, graph.str(R.string.hidden_now, s.selection.name())) } },
+                        if (s.anyHidden) MenuEntry(tr(R.string.unhide), "sheet/unhide") { run { graph.say(s, graph.str(R.string.unhidden_n, s.unhide())) } } else null,
+                    )),
                 ))
                 ToolMenu(tr(R.string.menu_chart), "sheet/chart", icon = R.drawable.ic_chart_3d, enabled = !s.isCsv, entries = listOfNotNull(
                     MenuEntry(tr(R.string.chart_bar), "sheet/chart-bar") { run { makeChart(graph, s, "bar") } },
@@ -756,10 +877,10 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
 /** Data ▸ Filter by this value: shows only the rows whose value in this column equals the selected cell's. */
 fun sheetFilter(graph: Graph, s: SheetSession) {
     if (s.row == 0) { graph.say(s, graph.str(R.string.filter_header)); return }
-    s.filterCol = s.col
-    s.filterValue = s.book.cell(s.sheet, s.row, s.col).display
+    val v = s.book.cell(s.sheet, s.row, s.col).display
+    s.applyFilter(io.embodit.spatialoffice.core.xlsx.FilterRule(s.col, io.embodit.spatialoffice.core.xlsx.FilterRule.Op.VALUES, values = setOf(v)))
     val n = s.visibleRows(s.rowCount).count { it in 1 until s.rowCount }
-    graph.say(s, graph.str(R.string.filter_on, A1.colName(s.col), s.filterValue ?: "", n))
+    graph.say(s, graph.str(R.string.filter_on, A1.colName(s.col), v, n))
 }
 
 /** A printable key arriving at the toolbar: starts editing the selected cell with it, as typing on the grid does. */

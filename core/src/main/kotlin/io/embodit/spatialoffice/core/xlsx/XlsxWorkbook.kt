@@ -59,10 +59,16 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         /** Row height in points as read (`ht`); [htChanged] when set here. */
         var ht: Float? = null
         var htChanged = false
+        /** v0.6.0 (s42): `hidden` as read / set here; [hiddenChanged] when set here. */
+        var hidden = false
+        var hiddenChanged = false
     }
 
     /** One `<col>` span; [attrs] = all its attributes as read (or set here), in order, for writing it back. */
-    private class ColInfo(val min: Int, val max: Int, val width: Float?, val style: Int, val attrs: LinkedHashMap<String, String> = LinkedHashMap())
+    private class ColInfo(val min: Int, val max: Int, val width: Float?, val style: Int, val attrs: LinkedHashMap<String, String> = LinkedHashMap()) {
+        /** v0.6.0 (s42): the span is hidden (`hidden="1"`). */
+        val hidden: Boolean get() = attrs["hidden"].let { it == "1" || it == "true" }
+    }
 
     private class Sheet(val index: Int, val name: String, val part: String, val xml: String) {
         val rows = TreeMap<Int, RowRec>()
@@ -81,6 +87,8 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         val ops = ArrayList<IntArray>()
         /** Frozen top rows as read from the file; [freezeSet] when changed here. */
         var frozen = 0
+        /** v0.6.0 (s30): frozen left columns as read (`xSplit` of a frozen pane). */
+        var frozenCols = 0
         var freezeSet = false
         var pendingDrawingRid: String? = null
         var usedRows = -1
@@ -229,7 +237,10 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             "sheetData" -> if (s.sheetData == null) { s.sheetData = k; s.pfx = XmlX.prefixOf(k.name); parseRows(s, k) }
             "sheetViews" -> XmlX.kid(xml, k, "sheetView")?.let { v -> XmlX.kid(xml, v, "pane") }?.let { pane ->
                 val a = Xml.attrs(xml, pane)
-                if (a["state"] == "frozen" || a["state"] == "frozenSplit") s.frozen = a["ySplit"]?.toDoubleOrNull()?.toInt() ?: 0
+                if (a["state"] == "frozen" || a["state"] == "frozenSplit") {
+                    s.frozen = a["ySplit"]?.toDoubleOrNull()?.toInt() ?: 0
+                    s.frozenCols = a["xSplit"]?.toDoubleOrNull()?.toInt() ?: 0
+                }
             }
         }
         return s
@@ -249,6 +260,7 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             val row = RowRec(idx, re)
             if (ra["customFormat"].let { it == "1" || it == "true" }) row.style = ra["s"]?.toIntOrNull() ?: 0
             row.ht = ra["ht"]?.toFloatOrNull()
+            row.hidden = ra["hidden"].let { it == "1" || it == "true" }
             s.rows[idx] = row
             var nextCol = 0
             for (ce in Xml.children(xml, re)) {
@@ -813,14 +825,92 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
     /** Number of frozen top rows (0 = none). */
     fun frozenRows(sheet: Int): Int = sheetAt(sheet).frozen
 
-    /** Freezes the top [rows] rows (0 unfreezes). Written to the sheet's view settings on save. */
-    fun setFrozenRows(sheet: Int, rows: Int) {
+    /** Freezes the top [rows] rows (0 unfreezes); frozen columns stay as they are. Written to the sheet's view settings on save. */
+    fun setFrozenRows(sheet: Int, rows: Int) = setFreeze(sheet, rows, sheetAt(sheet).frozenCols)
+
+    /** v0.6.0 (s30): number of frozen left columns (0 = none). */
+    fun frozenCols(sheet: Int): Int = sheetAt(sheet).frozenCols
+
+    /**
+     * v0.6.0 (s30): freezes the top [rows] rows and the left [cols] columns (both 0 unfreezes). "Freeze at B2" is
+     * (1, 1): everything above and left of the cell stays. Written as the first sheet view's frozen pane on save.
+     */
+    fun setFreeze(sheet: Int, rows: Int, cols: Int) {
         val s = sheetAt(sheet)
-        val n = rows.coerceIn(0, 100)
-        if (s.frozen == n) return
-        s.frozen = n
+        val r = rows.coerceIn(0, 100)
+        val c = cols.coerceIn(0, 50)
+        if (s.frozen == r && s.frozenCols == c) return
+        s.frozen = r
+        s.frozenCols = c
         s.freezeSet = true
         dirty = true
+    }
+
+    // ---- v0.6.0 (s42): hidden rows and columns
+
+    fun isRowHidden(sheet: Int, row: Int): Boolean = sheetAt(sheet).rows[row]?.hidden == true
+    fun isColHidden(sheet: Int, col: Int): Boolean = sheetAt(sheet).cols.any { col in it.min..it.max && it.hidden }
+
+    /** Rows hidden on the sheet (sorted). */
+    fun hiddenRows(sheet: Int): List<Int> = sheetAt(sheet).rows.values.filter { it.hidden }.map { it.index }
+
+    /** Columns hidden on the sheet (sorted), within the first [limit] columns. */
+    fun hiddenCols(sheet: Int, limit: Int = 702): List<Int> {
+        val s = sheetAt(sheet)
+        val out = ArrayList<Int>()
+        for (ci in s.cols) if (ci.hidden) for (c in ci.min..minOf(ci.max, limit - 1)) out.add(c)
+        return out.distinct().sorted()
+    }
+
+    /** Hides / shows rows [r1]..[r2] (`hidden="1"` on each row; the cells stay as they are). Returns how many changed. */
+    fun setRowsHidden(sheet: Int, r1: Int, r2: Int, hidden: Boolean): Int {
+        val s = sheetAt(sheet)
+        var n = 0
+        for (row in maxOf(0, r1)..minOf(r2, A1.MAX_ROW)) {
+            val r = s.rows[row] ?: if (!hidden) continue else RowRec(row, null).also { s.rows[row] = it }
+            if (r.hidden == hidden) continue
+            r.hidden = hidden; r.hiddenChanged = true; r.touched = true; n++
+        }
+        if (n > 0) dirty = true
+        return n
+    }
+
+    /** Hides / shows columns [c1]..[c2] (`hidden="1"` on their `<col>` spans, split where needed). Returns how many changed. */
+    fun setColsHidden(sheet: Int, c1: Int, c2: Int, hidden: Boolean): Int {
+        val s = sheetAt(sheet)
+        var n = 0
+        for (col in maxOf(0, c1)..minOf(c2, A1.MAX_COL)) {
+            if (isColHidden(sheet, col) == hidden) continue
+            // a column without a span of its own gets one with its present width (Excel writes a width on every <col>)
+            val hasWidth = s.cols.any { col in it.min..it.max && it.width != null }
+            updateCol(s, col, if (hasWidth) null else colWidthChars(sheet, col), mapOf("hidden" to if (hidden) "1" else null))
+            n++
+        }
+        if (n > 0) { s.colsChanged = true; s.usedCols = -1; dirty = true }
+        return n
+    }
+
+    /** One column's `<col>`: its span split out of a wider one, [width] (null = keep) and attributes set / removed (null value). */
+    private fun updateCol(s: Sheet, col: Int, width: Float?, set: Map<String, String?>) {
+        fun info(min: Int, max: Int, base: ColInfo?, w: Float?, extra: Map<String, String?>): ColInfo {
+            val a = if (base != null) LinkedHashMap(base.attrs) else LinkedHashMap()
+            a["min"] = (min + 1).toString(); a["max"] = (max + 1).toString()
+            if (w != null) { a["width"] = fmtNum(w); a["customWidth"] = "1" }
+            for ((k, v) in extra) if (v == null) a.remove(k) else a[k] = v
+            return ColInfo(min, max, w ?: base?.width, base?.style ?: 0, a)
+        }
+        val out = ArrayList<ColInfo>()
+        var hit = false
+        for (ci in s.cols) {
+            if (col < ci.min || col > ci.max) { out.add(ci); continue }
+            hit = true
+            if (ci.min < col) out.add(info(ci.min, col - 1, ci, null, emptyMap()))
+            out.add(info(col, col, ci, width, set))
+            if (ci.max > col) out.add(info(col + 1, ci.max, ci, null, emptyMap()))
+        }
+        if (!hit) out.add(info(col, col, null, width ?: s.defaultWidth, set))
+        out.sortBy { it.min }
+        s.cols.clear(); s.cols.addAll(out)
     }
 
     /** Fill colour of a cell as 0xRRGGBB, null when it has none. */
@@ -1520,7 +1610,8 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         if (ra == 4 || rb == 4) return ra.compareTo(rb) // blanks always last
         val c = if (ra != rb) ra.compareTo(rb) else when (a) {
             is Double -> a.compareTo(b as Double)
-            is String -> a.compareTo(b as String, ignoreCase = true)
+            // v0.6.0 (s31): text in dictionary order (Chinese by pinyin, as Excel / WPS sort it; Latin ignoring case)
+            is String -> TEXT_ORDER.compare(a, b as String).let { if (it != 0) it else a.compareTo(b, ignoreCase = true) }
             is Boolean -> a.compareTo(b as Boolean)
             else -> 0
         }
@@ -1534,15 +1625,26 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
      * block, a formula in the block that points at another row of the block, or a formula elsewhere (any sheet) that
      * points at part of the block.
      */
-    fun sortRows(sheet: Int, col: Int, ascending: Boolean, firstRow: Int, lastRow: Int): Boolean {
+    fun sortRows(sheet: Int, col: Int, ascending: Boolean, firstRow: Int, lastRow: Int): Boolean =
+        sortRowsBy(sheet, listOf(col to ascending), firstRow, lastRow)
+
+    /**
+     * v0.6.0 (s31): sorts rows [firstRow]..[lastRow] by several columns: [keys] = (column, ascending) in order of
+     * importance; rows equal on the first key are ordered by the second, and so on (stable). Same rules and refusals
+     * as [sortRows].
+     */
+    fun sortRowsBy(sheet: Int, keys: List<Pair<Int, Boolean>>, firstRow: Int, lastRow: Int): Boolean {
         val s = sheetAt(sheet)
-        if (col < 0 || col > A1.MAX_COL || firstRow < 0 || lastRow > A1.MAX_ROW) return false
+        if (keys.isEmpty() || keys.any { it.first < 0 || it.first > A1.MAX_COL } || firstRow < 0 || lastRow > A1.MAX_ROW) return false
         if (lastRow <= firstRow) return true
         evaluateAll()
         val n = lastRow - firstRow + 1
-        val keys = arrayOfNulls<Any?>(n)
-        for (i in 0 until n) keys[i] = s.rows[firstRow + i]?.cells?.get(col)?.let { valueOf(sheet, it) }
-        val order = (0 until n).sortedWith { a, b -> sortCompare(keys[a], keys[b], ascending) }
+        val values = Array(keys.size) { k -> arrayOfNulls<Any?>(n).also { arr -> for (i in 0 until n) arr[i] = s.rows[firstRow + i]?.cells?.get(keys[k].first)?.let { valueOf(sheet, it) } } }
+        val order = (0 until n).sortedWith { a, b ->
+            var c = 0
+            for (k in keys.indices) { c = sortCompare(values[k][a], values[k][b], keys[k].second); if (c != 0) break }
+            c
+        }
         if (order.indices.all { order[it] == it }) return true
 
         if (mergedRanges(s).any { it[0] <= lastRow && it[2] >= firstRow }) return false
@@ -1850,7 +1952,7 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             if (src == null) {
                 val sb = StringBuilder()
                 for (c in r.cells.values) if (materialises(c)) { sb.append(cellXml(s, c)); extent(c) }
-                if (sb.isEmpty() && !(r.htChanged && r.ht != null)) continue
+                if (sb.isEmpty() && !rowNeeded(r)) continue
                 val rowXml = "<${p}row r=\"${r.index + 1}\"" + htAttrs(r) + ">$sb</${p}row>"
                 if (sd == null || sd.selfClosing) detached.append(rowXml) else edits.add(Triple(rowPos.getValue(r), rowPos.getValue(r), rowXml))
                 continue
@@ -1871,7 +1973,7 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
                     if (c.col > addMax) addMax = c.col
                 }
             }
-            val htSet: Map<String, String?> = if (r.htChanged) mapOf("ht" to r.ht?.let { fmtNum(it) }, "customHeight" to (if (r.ht != null) "1" else null)) else emptyMap()
+            val htSet: Map<String, String?> = rowSet(r)
             if (inserts.isEmpty()) {
                 if (htSet.isNotEmpty()) edits.add(Triple(src.start, src.openEnd, XmlX.startTag(xml, src, htSet, src.selfClosing)))
                 continue
@@ -1929,10 +2031,11 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
                 sb.append(xml, src.start, src.end)
                 continue
             }
-            if (src == null && cells.isEmpty() && !(r.htChanged && r.ht != null)) continue
-            val rowSet = LinkedHashMap<String, String?>()
-            rowSet["r"] = (r.index + 1).toString(); rowSet["spans"] = null
-            if (r.htChanged) { rowSet["ht"] = r.ht?.let { fmtNum(it) }; rowSet["customHeight"] = if (r.ht != null) "1" else null }
+            if (src == null && cells.isEmpty() && !rowNeeded(r)) continue
+            val attrSet = LinkedHashMap<String, String?>()
+            attrSet["r"] = (r.index + 1).toString(); attrSet["spans"] = null
+            attrSet.putAll(rowSet(r))
+            val rowSet = attrSet
             if (src != null) sb.append(XmlX.startTag(xml, src, rowSet, cells.isEmpty()))
             else sb.append("<${p}row r=\"${r.index + 1}\"" + htAttrs(r) + ">")
             if (src != null && cells.isEmpty()) continue
@@ -1991,7 +2094,19 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         return if (edits.isEmpty()) null else Xml.splice(s.xml, edits)
     }
 
-    private fun htAttrs(r: RowRec): String = if (r.htChanged && r.ht != null) " ht=\"${fmtNum(r.ht!!)}\" customHeight=\"1\"" else ""
+    private fun htAttrs(r: RowRec): String = (if (r.htChanged && r.ht != null) " ht=\"${fmtNum(r.ht!!)}\" customHeight=\"1\"" else "") +
+        (if (r.hidden) " hidden=\"1\"" else "")
+
+    /** Row attributes changed here (height, s42 hidden): name → new value, null = remove. */
+    private fun rowSet(r: RowRec): Map<String, String?> {
+        val m = LinkedHashMap<String, String?>()
+        if (r.htChanged) { m["ht"] = r.ht?.let { fmtNum(it) }; m["customHeight"] = if (r.ht != null) "1" else null }
+        if (r.hiddenChanged) m["hidden"] = if (r.hidden) "1" else null
+        return m
+    }
+
+    /** A row element is needed for this row even without cells (height or hidden set here). */
+    private fun rowNeeded(r: RowRec): Boolean = (r.htChanged && r.ht != null) || r.hidden
 
     /** Rewrites `<cols>` from the sheet's column list (created in front of the sheet data when the sheet had none). */
     private fun colsEdits(s: Sheet, edits: MutableList<Triple<Int, Int, String>>) {
@@ -2027,7 +2142,14 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         val xml = s.xml
         val p = s.pfx
         val root = s.root ?: return
-        val pane = if (s.frozen > 0) "<${p}pane ySplit=\"${s.frozen}\" topLeftCell=\"A${s.frozen + 1}\" activePane=\"bottomLeft\" state=\"frozen\"/>" else ""
+        val fr = s.frozen
+        val fc = s.frozenCols
+        val pane = when {
+            fr > 0 && fc > 0 -> "<${p}pane xSplit=\"$fc\" ySplit=\"$fr\" topLeftCell=\"${A1.name(fr, fc)}\" activePane=\"bottomRight\" state=\"frozen\"/>"
+            fr > 0 -> "<${p}pane ySplit=\"$fr\" topLeftCell=\"A${fr + 1}\" activePane=\"bottomLeft\" state=\"frozen\"/>"
+            fc > 0 -> "<${p}pane xSplit=\"$fc\" topLeftCell=\"${A1.name(0, fc)}\" activePane=\"topRight\" state=\"frozen\"/>"
+            else -> ""
+        }
         val views = s.rootKids.firstOrNull { Xml.local(it.name) == "sheetViews" }
         val view = views?.let { XmlX.kid(xml, it, "sheetView") }
         if (view == null) {
@@ -2105,6 +2227,7 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         private const val APP_NAME = "Spatial Office"
 
         private val EMPTY_CELL = Cell("", "", CellKind.EMPTY, null, false, false, NumFmt.GENERAL)
+        private val TEXT_ORDER: java.text.Collator = java.text.Collator.getInstance(java.util.Locale.CHINA).apply { strength = java.text.Collator.SECONDARY }
         private val AFTER_VIEWS = setOf("sheetFormatPr", "cols", "sheetData")
         private val AFTER_MERGE = setOf(
             "phoneticPr", "conditionalFormatting", "dataValidations", "hyperlinks", "printOptions", "pageMargins", "pageSetup",

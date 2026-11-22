@@ -76,6 +76,18 @@ sealed class UiBlock {
  */
 data class FindHit(val a: Int, val b: Int = 0, val c: Int = 0, val start: Int, val len: Int)
 
+/** v0.6.0 (d25): one line of a document's outline: paragraph id, level (0 title, 1–3 headings), text. */
+data class OutlineItem(val id: Int, val level: Int, val text: String)
+
+/** v0.6.0 (d23): a selection across paragraphs, from (paragraph [aId], offset [aOff]) to ([bId], [bOff]); either order. */
+data class DocSel(val aId: Int, val aOff: Int, val bId: Int, val bOff: Int)
+
+/** v0.6.0 (d23): one copied paragraph (or part of one) with its formats, style and list level. */
+data class DocClipPara(val spans: List<io.embodit.spatialoffice.core.text.Span>, val style: io.embodit.spatialoffice.core.docx.ParaStyle, val level: Int)
+
+/** v0.6.0 (d23): document text copied with its formats; [text] is what went on the system clipboard. */
+class DocClip(val paras: List<DocClipPara>, val text: String)
+
 /** The character a page break is held as in paragraph text (`w:br w:type="page"`). */
 const val PAGE_BREAK = '\u000C'
 
@@ -590,6 +602,22 @@ class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File)
     fun cancelResize() { resizing = null; resizeStart = null }
 
     companion object {
+        /** d23: what was copied with formats, shared by every document window (pasting into another file keeps them too). */
+        var docClip: DocClip? = null
+
+        /** Characters [from, to) of [spans] as spans. */
+        fun cutSpans(spans: List<Span>, from: Int, to: Int): List<Span> {
+            val out = ArrayList<Span>()
+            var pos = 0
+            for (sp in spans) {
+                val a = maxOf(from, pos); val b = minOf(to, pos + sp.text.length)
+                if (b > a) out.add(sp.copy(text = sp.text.substring(a - pos, b - pos)))
+                pos += sp.text.length
+            }
+            return out
+        }
+    
+
         private val SCHEME = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*:")
         private val EMAIL = Regex("^[^@\\s/]+@[^@\\s/]+\\.[^@\\s/]+$")
 
@@ -649,6 +677,141 @@ class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File)
     }
 
     fun wordCount(): io.embodit.spatialoffice.core.text.WordCount.Result = io.embodit.spatialoffice.core.text.WordCount.count(plainText())
+
+    // ---- v0.6.0 (M4 d25): outline
+
+    /** The title and headings of the document, in order: [More ▸ Outline] lists them and jumps there. */
+    fun outline(): List<OutlineItem> = blocks().filterIsInstance<UiBlock.Para>().mapNotNull { p ->
+        val level = when (p.style) { ParaStyle.TITLE -> 0; ParaStyle.H1 -> 1; ParaStyle.H2 -> 2; ParaStyle.H3 -> 3; else -> return@mapNotNull null }
+        val t = io.embodit.spatialoffice.core.text.RichText.text(p.spans).trim()
+        if (t.isEmpty()) null else OutlineItem(p.id, level, t)
+    }
+
+    /** Paragraph the page should scroll to (and put the caret in); [scrollTick] bumps on every jump. */
+    var scrollTarget = -1
+        private set
+    var scrollTick by mutableIntStateOf(0)
+        private set
+    fun jumpTo(id: Int) {
+        scrollTarget = id; caretBlock = id; scrollTick++
+        android.util.Log.i(TAG, "OUTLINE jump to $id '${outline().firstOrNull { it.id == id }?.text}'")
+    }
+
+    // ---- v0.6.0 (M4 d23): a selection across paragraphs; copy / cut / paste keep the formats
+
+    /** The selection across paragraphs (null = none; inside one paragraph its own text field has the selection). */
+    var crossSel by mutableStateOf<DocSel?>(null)
+
+    /** [crossSel] in reading order (start before end). */
+    fun orderedSel(): DocSel? {
+        val s = crossSel ?: return null
+        val order = blocks().map { it.id }
+        val ia = order.indexOf(s.aId); val ib = order.indexOf(s.bId)
+        if (ia < 0 || ib < 0) return null
+        return if (ia < ib || (ia == ib && s.aOff <= s.bOff)) s else DocSel(s.bId, s.bOff, s.aId, s.aOff)
+    }
+
+    /** The editable paragraphs [crossSel] runs through, each with the characters of it that are selected [a, b). */
+    fun selectedParts(): List<Triple<UiBlock.Para, Int, Int>> {
+        val s = orderedSel() ?: return emptyList()
+        val all = blocks()
+        val ia = all.indexOfFirst { it.id == s.aId }; val ib = all.indexOfFirst { it.id == s.bId }
+        val out = ArrayList<Triple<UiBlock.Para, Int, Int>>()
+        for (i in ia..ib) {
+            val p = all[i] as? UiBlock.Para ?: continue
+            if (!p.editable || p.pageBreak) continue
+            val len = io.embodit.spatialoffice.core.text.RichText.text(p.spans).length
+            val a = if (i == ia) s.aOff.coerceIn(0, len) else 0
+            val b = if (i == ib) s.bOff.coerceIn(0, len) else len
+            out.add(Triple(p, a, maxOf(a, b)))
+        }
+        return out
+    }
+
+    private fun clipOf(parts: List<Triple<UiBlock.Para, Int, Int>>): DocClip? {
+        if (parts.isEmpty()) return null
+        // pasted text takes its formats with it, not the run it came from (src -1: written from the span's own formats)
+        val paras = parts.map { (p, a, b) -> DocClipPara(cutSpans(p.spans, a, b).map { it.copy(src = -1) }, p.style, p.level) }
+        if (paras.size == 1 && paras[0].spans.isEmpty()) return null
+        return DocClip(paras, paras.joinToString("\n") { cp -> cp.spans.joinToString("") { it.text } })
+    }
+
+    /** Ctrl+C on [crossSel]: kept for pasting with formats; returns it (its text also goes on the system clipboard). */
+    fun copyCross(): DocClip? = clipOf(selectedParts())?.also { docClip = it; android.util.Log.i(TAG, "DOCCLIP copy paras=${it.paras.size} chars=${it.text.length} styles=${it.paras.map { p -> p.style }}") }
+
+    /** Ctrl+C with characters [a, b) of one paragraph selected: the same, for one paragraph. */
+    fun copyRange(id: Int, a: Int, b: Int): DocClip? {
+        val p = blocks().firstOrNull { it.id == id } as? UiBlock.Para ?: return null
+        if (b <= a) return null
+        return clipOf(listOf(Triple(p, a, b)))?.also { docClip = it; android.util.Log.i(TAG, "DOCCLIP copy para=$id $a..$b") }
+    }
+
+    /** Delete / Backspace / Ctrl+X on [crossSel]: one undo step; returns where the caret goes (paragraph, offset). */
+    fun deleteCross(): Pair<Int, Int>? {
+        val parts = selectedParts()
+        if (parts.isEmpty() || readOnly) return null
+        val before = runCatching { serialize() }.getOrNull() ?: return null
+        val (first, a, _) = parts.first()
+        val (last, _, b) = parts.last()
+        val joined = io.embodit.spatialoffice.core.text.RichText.normalize(cutSpans(first.spans, 0, a) + cutSpans(last.spans, b, Int.MAX_VALUE))
+        rawSetParagraph(first.id, joined, first.style)
+        for ((p, _, _) in parts.drop(1)) { docx?.deleteBlock(p.id); plain?.deleteBlock(p.id) }
+        crossSel = null
+        pushUndo(before); changed()
+        android.util.Log.i(TAG, "DOCCLIP delete paras=${parts.size}")
+        return first.id to a
+    }
+
+    /**
+     * Ctrl+V of [clip] into paragraph [id] over characters [a, b): one paragraph goes into the text there; more than one
+     * splits the paragraph: the first part joins what is before the caret, the ones in between become paragraphs of
+     * their own (style and list level kept: a list item stays a list item), the last one is followed by what was after
+     * the caret. One undo step. Returns where the caret goes (paragraph, offset).
+     */
+    fun pasteClip(clip: DocClip, id: Int, a: Int, b: Int): Pair<Int, Int>? {
+        if (readOnly) return null
+        val p = blocks().firstOrNull { it.id == id } as? UiBlock.Para ?: return null
+        if (!p.editable) return null
+        val before = runCatching { serialize() }.getOrNull() ?: return null
+        val len = io.embodit.spatialoffice.core.text.RichText.text(p.spans).length
+        val lo = a.coerceIn(0, len); val hi = b.coerceIn(lo, len)
+        val left = cutSpans(p.spans, 0, lo)
+        val right = cutSpans(p.spans, hi, len)
+        val ps = clip.paras
+        val caret: Pair<Int, Int>
+        if (ps.size == 1) {
+            rawSetParagraph(id, io.embodit.spatialoffice.core.text.RichText.normalize(left + ps[0].spans + right), p.style)
+            caret = id to (lo + ps[0].spans.sumOf { it.text.length })
+        } else {
+            // a caret at the start of an empty paragraph takes the first pasted paragraph's style too
+            val firstStyle = if (left.isEmpty() && richText) ps[0].style else p.style
+            rawSetParagraph(id, io.embodit.spatialoffice.core.text.RichText.normalize(left + ps[0].spans), firstStyle)
+            if (firstStyle != p.style) rawLevel(id, ps[0].level)
+            var at = id
+            for (cp in ps.subList(1, ps.size - 1)) { at = rawInsertAfter(at, cp.spans, cp.style); rawLevel(at, cp.level) }
+            val lastP = ps.last()
+            at = rawInsertAfter(at, io.embodit.spatialoffice.core.text.RichText.normalize(lastP.spans + right), lastP.style)
+            rawLevel(at, lastP.level)
+            caret = at to lastP.spans.sumOf { it.text.length }
+        }
+        crossSel = null
+        pushUndo(before); changed()
+        android.util.Log.i(TAG, "DOCCLIP paste into $id at $lo..$hi paras=${ps.size} -> caret=$caret")
+        return caret
+    }
+
+    private fun rawSetParagraph(id: Int, spans: List<Span>, style: ParaStyle) {
+        docx?.setParagraph(id, runs(spans), style)
+        plain?.setParagraph(id, spans.joinToString("") { it.text }, style)
+    }
+    private fun rawInsertAfter(id: Int, spans: List<Span>, style: ParaStyle): Int =
+        docx?.insertParagraphAfter(id, runs(spans), if (richText || plain?.markdown == true) style else ParaStyle.BODY)
+            ?: plain?.insertParagraphAfter(id, spans.joinToString("") { it.text }, style) ?: -1
+    private fun rawLevel(id: Int, level: Int) {
+        val d = docx ?: return
+        val p = para(id) ?: return
+        if ((p.style == ParaStyle.BULLET || p.style == ParaStyle.NUMBERED) && p.level != level) d.setListLevel(id, level.coerceIn(0, 8))
+    }
 
     fun delete(id: Int) {
         mark("")
@@ -772,9 +935,17 @@ class SheetSession(ref: FileRef, kind: FileKind, bytes: ByteArray) : Session(ref
         private set
     var sheetCount by mutableIntStateOf(0)
         private set
-    /** View filter (not saved): show only data rows whose value in [filterCol] is [filterValue]. */
-    var filterCol by mutableIntStateOf(-1)
-    var filterValue by mutableStateOf<String?>(null)
+    /**
+     * View filter (not saved): the header row plus the data rows that pass [filter]. v0.6.0 (s29): a condition (one of
+     * several values, greater / less than, contains) instead of one value.
+     */
+    var filter by mutableStateOf<io.embodit.spatialoffice.core.xlsx.FilterRule?>(null)
+        private set
+    val filterCol: Int get() = filter?.col ?: -1
+    fun applyFilter(rule: io.embodit.spatialoffice.core.xlsx.FilterRule?) {
+        filter = rule
+        android.util.Log.i(TAG, "FILTER ${rule?.let { "${io.embodit.spatialoffice.core.xlsx.A1.colName(it.col)} ${it.op} '${it.text}' ${it.values.sorted()}" } ?: "off"} rows=${visibleRows(rowCount).count { it in 1 until rowCount }}")
+    }
 
     override fun counted() {
         runCatching {
@@ -786,15 +957,91 @@ class SheetSession(ref: FileRef, kind: FileKind, bytes: ByteArray) : Session(ref
 
     init { counted() }
 
-    /** Row indices the grid shows: all, or the header row plus the rows that pass the filter. */
+    /** Row indices the grid shows: all but the hidden rows (s42), and with a filter the header row plus the rows that pass it. */
     fun visibleRows(total: Int): List<Int> {
-        val v = filterValue
-        if (filterCol < 0 || v == null) return (0 until total).toList()
-        return (0 until total).filter { r -> r == 0 || r >= rowCount || book.cell(sheet, r, filterCol).display == v }
+        val f = filter
+        val hidden = if (isCsv) emptySet() else runCatching { book.hiddenRows(sheet).toHashSet() }.getOrDefault(HashSet())
+        return (0 until total).filter { r -> r !in hidden && (f == null || r == 0 || r >= rowCount || f.pass(book.cell(sheet, r, f.col))) }
     }
 
     /** Distinct values below the header in column [c] (filter choices). */
-    fun columnValues(c: Int): List<String> = (1 until rowCount).map { book.cell(sheet, it, c).display }.distinct().take(30)
+    fun columnValues(c: Int): List<String> = (1 until rowCount).map { book.cell(sheet, it, c).display }.distinct().take(60)
+
+    /** s42: columns hidden on this sheet (the grid leaves them out). */
+    fun hiddenCols(): Set<Int> = if (isCsv) emptySet() else runCatching { book.hiddenCols(sheet).toSet() }.getOrDefault(emptySet())
+    val anyHidden: Boolean get() = !isCsv && (book.hiddenRows(sheet).isNotEmpty() || book.hiddenCols(sheet).isNotEmpty())
+
+    /** s42 [Rows & columns ▸ Hide rows / columns]: the selected rows / columns. Returns how many were hidden. */
+    fun hide(cols: Boolean): Int {
+        if (isCsv) return 0
+        val r = selection
+        mark("")
+        val n = if (cols) book.setColsHidden(sheet, r.c1, r.c2, true) else book.setRowsHidden(sheet, r.r1, r.r2, true)
+        if (n > 0) changed()
+        android.util.Log.i(TAG, "HIDE ${if (cols) "cols" else "rows"} ${r.name()} n=$n hidden=${book.hiddenRows(sheet)}/${book.hiddenCols(sheet)}")
+        return n
+    }
+
+    /** s42 [Unhide]: the hidden rows / columns inside the selection, or all of them on the sheet when it holds none. */
+    fun unhide(): Int {
+        if (isCsv) return 0
+        val r = selection
+        val inside = book.hiddenRows(sheet).any { it in r.r1..r.r2 } || book.hiddenCols(sheet).any { it in r.c1..r.c2 }
+        mark("")
+        val n = if (inside) book.setRowsHidden(sheet, r.r1, r.r2, false) + book.setColsHidden(sheet, r.c1, r.c2, false)
+            else book.setRowsHidden(sheet, 0, MAX_R, false) + book.setColsHidden(sheet, 0, MAX_C, false)
+        if (n > 0) changed()
+        android.util.Log.i(TAG, "UNHIDE ${r.name()} inside=$inside n=$n")
+        return n
+    }
+
+    /** s30 [Data ▸ Freeze here]: the rows above and the columns left of the selected cell stay (B2 → row 1 and column A); at A1 it unfreezes. */
+    fun freezeHere(): Pair<Int, Int> {
+        if (isCsv) return 0 to 0
+        mark(""); book.setFreeze(sheet, row, col); changed()
+        android.util.Log.i(TAG, "FREEZE here ${io.embodit.spatialoffice.core.xlsx.A1.name(row, col)} -> rows=${book.frozenRows(sheet)} cols=${book.frozenCols(sheet)}")
+        return book.frozenRows(sheet) to book.frozenCols(sheet)
+    }
+    fun unfreeze() { if (isCsv) return; mark(""); book.setFreeze(sheet, 0, 0); changed() }
+    val frozenCols: Int get() = if (isCsv) 0 else book.frozenCols(sheet)
+
+    /**
+     * s31 [Data ▸ Sort…]: the block [rect] sorted by [keys] (column, ascending) in order; with [header] its first row
+     * stays on top. False (nothing changed) when the sort would break formulas or merged cells.
+     */
+    fun sortBy(rect: io.embodit.spatialoffice.core.xlsx.CellRect, keys: List<Pair<Int, Boolean>>, header: Boolean): Boolean {
+        if (keys.isEmpty()) return false
+        val first = rect.r1 + if (header) 1 else 0
+        if (rect.r2 <= first) return false
+        mark("")
+        val ok = book.sortRowsBy(sheet, keys, first, rect.r2)
+        android.util.Log.i(TAG, "SORT ${rect.name()} header=$header keys=${keys.map { io.embodit.spatialoffice.core.xlsx.A1.colName(it.first) + if (it.second) "↑" else "↓" }} ok=$ok")
+        if (ok) { csvEdits++; changed() }
+        return ok
+    }
+
+    /** s31: the block the sort dialog works on: the selection when it is a range, else the data around the selected cell. */
+    fun sortBlock(): io.embodit.spatialoffice.core.xlsx.CellRect? {
+        if (isRange) return selection
+        val b = book
+        fun filled(r: Int, c: Int) = r >= 0 && c >= 0 && b.cell(sheet, r, c).input.isNotEmpty()
+        if (!filled(row, col)) return null
+        var r0 = row; var r1 = row; var c0 = col; var c1 = col
+        var grew = true
+        while (grew) {
+            grew = false
+            if (r0 > 0 && (c0..c1).any { filled(r0 - 1, it) }) { r0--; grew = true }
+            if ((c0..c1).any { filled(r1 + 1, it) }) { r1++; grew = true }
+            if (c0 > 0 && (r0..r1).any { filled(it, c0 - 1) }) { c0--; grew = true }
+            if ((r0..r1).any { filled(it, c1 + 1) }) { c1++; grew = true }
+            if (r1 - r0 > 5000 || c1 - c0 > 60) break
+        }
+        return io.embodit.spatialoffice.core.xlsx.CellRect(r0, c0, r1, c1)
+    }
+
+    /** s31: whether the block's first row reads as headings (the sort dialog's [My data has headers] starts from this). */
+    fun blockHasHeader(rect: io.embodit.spatialoffice.core.xlsx.CellRect): Boolean =
+        io.embodit.spatialoffice.core.xlsx.SortPlan.looksLikeHeader((rect.c1..rect.c2).map { book.cell(sheet, rect.r1, it) }, (rect.c1..rect.c2).map { book.cell(sheet, rect.r1 + 1, it) })
 
     // formats act on the whole selection (s17: "fill + bold on B2:D5 reads back on 12 cells")
     fun setBold(bold: Boolean) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setBold(sheet, r, c, bold) }; changed() }
@@ -1025,7 +1272,7 @@ class SheetSession(ref: FileRef, kind: FileKind, bytes: ByteArray) : Session(ref
     fun deleteColumn() { mark(""); book.deleteColumn(sheet, col); csvEdits++; changed() }
     fun toggleFreeze(): Boolean {
         if (isCsv) return false
-        mark(""); val on = book.frozenRows(sheet) == 0; book.setFrozenRows(sheet, if (on) 1 else 0); changed(); return on
+        mark(""); val on = book.frozenRows(sheet) == 0 && book.frozenCols(sheet) == 0; book.setFreeze(sheet, if (on) 1 else 0, 0); changed(); return on
     }
     val frozen: Int get() = if (isCsv) 0 else book.frozenRows(sheet)
     fun setFmt(fmt: NumFmt) { if (isCsv) return; mark(""); eachSelected { r, c -> book.setFmt(sheet, r, c, fmt) }; changed() }
@@ -1090,6 +1337,9 @@ class SheetSession(ref: FileRef, kind: FileKind, bytes: ByteArray) : Session(ref
  * A line break inside a slide paragraph (PowerPoint's Shift+Enter, `a:br`) in the text a slide box is edited as;
  * "\n" there always starts a new paragraph. The slides editor shows it as a new line.
  */
+/** p25: a dragged slide object snaps to lines within 1/[SNAP_PART] of the slide width. */
+const val SNAP_PART = 120L
+
 const val SOFT_BREAK = ' '
 
 /** An object copied on a slide, with the deck it belongs to (pasting is for the same file: the copy points at its pictures). */
@@ -1275,10 +1525,20 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
     /** Shape picked on the current slide (−1 = none); the object tools act on it. */
     var selected by mutableIntStateOf(-1)
 
+    /** Objects added with [Object ▸ Add to selection] (or Shift+click) on the current slide; with the picked one, what align / group act on. */
+    var multi by mutableStateOf<List<Int>>(emptyList())
+        private set
+
+    /** The slide [multi] belongs to (another slide shown empties it). */
+    private var multiSlide = 0
+
     override fun counted() {
         slideCount = deck.slides.size
         current = current.coerceIn(0, (slideCount - 1).coerceAtLeast(0))
-        if (deck.slides.getOrNull(current)?.shapes?.none { it.id == selected } != false) selected = -1
+        val shapes = deck.slides.getOrNull(current)?.shapes
+        if (shapes?.none { it.id == selected } != false) selected = -1
+        if (multi.isNotEmpty() && (multiSlide != current || shapes == null || multi.any { id -> shapes.none { it.id == id } })) multi = multi.filter { id -> multiSlide == current && shapes?.any { it.id == id } == true }
+        multiSlide = current
     }
 
     init { counted() }
@@ -1348,11 +1608,100 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
         return true
     }
 
-    /** The pointer has travelled [dx], [dy] EMU since the press: the object follows. */
+    /** The pointer has travelled [dx], [dy] EMU since the press: the object follows, snapping to the edges and centres of the others and of the slide (p25). */
     fun moveBoxBy(dx: Long, dy: Long) {
         val (id, _) = dragBox ?: return
         val start = dragStart ?: return
-        dragBox = id to io.embodit.spatialoffice.core.layout.BoxDrag.move(start, dx, dy, deck.widthEmu, deck.heightEmu)
+        val free = io.embodit.spatialoffice.core.layout.BoxDrag.move(start, dx, dy, deck.widthEmu, deck.heightEmu)
+        val others = deck.slides.getOrNull(current)?.shapes?.filter { it.id != id && it.w > 0 && it.h > 0 }?.map { io.embodit.spatialoffice.core.layout.UnitBox(it.x, it.y, it.w, it.h) } ?: emptyList()
+        val snapped = if (!snap) io.embodit.spatialoffice.core.layout.Arrange.Snapped(free, emptyList()) else io.embodit.spatialoffice.core.layout.Arrange.snap(free, others, deck.widthEmu, deck.heightEmu, deck.widthEmu / SNAP_PART)
+        dragBox = id to snapped.box
+        if (snapped.guides != guides) guides = snapped.guides
+    }
+
+    /** p25: dragging snaps to guide lines (on; the travel-exact drag tests turn it off). */
+    var snap = true
+
+    /** p25: the guide lines a dragged object has snapped to (drawn as thin lines while the pointer is down). */
+    var guides by mutableStateOf<List<io.embodit.spatialoffice.core.layout.Arrange.Guide>>(emptyList())
+        private set
+
+    // ---- v0.6.0 (M4 p29 / p25): several objects picked, groups, align and distribute
+
+    /** The objects the multi-object tools act on: [multi] plus the picked one, in drawing order. */
+    fun multiSet(): List<Int> {
+        val shapes = deck.slides.getOrNull(current)?.shapes ?: return emptyList()
+        val want = (multi + listOfNotNull(selected.takeIf { it >= 0 })).toSet()
+        return shapes.filter { it.id in want }.map { it.id }
+    }
+
+    /** [Object ▸ Add to selection]: the picked object joins (Shift+click on one toggles it). */
+    fun addToMulti(id: Int = selected): Boolean {
+        if (id < 0 || deck.slides.getOrNull(current)?.shapes?.none { it.id == id } != false) return false
+        multi = if (id in multi) multi else multi + id
+        android.util.Log.i(TAG, "MULTI add $id -> ${multiSet()}")
+        return true
+    }
+    fun toggleMulti(id: Int) {
+        multi = if (id in multi) multi - id else multi + id
+        if (selected < 0 || selected == id && id !in multi) selected = multi.lastOrNull() ?: -1
+        android.util.Log.i(TAG, "MULTI toggle $id -> ${multiSet()}")
+    }
+    fun clearMulti() { if (multi.isNotEmpty()) { multi = emptyList(); android.util.Log.i(TAG, "MULTI clear") } }
+
+    private fun boxesOf(ids: List<Int>): List<Pair<Int, io.embodit.spatialoffice.core.layout.UnitBox>> {
+        val shapes = deck.slides.getOrNull(current)?.shapes ?: return emptyList()
+        return ids.mapNotNull { id -> shapes.firstOrNull { it.id == id }?.let { id to io.embodit.spatialoffice.core.layout.UnitBox(it.x, it.y, it.w, it.h) } }
+    }
+
+    private fun applyBoxes(what: String, moved: List<Pair<Int, io.embodit.spatialoffice.core.layout.UnitBox>>, old: List<Pair<Int, io.embodit.spatialoffice.core.layout.UnitBox>>): Boolean {
+        val changes = moved.filterIndexed { i, (_, b) -> b != old[i].second }
+        if (changes.isEmpty()) { android.util.Log.i(TAG, "ARRANGE $what: nothing moves"); return false }
+        val before = runCatching { serialize() }.getOrNull() ?: return false
+        var ok = true
+        for ((id, b) in changes) ok = ok && runCatching { deck.setShapeBox(current, id, b.x, b.y, b.w, b.h) }.isSuccess
+        pushUndo(before); edits++; changed()
+        android.util.Log.i(TAG, "ARRANGE $what ${moved.joinToString { "${it.first}@${it.second.x},${it.second.y}" }} ok=$ok")
+        return ok
+    }
+
+    /** p25 [Object ▸ Align ›] on [multiSet] (at least two). */
+    fun align(how: io.embodit.spatialoffice.core.layout.Arrange.Align): Boolean {
+        val old = boxesOf(multiSet())
+        if (old.size < 2) return false
+        val out = io.embodit.spatialoffice.core.layout.Arrange.align(old.map { it.second }, how)
+        return applyBoxes("align $how", old.mapIndexed { i, (id, _) -> id to out[i] }, old)
+    }
+
+    /** p25 [Object ▸ Distribute ›] on [multiSet] (at least three). */
+    fun distribute(horizontal: Boolean): Boolean {
+        val old = boxesOf(multiSet())
+        if (old.size < 3) return false
+        val out = io.embodit.spatialoffice.core.layout.Arrange.distribute(old.map { it.second }, horizontal)
+        return applyBoxes("distribute ${if (horizontal) "across" else "down"}", old.mapIndexed { i, (id, _) -> id to out[i] }, old)
+    }
+
+    /** p29 [Object ▸ Group]: [multiSet] (at least two) becomes one group, picked at once. */
+    fun group(): Int {
+        val ids = multiSet()
+        if (ids.size < 2) return -1
+        val before = runCatching { serialize() }.getOrNull() ?: return -1
+        val gid = runCatching { deck.groupShapes(current, ids) }.onFailure { android.util.Log.w(TAG, "GROUP refused: ${it.message}") }.getOrNull() ?: return -1
+        pushUndo(before); edits++; changed()
+        multi = emptyList(); selected = gid
+        android.util.Log.i(TAG, "GROUP slide=$current ids=$ids -> $gid")
+        return gid
+    }
+
+    /** p29 [Object ▸ Ungroup] on the picked group: its objects are picked together afterwards. */
+    fun ungroup(): Boolean {
+        val g = pickedShape()?.takeIf { it.children != null } ?: return false
+        val before = runCatching { serialize() }.getOrNull() ?: return false
+        val ids = runCatching { deck.ungroupShape(current, g.id) }.onFailure { android.util.Log.w(TAG, "UNGROUP refused: ${it.message}") }.getOrNull() ?: return false
+        pushUndo(before); edits++; changed()
+        multi = ids.dropLast(1); selected = ids.lastOrNull() ?: -1
+        android.util.Log.i(TAG, "UNGROUP slide=$current $g.id -> $ids")
+        return true
     }
 
     /** A corner has travelled [dx], [dy] EMU since the press: the opposite corner stays; pictures keep their proportions. */
@@ -1368,6 +1717,8 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
         val (id, box) = dragBox ?: return false
         val start = dragStart
         dragBox = null; dragStart = null
+        if (guides.isNotEmpty()) android.util.Log.i(TAG, "SNAP shape $id guides=$guides")
+        guides = emptyList()
         if (start == null || box == start) return false
         mark("")
         val ok = runCatching { deck.setShapeBox(current, id, box.x, box.y, box.w, box.h) }
@@ -1376,7 +1727,7 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
         return ok
     }
 
-    fun cancelBoxDrag() { dragBox = null; dragStart = null }
+    fun cancelBoxDrag() { dragBox = null; dragStart = null; guides = emptyList() }
 
     /** A 3 × 3 (or [rows] × [cols]) table in the middle of the slide; it is picked at once (D57). */
     fun addTable(rows: Int = 3, cols: Int = 3) {

@@ -28,6 +28,8 @@ class ArcRing {
      * somewhere unknown) is left out of the bookkeeping.
      */
     fun place(key: String, hub: String? = null, live: (String) -> Boolean = { true }): Pair<String, String>? {
+        // v0.6.0 (K1): a window coming back after the Stage takes the place [replan] gave it
+        plan.remove(key)?.let { return it }
         row.removeAll { it == key || !live(it) }
         if (center != null && center !in row) center = row.getOrNull(row.size / 2)
         if (hub != null && hub != key && row.isEmpty() && live(hub)) { row.add(hub); center = hub }
@@ -48,7 +50,48 @@ class ArcRing {
         if (center == key) center = row.getOrNull(row.size / 2)
     }
 
-    fun clear() { row.clear(); center = null }
+    fun clear() { row.clear(); center = null; plan.clear() }
+
+    /** Places promised by [replan] to windows that are still to open again (key → anchor, side). */
+    private val plan = LinkedHashMap<String, Pair<String, String>>()
+
+    /**
+     * v0.6.0 (K1, QA #15): the windows closed for the Stage come back around [hub] (the home window, which the system
+     * puts in front of the user). Each keeps the side of the hub it stood on before (v0.5.2 put them back in the
+     * order they opened, so the sheet and the document changed sides), and [first] (the file just rehearsed / spread
+     * out) takes the place right next to the hub on its side, the nearest one to the front. Windows of [before] that
+     * are not in [reopen] are left out. Returns the order to open them in (each one's anchor opens before it); the
+     * places are given by [place] as they open.
+     */
+    fun replan(before: List<String>, hub: String, reopen: List<String>, first: String?): List<Pair<String, Pair<String, String>>> {
+        val want = reopen.toSet()
+        val h = before.indexOf(hub)
+        val left = ArrayList<String>(); val right = ArrayList<String>()
+        if (h >= 0) {
+            for (i in h - 1 downTo 0) before[i].takeIf { it in want }?.let { left.add(it) }
+            for (i in h + 1 until before.size) before[i].takeIf { it in want }?.let { right.add(it) }
+        } else {
+            // the hub was not in the row: alternate right / left in the row's order
+            before.filter { it in want }.forEachIndexed { i, k -> if (i % 2 == 0) right.add(k) else left.add(k) }
+        }
+        for (k in reopen) if (k !in left && k !in right) (if (right.size <= left.size) right else left).add(k)
+        if (first != null && first in want) {
+            val onLeft = first in left
+            left.remove(first); right.remove(first)
+            if (onLeft) left.add(0, first) else right.add(0, first)
+        }
+        val out = ArrayList<Pair<String, Pair<String, String>>>()
+        fun take(side: List<String>, i: Int, name: String) { side.getOrNull(i)?.let { k -> out.add(k to ((if (i == 0) hub else side[i - 1]) to name)) } }
+        // the first window first, then outwards, right and left in turn
+        if (first != null && first in want) { if (left.firstOrNull() == first) take(left, 0, "left") else take(right, 0, "right") }
+        for (i in 0 until maxOf(left.size, right.size)) {
+            if (right.getOrNull(i) != first) take(right, i, "right")
+            if (left.getOrNull(i) != first) take(left, i, "left")
+        }
+        row.clear(); row.addAll(left.reversed()); row.add(hub); row.addAll(right); center = hub
+        plan.clear(); for ((k, p) in out) plan[k] = p
+        return out
+    }
 
     /** Slot of [key] counted from the first window: 0 centre, +1 first to the right, −1 first to the left, … */
     fun slot(key: String): Int? {

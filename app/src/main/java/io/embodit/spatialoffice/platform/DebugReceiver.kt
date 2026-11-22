@@ -117,7 +117,7 @@ object DebugReceiver {
             "bold" -> g.sheet?.setBold(arg != "0")
             "freeze" -> g.sheet?.toggleFreeze()
             "filter" -> g.sheet?.let { io.embodit.spatialoffice.ui.sheet.sheetFilter(g, it) }
-            "filter-clear" -> g.sheet?.let { it.filterCol = -1; it.filterValue = null }
+            "filter-clear" -> g.sheet?.applyFilter(null)
             "sort" -> g.sheet?.sortByColumn(arg != "desc")
             "row-ins" -> g.sheet?.insertRowBelow()
             "row-del" -> g.sheet?.deleteRow()
@@ -373,6 +373,59 @@ object DebugReceiver {
             "obj-rotby" -> g.deck?.rotateBy(arg.toInt())
             "rotdrag" -> g.deck?.let { d -> if (d.beginRotate(d.selected)) { d.rotateTo(io.embodit.spatialoffice.core.layout.Rotation.snap(arg.toFloat())); Log.i(TAG, "ROTATE debug ${d.selected} -> ${d.dragRot} changed=${d.endRotate()}") } }
             "dump" -> {}
+            // ---- v0.6.0 (M4): every command calls the same session function as its menu entry / dialog button
+            "new-tpl" -> io.embodit.spatialoffice.core.templates.DocTemplate.values().firstOrNull { it.name.equals(arg, true) }?.let { g.newFile(FileKind.DOC, it) }
+                ?: io.embodit.spatialoffice.core.templates.DeckTemplate.values().firstOrNull { it.name.equals(arg, true) }?.let { g.newFile(FileKind.SLIDES, it) }
+            "filter-dialog" -> g.sheet?.let { s -> g.show(s, Overlay.FilterData(Win.SHEET, s.col)) }
+            "sort-dialog" -> g.sheet?.let { s -> g.show(s, Overlay.SortData(Win.SHEET)) }
+            "filter-rule" -> g.sheet?.let { s -> // filter-rule <col> <values|gt|lt|ge|le|contains> <text | v1|v2…>
+                val p = arg.split(" ", limit = 3)
+                val col = A1.parse(p[0] + "1")?.second ?: return@let
+                val op = io.embodit.spatialoffice.core.xlsx.FilterRule.Op.valueOf(p[1].uppercase())
+                val v = p.getOrElse(2) { "" }
+                s.applyFilter(if (op == io.embodit.spatialoffice.core.xlsx.FilterRule.Op.VALUES) io.embodit.spatialoffice.core.xlsx.FilterRule(col, op, values = v.split("|").toSet()) else io.embodit.spatialoffice.core.xlsx.FilterRule(col, op, v))
+            }
+            "sort-by" -> g.sheet?.let { s -> // sort-by A:asc,C:desc [header 1|0]  (the block around the selection, as the dialog)
+                val p = arg.split(" ")
+                val keys = p[0].split(",").mapNotNull { k -> val (c, d) = k.split(":"); A1.parse(c + "1")?.second?.let { it to (d != "desc") } }
+                val block = s.sortBlock() ?: return@let
+                s.sortBy(block, keys, p.getOrNull(1)?.let { it == "1" } ?: s.blockHasHeader(block))
+            }
+            "freeze-here" -> g.sheet?.freezeHere()
+            "unfreeze" -> g.sheet?.unfreeze()
+            "hide" -> g.sheet?.hide(cols = arg.trim() == "cols")
+            "unhide" -> g.sheet?.unhide()
+            "outline" -> g.doc?.let { d -> g.show(d, Overlay.Outline(Win.DOC)) }
+            "outline-go" -> g.doc?.let { d -> d.outline().firstOrNull { it.text.contains(arg) }?.let { d.jumpTo(it.id) } }
+            "doc-xsel" -> g.doc?.let { d -> // doc-xsel <i>:<off>-<j>:<off> (i, j = editable paragraph indexes)
+                val paras = d.blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }
+                val (a, b) = arg.split("-").map { it.split(":").map { n -> n.toInt() } }
+                d.crossSel = DocSel(paras[a[0]].id, a[1], paras[b[0]].id, b[1])
+                Log.i(TAG, "DOCSEL debug ${d.crossSel} parts=${d.selectedParts().map { "${it.first.id}:${it.second}..${it.third}" }}")
+            }
+            "doc-copy", "doc-cut" -> g.doc?.let { d ->
+                val clip = d.copyCross() ?: return@let
+                runCatching { (g.app.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("text", clip.text)) }
+                if (cmd == "doc-cut") d.deleteCross()
+            }
+            "doc-paste" -> g.doc?.let { d -> // doc-paste <i> <offset|end>: Ctrl+V with the caret there
+                val p = arg.split(" ")
+                val para = d.blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }.let { l -> if (p[0] == "last") l.last() else l[p[0].toInt()] }
+                val len = RichText.text(para.spans).length
+                val at = p.getOrNull(1)?.let { if (it == "end") len else it.toInt() } ?: len
+                DocSession.docClip?.let { d.pasteClip(it, para.id, at, at) }
+            }
+            "multi-add" -> g.deck?.let { d -> if (arg.isNotEmpty()) d.selected = arg.toInt(); d.addToMulti() }
+            "multi-clear" -> g.deck?.clearMulti()
+            "align" -> g.deck?.align(io.embodit.spatialoffice.core.layout.Arrange.Align.valueOf(arg.uppercase()))
+            "distribute" -> g.deck?.distribute(arg.trim() != "v")
+            "group" -> g.deck?.group()
+            "ungroup" -> g.deck?.ungroup()
+            "rehearse-first" -> g.rehearse(fromStart = true)
+            "rh-go" -> g.rehearsalGo(arg.toInt())
+            "rh-black" -> g.toggleBlack()
+            "rh-picker" -> g.rehearsalPicking = arg != "0"
+            "rh-type" -> g.rehearsalTyped = arg
             // v0.2.4 (q4-1): longest main-thread frame gap over <arg> seconds (baseline of the emulator's own load)
             "mainwatch" -> { val w = io.embodit.spatialoffice.ui.chart.MainWatch("baseline"); w.start(); android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ w.stop() }, (arg?.toLongOrNull() ?: 10L) * 1000) }
             else -> Log.w(TAG, "DEBUG unknown command $cmd")

@@ -72,6 +72,9 @@ fun SharedOverlays(graph: Graph, win: Win, tag: String? = null) {
         is Overlay.SheetRename -> (s as? SheetSession)?.let { SheetRenameSheet(graph, it) }
         is Overlay.SheetDelete -> (s as? SheetSession)?.let { SheetDeleteDialog(graph, it) }
         is Overlay.WordCount -> (s as? DocSession)?.let { WordCountDialog(graph, it) }
+        is Overlay.FilterData -> (s as? SheetSession)?.let { FilterSheet(graph, it, o.col) }
+        is Overlay.SortData -> (s as? SheetSession)?.let { SortSheet(graph, it) }
+        is Overlay.Outline -> (s as? DocSession)?.let { OutlineSheet(graph, it) }
         is Overlay.InsertTable -> (s as? DocSession)?.let { InsertTableDialog(graph, it) }
         is Overlay.Link -> (s as? DocSession)?.let { LinkSheet(graph, it, o) }
         is Overlay.ImagePick -> ImagePickSheet(graph, win)

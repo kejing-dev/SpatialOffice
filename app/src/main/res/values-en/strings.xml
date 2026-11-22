@@ -659,4 +659,82 @@
     <string name="zoom_fit_width" formatted="false">Fit width Ctrl+0</string>
     <string name="zoom_100" formatted="false">100% Ctrl+0</string>
     <string name="zoom_fit_window" formatted="false">Fit window Ctrl+0</string>
+    <string name="fn_tab" formatted="false">Tab to complete</string>
+    <string name="data_sort" formatted="false">Sort…</string>
+    <string name="data_filter">Filter column %1$s…</string>
+    <string name="freeze_here">Freeze at %1$s</string>
+    <string name="frozen_at">Froze %1$d rows above and %2$d columns left</string>
+    <string name="freeze_off" formatted="false">Unfreeze</string>
+    <string name="hide_rows" formatted="false">Hide rows</string>
+    <string name="hide_cols" formatted="false">Hide columns</string>
+    <string name="unhide" formatted="false">Unhide</string>
+    <string name="hidden_now">Hid %1$s</string>
+    <string name="unhidden_n">Showed %1$d hidden rows or columns</string>
+    <string name="filter_title">Filter column %1$s “%2$s”</string>
+    <string name="filter_need_number" formatted="false">Type a number here, like 1000</string>
+    <string name="filter_shown">%1$d rows will show</string>
+    <string name="filter_apply" formatted="false">Filter</string>
+    <string name="filter_rule_on">Column %1$s %2$s: %3$d rows shown</string>
+    <string name="filter_values_word" formatted="false">values</string>
+    <string name="filter_op_values" formatted="false">Pick values</string>
+    <string name="filter_op_gt" formatted="false">Greater than</string>
+    <string name="filter_op_lt" formatted="false">Less than</string>
+    <string name="filter_op_contains" formatted="false">Contains</string>
+    <string name="filter_all" formatted="false">All</string>
+    <string name="filter_none" formatted="false">None</string>
+    <string name="filter_number" formatted="false">Number</string>
+    <string name="filter_text" formatted="false">Text</string>
+    <string name="sort_no_block" formatted="false">Pick a cell in the data first, then sort</string>
+    <string name="sort_title">Sort %1$s</string>
+    <string name="sort_header" formatted="false">My data has headers</string>
+    <string name="sort_add" formatted="false">Add a level</string>
+    <string name="sort_ok" formatted="false">Sort</string>
+    <string name="sorted_by">Sorted by %1$s</string>
+    <string name="sort_by" formatted="false">Sort by</string>
+    <string name="sort_then" formatted="false">Then by</string>
+    <string name="sort_up" formatted="false">Ascending</string>
+    <string name="sort_down" formatted="false">Descending</string>
+    <string name="sort_remove" formatted="false">Remove</string>
+    <string name="outline" formatted="false">Outline</string>
+    <string name="outline_empty" formatted="false">No headings yet. Paragraphs set to Heading 1–3 show up here</string>
+    <string name="doc_copied_n">Copied %1$d paragraphs with their formats</string>
+    <string name="doc_cut_n">Cut %1$d paragraphs with their formats</string>
+    <string name="doc_pasted_n">Pasted %1$d paragraphs</string>
+    <string name="multi_hint">%1$d objects picked · Align and Group are under [Object]</string>
+    <string name="rehearse_first" formatted="false">Rehearse from slide 1</string>
+    <string name="obj_need">Pick at least %1$d objects first</string>
+    <string name="obj_arrange_none" formatted="false">Already lined up, nothing to move</string>
+    <string name="obj_multi_add">Add to selection (%1$d picked)</string>
+    <string name="obj_align" formatted="false">Align</string>
+    <string name="align_obj_left" formatted="false">Align left</string>
+    <string name="align_obj_center" formatted="false">Align centres</string>
+    <string name="align_obj_right" formatted="false">Align right</string>
+    <string name="align_obj_top" formatted="false">Align top</string>
+    <string name="align_obj_middle" formatted="false">Align middles</string>
+    <string name="align_obj_bottom" formatted="false">Align bottom</string>
+    <string name="obj_distribute" formatted="false">Distribute</string>
+    <string name="dist_h" formatted="false">Space evenly across</string>
+    <string name="dist_v" formatted="false">Space evenly down</string>
+    <string name="obj_group">Group (%1$d)</string>
+    <string name="obj_group_refused" formatted="false">These objects cannot be grouped</string>
+    <string name="obj_ungroup" formatted="false">Ungroup</string>
+    <string name="obj_multi_clear" formatted="false">Clear selection</string>
+    <string name="rh_goto" formatted="false">Go to…</string>
+    <string name="rh_goto_label" formatted="false">Go to slide</string>
+    <string name="rh_pick_back" formatted="false">Back</string>
+    <string name="rh_typed">Slide %1$s ⏎</string>
+    <string name="rh_black" formatted="false">Black screen</string>
+    <string name="rh_unblack" formatted="false">Show slide</string>
+    <string name="back_hint_right">“%1$s”, just shown, is to the right of this window. Turn your head right to see it</string>
+    <string name="back_hint_left">“%1$s”, just shown, is to the left of this window. Turn your head left to see it</string>
+    <string name="back_hint_ok" formatted="false">Got it</string>
+    <string name="tpl_group" formatted="false">Start from a template</string>
+    <string name="tpl_meeting" formatted="false">Meeting notes</string>
+    <string name="tpl_weekly" formatted="false">Weekly report</string>
+    <string name="tpl_proposal" formatted="false">Proposal</string>
+    <string name="tpl_resume" formatted="false">Résumé</string>
+    <string name="tpl_report" formatted="false">Work report</string>
+    <string name="tpl_pitch" formatted="false">Product pitch</string>
+    <string name="tpl_dark" formatted="false">Minimal dark</string>
+    <string name="hide_menu" formatted="false">Hide</string>
 </resources>

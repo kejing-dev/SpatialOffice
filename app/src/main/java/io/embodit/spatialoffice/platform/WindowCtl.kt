@@ -93,6 +93,8 @@ class WindowCtl(private val graph: Graph) {
     private val seen = HashMap<WinRef, Triple<Boolean, Boolean, Boolean>>()
     fun seen(ref: WinRef, focused: Boolean, onstage: Boolean, sighted: Boolean) {
         seen[ref] = Triple(focused, onstage, sighted)
+        // K1: the user got to the window the home window pointed at
+        if (focused && ref.tag == graph.backHint?.tag && SystemClock.elapsedRealtime() - (graph.backHint?.at ?: 0L) > 3000) { Log.i(TAG, "BACKHINT done: $ref has the focus"); graph.backHint = null }
         Log.i(TAG, "WINDOW $ref focused=$focused onstage=$onstage sighted=$sighted")
         BackKeys.sweepSoon("window $ref") // v0.4.2: its toolbar / ornament windows attach after the activity resumes
     }
@@ -445,11 +447,21 @@ class WindowCtl(private val graph: Graph) {
      */
     fun stageClosed(back: WinRef?) {
         val chartWas = chart in closedForStage
-        val chartSheet = if (chartWas) chartSheetRef() else null
-        val editors = closedForStage.filter { it.editor }
-        val order = (editors.filter { it != back && it != chartSheet } + listOfNotNull(back?.takeIf { it != chartSheet }, chartSheet) + if (chartWas) listOf(chart) else emptyList())
-            .filter { it.win == Win.CHART || graph.sessionByTag(it.tag) != null }
-        Log.i(TAG, "STAGE closed, reopening windows closed=$closedForStage back=$back order=$order")
+        val editors = closedForStage.filter { it.editor && graph.sessionByTag(it.tag) != null }
+        // v0.6.0 (K1, QA #15): the windows come back on the sides of the home window they stood on, and the file just
+        // rehearsed / spread out takes the place next to the home window (ArcRing.replan); before, they came back in
+        // the order they had opened (sheet and document changed sides) and the rehearsed one ended up ~126° away.
+        val before = ring.order
+        val plan = if (Placing.mode == "arc") ring.replan(before, Containers.HOME, editors.map { Containers.key(it) }, back?.let { Containers.key(it) }) else emptyList()
+        val byKey = editors.associateBy { Containers.key(it) }
+        val ordered = if (plan.isNotEmpty()) plan.mapNotNull { byKey[it.first] } + editors.filter { e -> plan.none { it.first == Containers.key(e) } } else editors.filter { it != back } + listOfNotNull(back?.takeIf { it in editors })
+        val order = ordered + if (chartWas) listOf(chart) else emptyList()
+        Log.i(TAG, "STAGE closed, reopening windows closed=$closedForStage back=$back order=$order row-before=$before plan=$plan")
+        // the home window says where the window just rehearsed went (it is beside it, not in front of the user)
+        val backPlace = back?.let { b -> plan.firstOrNull { it.first == Containers.key(b) } }
+        val backSession = back?.let { graph.sessionByTag(it.tag) }
+        graph.backHint = if (backPlace != null && backSession != null) Graph.BackHint(back.tag, backSession.ref.name, backPlace.second.second == "right", SystemClock.elapsedRealtime()) else null
+        if (graph.backHint != null) Log.i(TAG, "BACKHINT ${graph.backHint}")
         nav()?.let { reopenHome(it) }
         closedForStage.clear()
         main.postDelayed({

@@ -69,6 +69,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -117,6 +121,116 @@ class DocFocus {
     /** Paragraph that should take focus on the next composition, and where the caret goes (−1 = end). */
     var want by mutableIntStateOf(-1)
     var wantCaret = -1
+    /** v0.6.0 (d23): a drag inside one paragraph selects in it: (paragraph, from, to); [dragTick] bumps on every change. */
+    var dragSel: Triple<Int, Int, Int>? = null
+    var dragTick by mutableIntStateOf(0)
+}
+
+/**
+ * v0.6.0 (d23): where the paragraphs being typed in are on the paper and how their text is laid out, so a drag can
+ * run from the middle of one paragraph to the middle of another (each paragraph is a text field of its own; a
+ * field's own drag stops at its edge).
+ */
+class ParaGeo {
+    val paras = HashMap<Int, Pair<androidx.compose.ui.layout.LayoutCoordinates?, TextLayoutResult?>>()
+    var paper: androidx.compose.ui.layout.LayoutCoordinates? = null
+    fun coords(id: Int, c: androidx.compose.ui.layout.LayoutCoordinates) {
+        paras[id] = c to paras[id]?.second
+        // where each paragraph is in window pixels (for `adb shell input swipe` checks of the drag across paragraphs)
+        val r = runCatching { c.boundsInWindow() }.getOrNull() ?: return
+        val line = "${r.left.toInt()},${r.top.toInt()} ${r.width.toInt()}x${r.height.toInt()}"
+        if (logged[id] != line) { logged[id] = line; android.util.Log.i(io.embodit.spatialoffice.platform.TAG, "DOCGEO para=$id $line") }
+    }
+    private val logged = HashMap<Int, String>()
+    fun layout(id: Int, l: TextLayoutResult) { paras[id] = paras[id]?.first to l }
+
+    /** The paragraph under (or nearest above / below) [pos] on the paper and the character offset there. */
+    fun hit(pos: androidx.compose.ui.geometry.Offset): Pair<Int, Int>? {
+        val p = paper?.takeIf { it.isAttached } ?: return null
+        var best: Triple<Int, Float, androidx.compose.ui.geometry.Offset>? = null
+        for ((id, pair) in paras) {
+            val c = pair.first?.takeIf { it.isAttached } ?: continue
+            if (pair.second == null) continue
+            val o = p.localPositionOf(c, androidx.compose.ui.geometry.Offset.Zero)
+            val top = o.y; val bottom = o.y + c.size.height
+            val d = if (pos.y < top) top - pos.y else if (pos.y > bottom) pos.y - bottom else 0f
+            if (best == null || d < best.second) best = Triple(id, d, pos - o)
+        }
+        val (id, _, local) = best ?: return null
+        val l = paras[id]?.second ?: return null
+        val x = local.x.coerceIn(0f, l.size.width.toFloat())
+        val y = local.y.coerceIn(0f, (l.size.height - 1).toFloat().coerceAtLeast(0f))
+        return id to l.getOffsetForPosition(androidx.compose.ui.geometry.Offset(x, y))
+    }
+}
+
+val LocalParaGeo = androidx.compose.runtime.staticCompositionLocalOf<ParaGeo?> { null }
+
+/** d23: the characters of a paragraph inside the selection across paragraphs, on a light blue ground. */
+fun crossMarked(t: AnnotatedString, r: Pair<Int, Int>?): AnnotatedString {
+    if (r == null || r.second <= r.first || r.first >= t.length) return t
+    return AnnotatedString.Builder(t).apply { addStyle(androidx.compose.ui.text.SpanStyle(background = Ink.SelectFill), r.first, minOf(r.second, t.length)) }.toAnnotatedString()
+}
+
+/** d23: [text] on the system clipboard (plain text; the formats stay in [DocSession.docClip]). */
+fun putClipboard(graph: Graph, text: String) {
+    runCatching {
+        val cm = graph.app.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("text", text))
+    }.onFailure { android.util.Log.w(io.embodit.spatialoffice.platform.TAG, "CLIP set failed: $it") }
+}
+
+private fun clipboardText(graph: Graph): String? = runCatching {
+    val cm = graph.app.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+    cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(graph.app)?.toString()
+}.getOrNull()
+
+/**
+ * d23 Ctrl+C / Ctrl+X / [More ▸ Copy / Cut]: a selection across paragraphs is copied with its formats (and cut);
+ * characters of one paragraph are kept with their formats too. [fromKey]: the key path, where a paragraph's own text
+ * field copies / cuts plain text itself (false is returned so it does). True when handled here.
+ */
+fun docCopy(graph: Graph, s: DocSession, focus: DocFocus, cut: Boolean, fromKey: Boolean): Boolean {
+    if (s.crossSel != null) {
+        val clip = s.copyCross() ?: return false
+        putClipboard(graph, clip.text)
+        if (cut && !s.readOnly) s.deleteCross()?.let { (id, at) -> focus.want = id; focus.wantCaret = at }
+        graph.say(s, graph.str(if (cut) R.string.doc_cut_n else R.string.doc_copied_n, clip.paras.size))
+        return true
+    }
+    val p = focused(s, focus) ?: return false
+    val a = focus.selection.min; val b = focus.selection.max
+    if (b <= a) return false
+    val clip = s.copyRange(p.id, a, b) ?: return false
+    if (fromKey) return false
+    putClipboard(graph, clip.text)
+    if (cut && p.editable && !s.readOnly) {
+        s.setParagraph(p.id, DocSession.cutSpans(p.spans, 0, a) + DocSession.cutSpans(p.spans, b, Int.MAX_VALUE), p.style)
+        focus.want = p.id; focus.wantCaret = a
+    }
+    return true
+}
+
+/**
+ * d23 Ctrl+V / [More ▸ Paste]: what was copied here goes in with its formats (paragraph styles and list levels kept)
+ * when the clipboard still holds its text; other text from the clipboard goes in as plain paragraphs.
+ */
+fun docPaste(graph: Graph, s: DocSession, focus: DocFocus, fromKey: Boolean): Boolean {
+    if (s.readOnly) return false
+    val sys = clipboardText(graph)
+    val own = DocSession.docClip?.takeIf { sys == null || sys == it.text }
+    // a key with only outside text and no selection across paragraphs: the paragraph's own field pastes it
+    if (own == null && fromKey && s.crossSel == null) return false
+    val clip = own ?: sys?.takeIf { it.isNotEmpty() }?.let { t -> io.embodit.spatialoffice.platform.DocClip(t.replace("\r\n", "\n").split('\n').map { io.embodit.spatialoffice.platform.DocClipPara(listOf(Span(it)), ParaStyle.BODY, 0) }, t) } ?: return false
+    var target = focused(s, focus)?.takeIf { it.editable }
+    var a = focus.selection.min; var b = focus.selection.max
+    if (s.crossSel != null) s.deleteCross()?.let { (id, at) -> target = s.blocks().firstOrNull { it.id == id } as? UiBlock.Para; a = at; b = at }
+    val p = target ?: (s.blocks().lastOrNull { it is UiBlock.Para && it.editable } as? UiBlock.Para) ?: return false
+    if (target == null) { a = RichText.text(p.spans).length; b = a }
+    val caret = s.pasteClip(clip, p.id, a, b) ?: return false
+    focus.want = caret.first; focus.wantCaret = caret.second
+    graph.say(s, graph.str(R.string.doc_pasted_n, clip.paras.size))
+    return true
 }
 
 fun paraStyle(style: ParaStyle): TextStyle = when (style) {
@@ -262,8 +376,18 @@ fun DocWindow(tag: String? = null) {
 
 private fun docKeys(graph: Graph, s: DocSession, focus: DocFocus, e: androidx.compose.ui.input.key.KeyEvent): Boolean {
     if (commonKeys(graph, s, e)) return true
-    if (e.type != KeyEventType.KeyDown || !e.isCtrlPressed) return false
+    if (e.type != KeyEventType.KeyDown) return false
+    // d23: a selection across paragraphs answers Delete / Backspace (and Esc lets go of it)
+    if (!e.isCtrlPressed && s.crossSel != null) when (e.key) {
+        Key.Delete, Key.Backspace -> { s.deleteCross()?.let { (id, at) -> focus.want = id; focus.wantCaret = at }; return true }
+        Key.Escape -> { s.crossSel = null; return true }
+        else -> {}
+    }
+    if (!e.isCtrlPressed) return false
     when (e.key) {
+        Key.C -> return docCopy(graph, s, focus, cut = false, fromKey = true)
+        Key.X -> return docCopy(graph, s, focus, cut = true, fromKey = true)
+        Key.V -> return docPaste(graph, s, focus, fromKey = true)
         Key.B -> toggle(s, focus, Attr.BOLD)
         Key.I -> toggle(s, focus, Attr.ITALIC)
         Key.U -> toggle(s, focus, Attr.UNDERLINE)
@@ -378,6 +502,48 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
     val all = blocks ?: s.blocks()
     val numbers = listNumbers(all)
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    // d25: a heading picked in the outline comes into view with the caret in it
+    LaunchedEffect(s.scrollTick) {
+        if (s.scrollTick == 0) return@LaunchedEffect
+        val id = s.scrollTarget
+        val i = all.indexOfFirst { it.id == id }
+        if (i >= 0) { runCatching { list.scrollToItem(i) }; if (focus != null) { focus.want = id; focus.wantCaret = 0 } }
+    }
+    // d23: the selection across paragraphs (one paragraph: its own field's selection)
+    val geo = remember(s) { ParaGeo() }
+    val cross = remember(s.crossSel, s.version) { s.selectedParts().associate { it.first.id to (it.second to it.third) } }
+    val crossOn = focus != null && !s.readOnly && blocks == null
+    val crossDrag = if (!crossOn) Modifier else Modifier.pointerInput(s, focus) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+            val start = geo.hit(down.position) ?: return@awaitEachGesture
+            var dragging = false
+            val slop = viewConfiguration.touchSlop
+            while (true) {
+                val ev = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                if (!ch.pressed) {
+                    if (dragging) { ch.consume(); android.util.Log.i(io.embodit.spatialoffice.platform.TAG, "DOCSEL drag ${s.crossSel ?: focus!!.dragSel}") }
+                    else if (s.crossSel != null) s.crossSel = null // a click lets go of it
+                    break
+                }
+                if (!dragging && (ch.position - down.position).getDistance() > slop) dragging = true
+                if (!dragging) continue
+                ch.consume()
+                val cur = geo.hit(ch.position) ?: continue
+                if (cur.first == start.first) {
+                    if (s.crossSel != null) s.crossSel = null
+                    focus!!.dragSel = Triple(start.first, minOf(start.second, cur.second), maxOf(start.second, cur.second)); focus.dragTick++
+                } else {
+                    val sel = io.embodit.spatialoffice.platform.DocSel(start.first, start.second, cur.first, cur.second)
+                    if (sel != s.crossSel) s.crossSel = sel
+                }
+                // near the top / bottom edge the page scrolls on
+                val edge = 48.dp.toPx()
+                if (ch.position.y > size.height - edge) list.dispatchRawDelta(18f) else if (ch.position.y < edge) list.dispatchRawDelta(-18f)
+            }
+        }
+    }
     // a new table takes the caret in its first cell: bring it into view first, so the cell exists to take focus
     val caret = s.tableCaret
     LaunchedEffect(s.tableCaretTick) {
@@ -391,8 +557,11 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
         val i = all.indexOfFirst { it.id == id }
         if (i >= 0) runCatching { list.scrollToItem((i - 1).coerceAtLeast(0) + if (all.isEmpty() && focus != null) 1 else 0) }
     }
+    androidx.compose.runtime.CompositionLocalProvider(LocalParaGeo provides (if (crossOn) geo else null)) {
     LazyColumn(
-        modifier.clip(RoundedCornerShape(12.dp)).background(Ink.Paper).padding(horizontal = 44.dp),
+        modifier.clip(RoundedCornerShape(12.dp)).background(Ink.Paper)
+            .then(if (crossOn) Modifier.onGloballyPositioned { geo.paper = it }.then(crossDrag) else Modifier)
+            .padding(horizontal = 44.dp),
         state = list,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 36.dp),
     ) {
@@ -406,7 +575,7 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
             when (b) {
                 is UiBlock.Para -> when {
                     b.pageBreak -> PageBreakView(s, b, focus != null && b.editable && !s.readOnly)
-                    focus != null && b.editable && !s.readOnly -> ParaEditor(s, b, focus, all, numbers, graph)
+                    focus != null && b.editable && !s.readOnly -> ParaEditor(s, b, focus, all, numbers, graph, cross[b.id])
                     else -> ParaView(b, numbers, s.findHit, graph)
                 }
                 is UiBlock.Table -> TableView(b, if (focus != null && s.richText && !s.readOnly) s else null, s) { onWindowFocus() }
@@ -415,6 +584,7 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
                 is UiBlock.Opaque -> OpaqueView(b)
             }
         }
+    }
     }
 }
 
@@ -466,12 +636,22 @@ private fun LinkChip(graph: Graph, s: DocSession, focus: DocFocus, link: Triple<
 fun annotatedOf(b: UiBlock.Para): AnnotatedString = annotated(b.spans, b.baseSizeHp, paraStyle(b.style).fontSize.value)
 
 @Composable
-private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: List<UiBlock>, numbers: Map<Int, Int>, graph: Graph? = null) {
+private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: List<UiBlock>, numbers: Map<Int, Int>, graph: Graph? = null, cross: Pair<Int, Int>? = null) {
     val requester = remember(b.id) { FocusRequester() }
     var value by remember(b.id) { mutableStateOf(TextFieldValue(annotatedOf(b))) }
     // model changed underneath (format toggle, undo, style): rebuild the styled text, keep the caret
     val text = RichText.text(b.spans)
-    val styled = marked(annotatedOf(b), s.findHit, b.id)
+    val styled = crossMarked(marked(annotatedOf(b), s.findHit, b.id), cross)
+    val geo = LocalParaGeo.current
+    androidx.compose.runtime.DisposableEffect(b.id, geo) { onDispose { geo?.paras?.remove(b.id) } }
+    // d23: a drag inside this paragraph (the paper takes drags so they can cross paragraphs) selects in it
+    LaunchedEffect(focus.dragTick) {
+        val d = focus.dragSel ?: return@LaunchedEffect
+        if (d.first != b.id) return@LaunchedEffect
+        runCatching { requester.requestFocus() }
+        value = value.copy(selection = TextRange(d.second.coerceIn(0, text.length), d.third.coerceIn(0, text.length)))
+        focus.selection = value.selection
+    }
     if (value.annotatedString != styled) {
         // same text: only the styling moved, so the caret and the input method's composing range stay as they are
         value = if (value.text == text) value.copy(annotatedString = styled) else TextFieldValue(styled, TextRange(text.length))
@@ -513,7 +693,9 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
             },
             textStyle = paraTextStyle(b),
             cursorBrush = SolidColor(Ink.Select),
+            onTextLayout = { geo?.layout(b.id, it) },
             modifier = Modifier.weight(1f).heightIn(min = 32.dp).focusRequester(requester).typingTarget()
+                .then(if (geo != null) Modifier.onGloballyPositioned { geo.coords(b.id, it) } else Modifier)
                 .semantics { contentDescription = "paragraph-${b.id}" }
                 .onFocusChanged { if (it.isFocused) { focus.id = b.id; s.caretBlock = b.id; focus.selection = value.selection; s.picked = -1 } }
                 .onPreviewKeyEvent { e ->
@@ -821,6 +1003,11 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                     MenuEntry(tr(R.string.ins_pagebreak), "doc/pagebreak") { docInsertPageBreak(s, focus) },
                 ))
                 ToolMenu(tr(R.string.more), "doc/more", entries = listOfNotNull(
+                    // v0.6.0 (d25) the outline; (d23) copy / cut / paste with formats, the menu entries of Ctrl+C / X / V
+                    MenuEntry(tr(R.string.outline), "doc/outline") { graph.show(s, Overlay.Outline(Win.DOC)) },
+                    MenuEntry(tr(R.string.edit_copy), "doc/copy") { docCopy(graph, s, focus, cut = false, fromKey = false) },
+                    MenuEntry(tr(R.string.edit_cut), "doc/cut") { docCopy(graph, s, focus, cut = true, fromKey = false) },
+                    MenuEntry(tr(R.string.edit_paste), "doc/paste") { docPaste(graph, s, focus, fromKey = false) },
                     MenuEntry(tr(R.string.find_replace), "doc/find") { graph.show(s, Overlay.Find(Win.DOC)) },
                     MenuEntry(tr(R.string.word_count), "doc/wordcount") { graph.show(s, Overlay.WordCount(Win.DOC)) },
                     // d28 version history

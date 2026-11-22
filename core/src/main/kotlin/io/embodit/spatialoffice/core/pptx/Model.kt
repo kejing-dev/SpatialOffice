@@ -44,6 +44,8 @@ data class Shape(
     /** M3 p40: the table's column widths (`a:gridCol w`) and row heights (`a:tr h`) in EMU. */
     val tableColW: List<Long>? = null,
     val tableRowH: List<Long>? = null,
+    /** v0.6.0 (M4 p29): a group's objects (back to front) with their boxes in slide coordinates; null for anything else. */
+    val children: List<Shape>? = null,
 )
 
 /**

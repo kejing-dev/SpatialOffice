@@ -661,3 +661,82 @@ zoom_out	缩小 Ctrl+-	Zoom out Ctrl+-
 zoom_fit_width	适合宽度 Ctrl+0	Fit width Ctrl+0
 zoom_100	100% Ctrl+0	100% Ctrl+0
 zoom_fit_window	适合窗口 Ctrl+0	Fit window Ctrl+0
+# v0.6.0 (M4)
+fn_tab	Tab 补全	Tab to complete
+data_sort	排序…	Sort…
+data_filter	筛选 %1$s 列…	Filter column %1$s…
+freeze_here	冻结到 %1$s	Freeze at %1$s
+frozen_at	已冻结上面 %1$d 行、左边 %2$d 列	Froze %1$d rows above and %2$d columns left
+freeze_off	取消冻结	Unfreeze
+hide_rows	隐藏行	Hide rows
+hide_cols	隐藏列	Hide columns
+unhide	取消隐藏	Unhide
+hidden_now	已隐藏 %1$s	Hid %1$s
+unhidden_n	取消隐藏了 %1$d 处	Showed %1$d hidden rows or columns
+filter_title	筛选 %1$s 列「%2$s」	Filter column %1$s “%2$s”
+filter_need_number	这里要填数字，比如 1000	Type a number here, like 1000
+filter_shown	会显示 %1$d 行	%1$d rows will show
+filter_apply	筛选	Filter
+filter_rule_on	%1$s 列 %2$s：显示 %3$d 行	Column %1$s %2$s: %3$d rows shown
+filter_values_word	个值	values
+filter_op_values	选值	Pick values
+filter_op_gt	大于	Greater than
+filter_op_lt	小于	Less than
+filter_op_contains	包含	Contains
+filter_all	全选	All
+filter_none	全不选	None
+filter_number	数字	Number
+filter_text	文字	Text
+sort_no_block	先选数据里的一个格子，再排序	Pick a cell in the data first, then sort
+sort_title	排序 %1$s	Sort %1$s
+sort_header	第一行是表头	My data has headers
+sort_add	加一个条件	Add a level
+sort_ok	排序	Sort
+sorted_by	已按 %1$s 排序	Sorted by %1$s
+sort_by	先按	Sort by
+sort_then	再按	Then by
+sort_up	升序	Ascending
+sort_down	降序	Descending
+sort_remove	去掉	Remove
+outline	大纲	Outline
+outline_empty	这份文档还没有标题。把段落设成标题 1–3，就会列在这里	No headings yet. Paragraphs set to Heading 1–3 show up here
+doc_copied_n	已复制 %1$d 段，格式一起带走	Copied %1$d paragraphs with their formats
+doc_cut_n	已剪切 %1$d 段，格式一起带走	Cut %1$d paragraphs with their formats
+doc_pasted_n	已粘贴 %1$d 段	Pasted %1$d paragraphs
+multi_hint	已选 %1$d 个对象 · 对齐、组合在 [所选对象] 里	%1$d objects picked · Align and Group are under [Object]
+rehearse_first	从第 1 页开始预演	Rehearse from slide 1
+obj_need	先选至少 %1$d 个对象	Pick at least %1$d objects first
+obj_arrange_none	已经排好了，没有要动的	Already lined up, nothing to move
+obj_multi_add	加入多选（已选 %1$d 个）	Add to selection (%1$d picked)
+obj_align	对齐	Align
+align_obj_left	左对齐	Align left
+align_obj_center	水平居中	Align centres
+align_obj_right	右对齐	Align right
+align_obj_top	顶端对齐	Align top
+align_obj_middle	垂直居中	Align middles
+align_obj_bottom	底端对齐	Align bottom
+obj_distribute	分布	Distribute
+dist_h	横向等距	Space evenly across
+dist_v	纵向等距	Space evenly down
+obj_group	组合（%1$d 个）	Group (%1$d)
+obj_group_refused	这几个对象没法组合	These objects cannot be grouped
+obj_ungroup	取消组合	Ungroup
+obj_multi_clear	清空多选	Clear selection
+rh_goto	跳到…	Go to…
+rh_goto_label	跳到第几页	Go to slide
+rh_pick_back	返回	Back
+rh_typed	第 %1$s 页 ⏎	Slide %1$s ⏎
+rh_black	黑屏	Black screen
+rh_unblack	取消黑屏	Show slide
+back_hint_right	刚放映的「%1$s」在这扇窗右边，往右转头就能看到	“%1$s”, just shown, is to the right of this window. Turn your head right to see it
+back_hint_left	刚放映的「%1$s」在这扇窗左边，往左转头就能看到	“%1$s”, just shown, is to the left of this window. Turn your head left to see it
+back_hint_ok	知道了	Got it
+tpl_group	从模板开始	Start from a template
+tpl_meeting	会议纪要	Meeting notes
+tpl_weekly	周报	Weekly report
+tpl_proposal	方案	Proposal
+tpl_resume	简历	Résumé
+tpl_report	工作汇报	Work report
+tpl_pitch	产品介绍	Product pitch
+tpl_dark	极简深色	Minimal dark
+hide_menu	隐藏	Hide

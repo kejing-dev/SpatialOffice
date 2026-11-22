@@ -301,6 +301,70 @@ tableDeleteCol / tableMerge(slide, id, row, col, down) / tableArea`; a merge wri
 what can happen now (`tableAbilities`). Merged tables are typeable (covered cells refuse text). Logs `SLIDEBG`,
 `SLIDETABLE`. Tests: `PptxM3Test` (core), `M3SlidesTest` (app).
 
+## v0.6.0 (M4, design-package roadmap[3]; "Organising, layout tools, templates"; gateB=false, no new panels)
+
+**Documents.** d23 a selection across paragraphs: every editable paragraph is its own text field, so the paper
+(`Paper`, DocWindow.kt) takes a press-and-drag at the Initial pass after the touch slop and works out the paragraph and
+offset under the pointer from `ParaGeo` (each paragraph field reports its coordinates and text layout; log
+`DOCGEO para=<id> x,y wxh` in window px for `adb shell input swipe`). Inside one paragraph it sets that field's
+selection (`DocFocus.dragSel`); across paragraphs it sets `DocSession.crossSel` (`DocSel`, drawn as a light blue
+ground by `crossMarked`; log `DOCSEL drag …`); near the top / bottom edge the page scrolls on. A click lets go of it,
+Esc too; Delete / Backspace remove it (`deleteCross`, the two ends joined). Ctrl+C / Ctrl+X (and [More ▾ ▸ Copy /
+Cut / Paste], the menu entries of the shortcuts) keep `DocSession.docClip` (`DocClip`: spans with their formats, style
+and list level per paragraph; `src = -1`, so the formats are written from the spans) and put the plain text on the
+system clipboard; Ctrl+V pastes the clip with its formats when the clipboard still holds its text (Word's way: the
+first part joins the text before the caret, middle parts become paragraphs of their own, the last one is followed by
+what was after the caret; one undo step, `pasteClip`), other clipboard text as plain paragraphs. Log `DOCCLIP …`.
+d25 [More ▾ ▸ Outline] (`Overlay.Outline`, `OutlineSheet`): title and headings 1–3 (`DocSession.outline()`), a click
+calls `jumpTo` (the paper scrolls there, caret in the heading; log `OUTLINE jump to …`).
+
+**Templates (d26 / p27).** `core/templates/Templates.kt`: `DocTemplate` (meeting notes, weekly report, proposal,
+résumé) and `DeckTemplate` (work report, product pitch, minimal dark), built with the editors' own calls (styles,
+lists, tables; theme colours + accent bands + placeholders), in the app language, ordinary parts only. Home ▸ New has
+a row of them under the document and presentation cards (`TemplateButton`); `Graph.newFile(kind, template)` names the
+file after the template (log `NEW from template …`). `core/build/m4-fixtures/templates/` (M4FixturesTest) holds all 14
+for checking with python-docx / python-pptx.
+
+**Sheets.** s28 `core/xlsx/FormulaHints`: every function the evaluator knows with its arguments; while a formula is
+typed, `FormulaHint` (over the grid: at the bottom when the cell is in the top rows, else at the top) lists the names
+that start with what is typed (click one, or Tab = `completeFunction`), then inside the brackets the arguments with
+the current one in bold (log `FNHINT …`). s29 [Data ▾ ▸ Filter column X…] (`Overlay.FilterData`, `FilterSheet`):
+pick values, greater than, less than, contains (`core/xlsx/FilterRule`; a view of the data as before, not saved; log
+`FILTER …`); the one-value [Only “…”] stays. s31 [Data ▾ ▸ Sort…] (`Overlay.SortData`, `SortSheet`): the selected
+range or the block around the cell, up to three columns each ascending / descending, [My data has headers] guessed by
+`SortPlan.looksLikeHeader` (`XlsxWorkbook.sortRowsBy`; text compares by `Collator(Locale.CHINA)`: Chinese by pinyin,
+Latin ignoring case; log `SORT …`). s30 [Data ▾ ▸ Freeze at B2] (`freezeHere`) / [Unfreeze]: `setFreeze(rows, cols)`
+writes `<pane xSplit ySplit topLeftCell activePane="bottomRight" state="frozen"/>`; the grid keeps frozen columns
+left of a blue line while the rest scrolls. s42 [Rows & columns ▾ ▸ Hide ›] rows / columns / Unhide: `hidden="1"` on
+`<row>` / on the column's own `<col>` (split out of a wider span, with a width); the grid leaves them out and marks the
+header after them with a blue edge (log `HIDE` / `UNHIDE`).
+
+**Slides.** p29 [Object ▾ ▸ Add to selection (n picked)] (pick an object, add it, pick the next…; Shift+click is not
+needed), then [Align ›] left / centre / right / top / middle / bottom, [Distribute ›] across / down (three or more),
+[Group (n)], [Ungroup] on a group, [Clear selection] (`DeckSession.multi`, `multiSet()`, `core/layout/Arrange`;
+`PptxDeck.groupShapes / ungroupShape`: a `p:grpSp` whose `chOff / chExt` equal its box, so the objects keep their own
+`a:off`; placeholders are made plain shapes first). A group is drawn with its objects (`Shape.children`) and is
+picked, dragged and resized as one. p25 a dragged object snaps to the edges / centres of the others and of the slide
+within 1/120 of the slide width (`Arrange.snap`, `DeckSession.guides`, thin pink lines; log `SNAP …`). Logs `MULTI`,
+`ARRANGE`, `GROUP`. p28 the rehearsal bar has [Go to…] (a row of slide numbers) and [Black screen] / [Show slide]; the
+bar is a typing target, so a number + Enter jumps and B / . toggles black (KeyGuard lets Enter through); [Page ▾ ▸
+Rehearse from slide 1] (the title bar's [Rehearse] starts at the current slide). Logs `REHEARSAL go / black / typed`.
+
+**K1 (QA #15).** After the Stage, `ArcRing.replan` brings the windows back on the side of the home window they stood
+on, and the file just rehearsed / spread out takes the place right next to it (QA #15: the slides came back ~126°
+away and the sheet and document changed sides). Nothing is closed and reopened beyond what the Stage already does and
+no window is hidden. The home window shows `BackHintBar` ("… is to the right of this window") until that window gets
+the focus, [Got it], or 30 s (log `STAGE closed … row-before=… plan=…`, `BACKHINT`). The ~63° neighbour angle is
+unchanged (waiting for the user).
+
+Debug commands (v0.6.0): `new-tpl meeting|weekly|proposal|resume|report|pitch|dark`, `filter-dialog`, `sort-dialog`,
+`filter-rule <col> <values|gt|lt|ge|le|contains> <text | v1|v2>`, `sort-by A:asc,C:desc [1|0]`, `freeze-here`,
+`unfreeze`, `hide rows|cols`, `unhide`, `outline`, `outline-go <text>`, `doc-xsel <i>:<off>-<j>:<off>`, `doc-copy`,
+`doc-cut`, `doc-paste <i|last> <offset|end>`, `multi-add [id]`, `multi-clear`, `align left|center|right|top|middle|bottom`,
+`distribute h|v`, `group`, `ungroup`, `rehearse-first`, `rh-go <n>`, `rh-black`, `rh-picker 1|0`, `rh-type <digits>`.
+Sample files: `./gradlew :core:test --tests "*M4FixturesTest*"` → `core/build/m4-fixtures/` (outline-sample.docx with
+chapters one to five, cross-select.docx, sales-m4.xlsx with 部门 / 姓名 / 金额). Tests: `M4CoreTest`, `M4AppTest`.
+
 ## The save rule
 
 Opening never changes a file. Saving rewrites only the parts that hold an edit, and inside such a part only the

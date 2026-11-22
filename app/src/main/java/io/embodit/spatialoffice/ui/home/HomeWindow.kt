@@ -78,6 +78,7 @@ fun HomeWindow() {
                 }
             }
             Column(Modifier.weight(1f).fillMaxHeight()) {
+                BackHintBar(graph)
                 when (graph.homePage) {
                     HomePage.RECENT -> RecentPage(graph)
                     HomePage.BROWSE -> BrowsePage(graph)
@@ -244,12 +245,48 @@ internal fun InfoRow(icon: Int, head: String, sub: String?, tag: String, trailin
     }
 }
 
+/**
+ * K1 (QA #15): after a rehearsal / spread the home window is in front and the file just shown stands beside it on the
+ * circle around the user; this line says which side, until the user goes to that window, closes it, or 30 s pass.
+ */
+@Composable
+private fun BackHintBar(graph: Graph) {
+    val h = graph.backHint ?: return
+    LaunchedEffect(h.at) { kotlinx.coroutines.delay(30_000); if (graph.backHint?.at == h.at) graph.backHint = null }
+    Row(
+        Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 12.dp).clip(RoundedCornerShape(16.dp)).background(PicoTheme.colorScheme.fillSecondary)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(painter = painterResource(if (h.right) R.drawable.ic_arrow_right else R.drawable.ic_arrow_left), contentDescription = null, modifier = Modifier.size(28.dp))
+        Txt(tr(if (h.right) R.string.back_hint_right else R.string.back_hint_left, h.name), "home/back-hint", Modifier.weight(1f).padding(horizontal = 12.dp), style = PicoTheme.typography.bodyLarge, maxLines = 2)
+        SecondaryButton(tr(R.string.back_hint_ok), "home/back-hint-ok", onClick = { graph.backHint = null })
+    }
+}
+
 @Composable
 private fun NewPage(graph: Graph) {
     PageHeader(tr(R.string.nav_new), tr(R.string.new_sub), "new")
     val context = LocalContext.current
     PageBody {
-        QuickNewRow(graph, cover = 236.dp, top = 8.dp)
+        QuickNewRow(graph, cover = 132.dp, top = 8.dp)
+        // v0.6.0 (d26 / p27): a row of templates under the document and presentation cards
+        GroupLabel(tr(R.string.tpl_group), "new/tpl")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(Modifier.width(224.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                listOf(
+                    io.embodit.spatialoffice.core.templates.DocTemplate.MEETING to R.string.tpl_meeting, io.embodit.spatialoffice.core.templates.DocTemplate.WEEKLY to R.string.tpl_weekly,
+                    io.embodit.spatialoffice.core.templates.DocTemplate.PROPOSAL to R.string.tpl_proposal, io.embodit.spatialoffice.core.templates.DocTemplate.RESUME to R.string.tpl_resume,
+                ).forEach { (t, label) -> TemplateButton(tr(label), R.drawable.file_doc, "new/tpl-${t.name.lowercase()}") { graph.newFile(FileKind.DOC, t) } }
+            }
+            Spacer(Modifier.width(224.dp))
+            Column(Modifier.width(224.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                listOf(
+                    io.embodit.spatialoffice.core.templates.DeckTemplate.REPORT to R.string.tpl_report, io.embodit.spatialoffice.core.templates.DeckTemplate.PITCH to R.string.tpl_pitch,
+                    io.embodit.spatialoffice.core.templates.DeckTemplate.DARK to R.string.tpl_dark,
+                ).forEach { (t, label) -> TemplateButton(tr(label), R.drawable.file_slides, "new/tpl-${t.name.lowercase()}") { graph.newFile(FileKind.SLIDES, t) } }
+            }
+        }
         Spacer(Modifier.height(12.dp))
         Txt(tr(R.string.new_note), "new/note", style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
         Spacer(Modifier.height(4.dp))
@@ -270,6 +307,19 @@ internal fun QuickNewRow(graph: Graph, cover: androidx.compose.ui.unit.Dp, top: 
         NewCard(R.drawable.cover_doc, tr(R.string.new_doc), ".docx", "new/doc", cover) { graph.newFile(FileKind.DOC) }
         NewCard(R.drawable.cover_sheet, tr(R.string.new_sheet), ".xlsx", "new/sheet", cover) { graph.newFile(FileKind.SHEET) }
         NewCard(R.drawable.cover_slides, tr(R.string.new_slides), ".pptx", "new/slides", cover) { graph.newFile(FileKind.SLIDES) }
+    }
+}
+
+/** d26 / p27: one template under its card: the kind's tile and the template's name. */
+@Composable
+private fun TemplateButton(label: String, tile: Int, tag: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(PicoTheme.colorScheme.fillSecondary)
+            .noKeyFocus().clickable(onClick = onClick).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Image(painter = painterResource(tile), contentDescription = null, modifier = Modifier.size(28.dp))
+        Txt(label, tag, Modifier.padding(start = 10.dp), style = PicoTheme.typography.titleSmall, maxLines = 2)
     }
 }
 

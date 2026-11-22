@@ -659,4 +659,82 @@
     <string name="zoom_fit_width" formatted="false">适合宽度 Ctrl+0</string>
     <string name="zoom_100" formatted="false">100% Ctrl+0</string>
     <string name="zoom_fit_window" formatted="false">适合窗口 Ctrl+0</string>
+    <string name="fn_tab" formatted="false">Tab 补全</string>
+    <string name="data_sort" formatted="false">排序…</string>
+    <string name="data_filter">筛选 %1$s 列…</string>
+    <string name="freeze_here">冻结到 %1$s</string>
+    <string name="frozen_at">已冻结上面 %1$d 行、左边 %2$d 列</string>
+    <string name="freeze_off" formatted="false">取消冻结</string>
+    <string name="hide_rows" formatted="false">隐藏行</string>
+    <string name="hide_cols" formatted="false">隐藏列</string>
+    <string name="unhide" formatted="false">取消隐藏</string>
+    <string name="hidden_now">已隐藏 %1$s</string>
+    <string name="unhidden_n">取消隐藏了 %1$d 处</string>
+    <string name="filter_title">筛选 %1$s 列「%2$s」</string>
+    <string name="filter_need_number" formatted="false">这里要填数字，比如 1000</string>
+    <string name="filter_shown">会显示 %1$d 行</string>
+    <string name="filter_apply" formatted="false">筛选</string>
+    <string name="filter_rule_on">%1$s 列 %2$s：显示 %3$d 行</string>
+    <string name="filter_values_word" formatted="false">个值</string>
+    <string name="filter_op_values" formatted="false">选值</string>
+    <string name="filter_op_gt" formatted="false">大于</string>
+    <string name="filter_op_lt" formatted="false">小于</string>
+    <string name="filter_op_contains" formatted="false">包含</string>
+    <string name="filter_all" formatted="false">全选</string>
+    <string name="filter_none" formatted="false">全不选</string>
+    <string name="filter_number" formatted="false">数字</string>
+    <string name="filter_text" formatted="false">文字</string>
+    <string name="sort_no_block" formatted="false">先选数据里的一个格子，再排序</string>
+    <string name="sort_title">排序 %1$s</string>
+    <string name="sort_header" formatted="false">第一行是表头</string>
+    <string name="sort_add" formatted="false">加一个条件</string>
+    <string name="sort_ok" formatted="false">排序</string>
+    <string name="sorted_by">已按 %1$s 排序</string>
+    <string name="sort_by" formatted="false">先按</string>
+    <string name="sort_then" formatted="false">再按</string>
+    <string name="sort_up" formatted="false">升序</string>
+    <string name="sort_down" formatted="false">降序</string>
+    <string name="sort_remove" formatted="false">去掉</string>
+    <string name="outline" formatted="false">大纲</string>
+    <string name="outline_empty" formatted="false">这份文档还没有标题。把段落设成标题 1–3，就会列在这里</string>
+    <string name="doc_copied_n">已复制 %1$d 段，格式一起带走</string>
+    <string name="doc_cut_n">已剪切 %1$d 段，格式一起带走</string>
+    <string name="doc_pasted_n">已粘贴 %1$d 段</string>
+    <string name="multi_hint">已选 %1$d 个对象 · 对齐、组合在 [所选对象] 里</string>
+    <string name="rehearse_first" formatted="false">从第 1 页开始预演</string>
+    <string name="obj_need">先选至少 %1$d 个对象</string>
+    <string name="obj_arrange_none" formatted="false">已经排好了，没有要动的</string>
+    <string name="obj_multi_add">加入多选（已选 %1$d 个）</string>
+    <string name="obj_align" formatted="false">对齐</string>
+    <string name="align_obj_left" formatted="false">左对齐</string>
+    <string name="align_obj_center" formatted="false">水平居中</string>
+    <string name="align_obj_right" formatted="false">右对齐</string>
+    <string name="align_obj_top" formatted="false">顶端对齐</string>
+    <string name="align_obj_middle" formatted="false">垂直居中</string>
+    <string name="align_obj_bottom" formatted="false">底端对齐</string>
+    <string name="obj_distribute" formatted="false">分布</string>
+    <string name="dist_h" formatted="false">横向等距</string>
+    <string name="dist_v" formatted="false">纵向等距</string>
+    <string name="obj_group">组合（%1$d 个）</string>
+    <string name="obj_group_refused" formatted="false">这几个对象没法组合</string>
+    <string name="obj_ungroup" formatted="false">取消组合</string>
+    <string name="obj_multi_clear" formatted="false">清空多选</string>
+    <string name="rh_goto" formatted="false">跳到…</string>
+    <string name="rh_goto_label" formatted="false">跳到第几页</string>
+    <string name="rh_pick_back" formatted="false">返回</string>
+    <string name="rh_typed">第 %1$s 页 ⏎</string>
+    <string name="rh_black" formatted="false">黑屏</string>
+    <string name="rh_unblack" formatted="false">取消黑屏</string>
+    <string name="back_hint_right">刚放映的「%1$s」在这扇窗右边，往右转头就能看到</string>
+    <string name="back_hint_left">刚放映的「%1$s」在这扇窗左边，往左转头就能看到</string>
+    <string name="back_hint_ok" formatted="false">知道了</string>
+    <string name="tpl_group" formatted="false">从模板开始</string>
+    <string name="tpl_meeting" formatted="false">会议纪要</string>
+    <string name="tpl_weekly" formatted="false">周报</string>
+    <string name="tpl_proposal" formatted="false">方案</string>
+    <string name="tpl_resume" formatted="false">简历</string>
+    <string name="tpl_report" formatted="false">工作汇报</string>
+    <string name="tpl_pitch" formatted="false">产品介绍</string>
+    <string name="tpl_dark" formatted="false">极简深色</string>
+    <string name="hide_menu" formatted="false">隐藏</string>
 </resources>

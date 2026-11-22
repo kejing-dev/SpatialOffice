@@ -61,6 +61,12 @@ sealed class Overlay {
     /** s21: delete the current worksheet (formulas that point at it turn into #REF!). */
     data class SheetDelete(override val win: Win = Win.SHEET) : Overlay()
     data class WordCount(override val win: Win = Win.DOC) : Overlay()
+    /** v0.6.0 (s29): [Data ▸ Filter…] on column [col]. */
+    data class FilterData(override val win: Win = Win.SHEET, val col: Int = 0) : Overlay()
+    /** v0.6.0 (s31): [Data ▸ Sort…]. */
+    data class SortData(override val win: Win = Win.SHEET) : Overlay()
+    /** v0.6.0 (d25): [More ▸ Outline]. */
+    data class Outline(override val win: Win = Win.DOC) : Overlay()
     data class InsertTable(override val win: Win = Win.DOC) : Overlay()
     /**
      * M3 d20: insert / edit a link. [para] and [a]..[b] are the characters it goes on (an empty range: [text] is typed
@@ -332,20 +338,31 @@ class Graph(val app: Application) {
         if (!isNew && (rec?.spread == true || settings.value.openMode == OpenMode.SPREAD)) spread(s)
     }
 
-    /** A new, empty file in a window of its own; the files that are open stay open. */
-    fun newFile(kind: FileKind) {
+    /**
+     * A new file in a window of its own; the files that are open stay open. v0.6.0 (d26 / p27): [template] = a
+     * [io.embodit.spatialoffice.core.templates.DocTemplate] or [io.embodit.spatialoffice.core.templates.DeckTemplate]
+     * to start from (in the app language), named after it.
+     */
+    fun newFile(kind: FileKind, template: Any? = null) {
         val open = files.ofKind(kind.editor.name).size
         if (open >= OpenFiles.MAX_PER_KIND) { say(Win.HOME, str(R.string.too_many_open, open)); return }
         scope.launch {
             val zh = settings.value.zh
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val bytes = when (kind) {
-                        FileKind.SHEET -> XlsxWorkbook.blank().save()
-                        FileKind.SLIDES -> PptxDeck.blank().save()
+                    val bytes = when {
+                        template is io.embodit.spatialoffice.core.templates.DocTemplate -> io.embodit.spatialoffice.core.templates.Templates.doc(template, zh)
+                        template is io.embodit.spatialoffice.core.templates.DeckTemplate -> io.embodit.spatialoffice.core.templates.Templates.deck(template, zh)
+                        kind == FileKind.SHEET -> XlsxWorkbook.blank().save()
+                        kind == FileKind.SLIDES -> PptxDeck.blank().save()
                         else -> DocxDocument.blank().save()
                     }
-                    val name = Naming.untitled(kind, zh)
+                    val name = when (template) {
+                        is io.embodit.spatialoffice.core.templates.DocTemplate -> template.title(zh) + ".docx"
+                        is io.embodit.spatialoffice.core.templates.DeckTemplate -> template.title(zh) + ".pptx"
+                        else -> Naming.untitled(kind, zh)
+                    }
+                    if (template != null) Log.i(TAG, "NEW from template $template (${bytes.size} bytes) as $name")
                     val file = storage.freeFile(storage.newDir, name.substringBeforeLast('.'), kind.ext)
                     file.writeBytes(bytes)
                     build(FileRef.Path(file), kind, bytes)
@@ -587,8 +604,29 @@ class Graph(val app: Application) {
         remember()
     }
 
-    fun rehearse(d: DeckSession? = deck) {
+    /** p28: the rehearsal screen shows black (B / . toggles it; the speaker's panels stay). */
+    var rehearsalBlack by mutableStateOf(false)
+        private set
+    /** p28: the rehearsal bar shows the slide numbers to jump to ([Go to…]). */
+    var rehearsalPicking by mutableStateOf(false)
+    /** p28: digits typed during the rehearsal; Enter goes to that slide. */
+    var rehearsalTyped by mutableStateOf("")
+
+    fun toggleBlack() { rehearsalBlack = !rehearsalBlack; Log.i(TAG, "REHEARSAL black=$rehearsalBlack") }
+
+    /** p28 [Go to…] / number + Enter: slide [n] (1-based) of the rehearsed deck; the screen is shown again. */
+    fun rehearsalGo(n: Int): Boolean {
+        val d = stageSession as? DeckSession ?: return false
+        if (n !in 1..d.deck.slides.size) { Log.i(TAG, "REHEARSAL go $n refused (1..${d.deck.slides.size})"); return false }
+        d.current = n - 1; rehearsalBlack = false; rehearsalPicking = false; rehearsalTyped = ""
+        Log.i(TAG, "REHEARSAL go slide=${d.current}")
+        return true
+    }
+
+    fun rehearse(d: DeckSession? = deck, fromStart: Boolean = false) {
         d ?: return
+        if (fromStart) d.current = 0
+        rehearsalBlack = false; rehearsalPicking = false; rehearsalTyped = ""
         activate(d)
         stageTag = d.tag
         stageKind = FileKind.SLIDES
@@ -597,6 +635,14 @@ class Graph(val app: Application) {
         Log.i(TAG, "REHEARSAL enter slide=${d.current}")
         windows.enterStage()
     }
+
+    /**
+     * K1 (QA #15): after the Stage the home window is in front and the window just rehearsed / spread out stands next
+     * to it on the circle around the user. The home window shows on which side, until the user looks at that window,
+     * closes the note, or 20 s pass.
+     */
+    data class BackHint(val tag: String, val name: String, val right: Boolean, val at: Long)
+    var backHint by mutableStateOf<BackHint?>(null)
 
     fun collapse() {
         val mode = stageMode ?: return
@@ -791,7 +837,7 @@ class Graph(val app: Application) {
         "DUMP page=$homePage lang=${settings.value.lang} doc=${doc?.ref?.name}:${doc?.dirty} sheet=${sheet?.ref?.name}:${sheet?.dirty}@${sheet?.row},${sheet?.col} " +
             "deck=${deck?.ref?.name}:${deck?.dirty}#${deck?.current} overlay=${overlay?.javaClass?.simpleName} stage=$stageMode/$stageKind/$arrangement/$focus " +
             "windows=${windows.dump()} allFiles=${storage.hasAllFiles} blocks=${doc?.blockCount} slides=${deck?.slideCount} sel=${deck?.selected} " +
-            "tableCaret=${doc?.tableCaret} cols=${sheet?.colCount} rows=${sheet?.rowCount} frozen=${sheet?.frozen} filter=${sheet?.filterCol}:${sheet?.filterValue} accounts=" +
+            "tableCaret=${doc?.tableCaret} cols=${sheet?.colCount} rows=${sheet?.rowCount} frozen=${sheet?.frozen} filter=${sheet?.filter} fcols=${sheet?.frozenCols} hidden=${sheet?.let { s -> runCatching { s.book.hiddenRows(s.sheet).toString() + s.book.hiddenCols(s.sheet) }.getOrNull() }} multi=${deck?.multiSet()} outline=${doc?.outline()?.size} xsel=${doc?.crossSel} accounts=" +
             io.embodit.spatialoffice.core.cloud.Provider.values().joinToString(",") { it.id + ":" + accounts.state(it) } +
             " open=[" + files.entries.joinToString(",") { e -> "${e.tag}:${e.kind}:${byTag[e.tag]?.ref?.name}:${windows.state[WinRef(winOf(FileKind.valueOf(e.kind)), e.tag)] ?: "-"}" } + "]" +
             " chartOf=$chartTag objBox=${deck?.dragBox} sel=${deck?.selected} docPicked=${doc?.picked}" +

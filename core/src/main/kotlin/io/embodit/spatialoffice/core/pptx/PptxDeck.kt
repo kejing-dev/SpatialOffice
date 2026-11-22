@@ -459,6 +459,100 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         return true
     }
 
+    // ---- v0.6.0 (M4 p29): groups
+
+    /**
+     * Puts the top-level objects [ids] of slide [slide] into one group (`p:grpSp`) where the topmost of them was in the
+     * drawing order; returns the group's id. The group's box is the objects' bounding box and its child space is the
+     * same box (`chOff` = `off`, `chExt` = `ext`), so every object keeps its own `a:off` / `a:ext` as they were. A
+     * placeholder is turned into a plain shape first (as [copyShape] does). Needs at least two objects.
+     * @throws IllegalArgumentException when an id is not a top-level object of the slide or fewer than two are given.
+     */
+    fun groupShapes(slide: Int, ids: List<Int>): Int {
+        val want = ids.distinct()
+        require(want.size >= 2) { "a group needs two objects" }
+        val part = slidePart(slide)
+        val sx = pkg.text(part)!!
+        val tops = topShapes(sx)
+        val picked = tops.filter { shapeId(sx, it) in want }
+        require(picked.size == want.size) { "slide $slide does not have all of $want as top-level objects" }
+        val model = slides[slide].shapes.associateBy { it.id }
+        val boxes = picked.map { e -> val id = shapeId(sx, e)!!; model[id]?.let { longArrayOf(it.x, it.y, it.w, it.h) } ?: boxOf(sx, e) ?: longArrayOf(0, 0, 0, 0) }
+        val x0 = boxes.minOf { it[0] }; val y0 = boxes.minOf { it[1] }
+        val x1 = boxes.maxOf { it[0] + it[2] }; val y1 = boxes.maxOf { it[1] + it[3] }
+        val gid = maxShapeId(sx) + 1
+        val kids = picked.mapIndexed { i, e ->
+            val xml = XmlEx.src(sx, e)
+            if (e.name == "p:sp" || e.name == "p:pic" || e.name == "p:graphicFrame") unplaceholder(xml, boxes[i]) else xml
+        }.joinToString("")
+        val xf = "<a:off x=\"$x0\" y=\"$y0\"/><a:ext cx=\"${x1 - x0}\" cy=\"${y1 - y0}\"/><a:chOff x=\"$x0\" y=\"$y0\"/><a:chExt cx=\"${x1 - x0}\" cy=\"${y1 - y0}\"/>"
+        val group = "<p:grpSp><p:nvGrpSpPr><p:cNvPr id=\"$gid\" name=\"Group $gid\"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>" +
+            "<p:grpSpPr><a:xfrm>$xf</a:xfrm></p:grpSpPr>$kids</p:grpSp>"
+        val edits = picked.mapIndexed { i, e -> Triple(e.start, e.end, if (i == picked.lastIndex) group else "") }
+        pkg.putText(part, Xml.splice(sx, edits))
+        slideChanged(part)
+        return gid
+    }
+
+    /**
+     * Takes group [groupId] of slide [slide] apart: its objects take its place in the drawing order, each with its box
+     * worked out from the group's child space into slide coordinates. Returns their ids (back to front).
+     * @throws IllegalArgumentException when the slide has no such group.
+     */
+    fun ungroupShape(slide: Int, groupId: Int): List<Int> {
+        val part = slidePart(slide)
+        val sx = pkg.text(part)!!
+        val g = topShapes(sx).firstOrNull { it.name == "p:grpSp" && shapeId(sx, it) == groupId } ?: throw IllegalArgumentException("slide $slide has no group $groupId")
+        val map = groupMap(sx, g)
+        val kids = Xml.children(sx, g).filter { it.name != "p:nvGrpSpPr" && it.name != "p:grpSpPr" && it.name != "p:extLst" }
+        val ids = ArrayList<Int>()
+        val out = StringBuilder()
+        for (k in kids) {
+            shapeId(sx, k)?.let { ids.add(it) }
+            var xml = XmlEx.src(sx, k)
+            val el = Xml.root(xml)
+            val own = el?.let { ownXfrm(xml, it) }
+            if (own != null && map != null) {
+                val off = Xml.child(xml, own, "a:off"); val ext = Xml.child(xml, own, "a:ext")
+                val edits = ArrayList<Triple<Int, Int, String>>()
+                val ox = off?.let { Xml.attr(xml, it, "x")?.toLongOrNull() } ?: 0L; val oy = off?.let { Xml.attr(xml, it, "y")?.toLongOrNull() } ?: 0L
+                val cx = ext?.let { Xml.attr(xml, it, "cx")?.toLongOrNull() } ?: 0L; val cy = ext?.let { Xml.attr(xml, it, "cy")?.toLongOrNull() } ?: 0L
+                val b = map(longArrayOf(ox, oy, cx, cy))
+                if (off != null) edits.add(Triple(off.start, off.end, "<a:off x=\"${b[0]}\" y=\"${b[1]}\"/>"))
+                if (ext != null) edits.add(Triple(ext.start, ext.end, "<a:ext cx=\"${b[2]}\" cy=\"${b[3]}\"/>"))
+                if (edits.isNotEmpty()) xml = Xml.splice(xml, edits)
+            }
+            out.append(xml)
+        }
+        pkg.putText(part, sx.substring(0, g.start) + out + sx.substring(g.end))
+        slideChanged(part)
+        return ids
+    }
+
+    /** The mapping from group [g]'s child space to its parent's coordinates (x, y, w, h in EMU); null without a box. */
+    private fun groupMap(xml: String, g: Xml.Elem): ((LongArray) -> LongArray)? {
+        val xf = Xml.child(xml, g, "p:grpSpPr")?.let { Xml.child(xml, it, "a:xfrm") } ?: return null
+        fun pair(name: String, a: String, b: String): LongArray? = Xml.child(xml, xf, name)?.let { longArrayOf(Xml.attr(xml, it, a)?.toLongOrNull() ?: 0L, Xml.attr(xml, it, b)?.toLongOrNull() ?: 0L) }
+        val off = pair("a:off", "x", "y") ?: return null
+        val ext = pair("a:ext", "cx", "cy") ?: return null
+        val chOff = pair("a:chOff", "x", "y") ?: off
+        val chExt = pair("a:chExt", "cx", "cy") ?: ext
+        val fx = if (chExt[0] > 0) ext[0].toDouble() / chExt[0] else 1.0
+        val fy = if (chExt[1] > 0) ext[1].toDouble() / chExt[1] else 1.0
+        return { b -> longArrayOf(off[0] + Math.round((b[0] - chOff[0]) * fx), off[1] + Math.round((b[1] - chOff[1]) * fy), Math.round(b[2] * fx), Math.round(b[3] * fy)) }
+    }
+
+    /** The objects inside group [e] as shapes with their boxes in the coordinates of the group's parent (nested groups too). */
+    private fun groupChildren(sx: String, e: Xml.Elem, part: String, master: PartDoc?): List<Shape> {
+        val map = groupMap(sx, e) ?: return emptyList()
+        return Xml.children(sx, e).filter { it.name != "p:nvGrpSpPr" && it.name != "p:grpSpPr" && it.name != "p:extLst" }.mapNotNull { k ->
+            val sh = readShape(sx, k, part, master) ?: return@mapNotNull null
+            val b = map(longArrayOf(sh.x, sh.y, sh.w, sh.h))
+            val kids = sh.children?.map { c -> val cb = map(longArrayOf(c.x, c.y, c.w, c.h)); c.copy(x = cb[0], y = cb[1], w = cb[2], h = cb[3]) }
+            sh.copy(x = b[0], y = b[1], w = b[2], h = b[3], children = kids)
+        }
+    }
+
     /** [xml] of a top-level `p:sp` / `p:pic` / `p:graphicFrame` without its `p:ph`, with [box] written in when it had none. */
     private fun unplaceholder(xml: String, box: LongArray): String {
         val el = Xml.root(xml) ?: return xml
@@ -1287,6 +1381,7 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         return shape.copy(
             lineRgb = ln?.let { colorOf(sx, it, master) }, lineWidthEmu = ln?.let { Xml.attr(sx, it, "w")?.toLongOrNull() },
             rotation = Math.floorMod(Math.round(rot / 60000.0).toInt(), 360),
+            children = if (e.name == "p:grpSp") groupChildren(sx, e, part, master) else null,
         )
     }
 

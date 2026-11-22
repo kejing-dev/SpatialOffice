@@ -56,6 +56,7 @@ class MoveResizeTest {
 
     @Test fun everyInsertedKindIsDraggedToAnotherPlace() {
         val s = deck()
+        s.snap = false // v0.6.0 p25: exact travel (snapping has its own test, M4AppTest)
         s.addTextBox("box"); val text = s.selected
         s.addPicture(png, "png", 200, 100); val pic = s.selected
         s.addShape("ellipse", 0x2563EB); val shape = s.selected
@@ -105,6 +106,7 @@ class MoveResizeTest {
 
     @Test fun theDragIsDrawnInTheSameFrameAndAPressWithoutTravelChangesNothing() {
         val s = deck()
+        s.snap = false // v0.6.0 p25: a centred shape would stay on the centre line for a 10 000 EMU step
         s.addShape("rect", 0x2563EB); val id = s.selected
         s.selected = -1
         assertTrue("picking on press redraws the frame", invalidates({ s.selected; s.dragBox }) { s.beginBoxDrag(id) })

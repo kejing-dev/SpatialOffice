@@ -108,6 +108,7 @@ import com.pico.spatial.ui.design.windows.popup.HorizontalPlacement
 import com.pico.spatial.ui.design.windows.popup.VerticalPlacement
 import io.embodit.spatialoffice.R
 import io.embodit.spatialoffice.core.layout.BoxDrag
+import io.embodit.spatialoffice.core.layout.Arrange
 import io.embodit.spatialoffice.core.layout.Corner
 import io.embodit.spatialoffice.core.layout.UnitBox
 import io.embodit.spatialoffice.core.pptx.Shape
@@ -188,7 +189,8 @@ fun SlidesWindow(tag: String? = null) {
                                     style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelPrimary, maxLines = 1,
                                     modifier = Modifier.semantics { contentDescription = "slides/notes-hit" },
                                 )
-                            } else if (s.selected >= 0 && !s.readOnly) Txt(tr(R.string.obj_hint), "slides/obj-hint", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
+                            } else if (s.multi.isNotEmpty() && !s.readOnly) Txt(tr(R.string.multi_hint, s.multiSet().size), "slides/multi-hint", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelPrimary)
+                            else if (s.selected >= 0 && !s.readOnly) Txt(tr(R.string.obj_hint), "slides/obj-hint", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
                         }
                         Box(Modifier.height(SlideFit.GAP_LABEL.dp))
                         val slide = s.deck.slides.getOrNull(s.current)
@@ -357,6 +359,12 @@ fun SlideCanvas(s: DeckSession, index: Int, width: Dp, editable: Boolean, modifi
                 val move = if (canDrag) Modifier.objectDrag(s, sh.id, pxPerEmu, null) else Modifier
                 val pick = if (editable) Modifier.noKeyFocus().clickable(interactionSource = remember(sh.id) { MutableInteractionSource() }, indication = null) { s.selected = sh.id; focusManager.clearFocus() } else Modifier
                 when {
+                    // v0.6.0 (p29): a group draws its objects inside its box (they move and scale with it) and is picked / dragged as one
+                    sh.children != null -> Box(box.then(move).then(pick).semantics { contentDescription = "slide-group-${sh.id}" }) {
+                        val fx = if (sh.w > 0) b.w.toFloat() / sh.w else 1f
+                        val fy = if (sh.h > 0) b.h.toFloat() / sh.h else 1f
+                        for (c in sh.children!!) GroupChild(s, c, ((c.x - sh.x) * fx * perEmu).dp, ((c.y - sh.y) * fy * perEmu).dp, (c.w * fx * perEmu).coerceAtLeast(1f).dp, (c.h * fy * perEmu).coerceAtLeast(1f).dp, perPt)
+                    }
                     sh.kind == ShapeKind.PICTURE -> sh.imagePart?.let { s.image(it) }?.let { bmp ->
                         Image(
                             bitmap = bmp.asImageBitmap(), contentDescription = null, contentScale = ContentScale.FillBounds,
@@ -374,8 +382,54 @@ fun SlideCanvas(s: DeckSession, index: Int, width: Dp, editable: Boolean, modifi
                 }
             }
         }
+        // p29: the other objects added to the selection, each with a blue frame and its number
+        if (editable) s.multi.forEachIndexed { i, id ->
+            val m = slide.shapes.firstOrNull { it.id == id } ?: return@forEachIndexed
+            if (m.id == s.selected) return@forEachIndexed
+            val mb = s.boxOf(m)
+            Box(Modifier.offset((mb.x * perEmu).dp, (mb.y * perEmu).dp).size((mb.w * perEmu).coerceAtLeast(1f).dp, (mb.h * perEmu).coerceAtLeast(1f).dp)
+                .border(3.dp, Ink.Select.copy(alpha = 0.75f), RoundedCornerShape(4.dp)).semantics { contentDescription = "slide-multi-${m.id}" })
+            Box(
+                Modifier.offset((mb.x * perEmu).dp - 14.dp, (mb.y * perEmu).dp - 14.dp).size(28.dp).clip(androidx.compose.foundation.shape.CircleShape).background(Ink.Select),
+                contentAlignment = Alignment.Center,
+            ) { Text((i + 1).toString(), style = TextStyle(fontSize = 14.sp, color = Color.White, fontWeight = FontWeight.Bold)) }
+        }
         val sel = if (editable) slide.shapes.firstOrNull { it.id == s.selected } else null
         if (sel != null) PickedFrame(s, sel, perEmu, pxPerEmu, height, canDrag)
+        // p25: the thin lines a dragged object snaps to
+        if (editable) for (g in s.guides) {
+            val c = Color(0xFFDB2777)
+            if (g.vertical) Box(Modifier.offset((g.at * perEmu).dp - 0.5.dp, 0.dp).size(1.5.dp, height).background(c).semantics { contentDescription = "slide-guide-v" })
+            else Box(Modifier.offset(0.dp, (g.at * perEmu).dp - 0.5.dp).size(width, 1.5.dp).background(c).semantics { contentDescription = "slide-guide-h" })
+        }
+    }
+}
+
+/** p29: one object inside a group, drawn at its place in the group's box (fill, outline, picture, text). */
+@Composable
+private fun GroupChild(s: DeckSession, c: Shape, x: Dp, y: Dp, w: Dp, h: Dp, perPt: Float) {
+    var m = Modifier.offset(x, y).size(w, h)
+    if (c.rotation != 0) m = m.rotate(c.rotation.toFloat())
+    c.lineRgb?.let { rgb -> m = m.border(((c.lineWidthEmu ?: 12700L) / 12700f * perPt).coerceAtLeast(0.5f).dp, TextPalette.rgb(rgb), geomShape(c.geom, w)) }
+    c.fillRgb?.takeIf { c.kind != ShapeKind.PICTURE }?.let { rgb -> m = m.background(Color(0xFF000000 or rgb.toLong()), geomShape(c.geom, w)) }
+    when {
+        c.children != null -> Box(m) { for (k in c.children!!) {
+            val fx = if (c.w > 0) w.value / c.w else 0f; val fy = if (c.h > 0) h.value / c.h else 0f
+            GroupChild(s, k, ((k.x - c.x) * fx).dp, ((k.y - c.y) * fy).dp, (k.w * fx).coerceAtLeast(1f).dp, (k.h * fy).coerceAtLeast(1f).dp, perPt)
+        } }
+        c.kind == ShapeKind.PICTURE -> c.imagePart?.let { s.image(it) }?.let { bmp -> Image(bitmap = bmp.asImageBitmap(), contentDescription = null, contentScale = ContentScale.FillBounds, modifier = m) }
+        c.paras.isNotEmpty() -> Box(m.padding(horizontal = 2.dp), contentAlignment = if (c.kind == ShapeKind.TITLE) Alignment.CenterStart else Alignment.Center) {
+            Text(
+                c.paras.joinToString("\n") { it.text },
+                style = TextStyle(
+                    fontSize = ((c.fontPt ?: 18f) * perPt).sp, color = c.colorRgb?.let { Color(0xFF000000 or it.toLong()) } ?: Ink.Text,
+                    fontWeight = if (c.bold) FontWeight.Bold else null,
+                    textAlign = when (c.align) { 1 -> TextAlign.Center; 2 -> TextAlign.End; else -> TextAlign.Start },
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        else -> Box(m)
     }
 }
 
@@ -762,6 +816,36 @@ val THEMES: List<Pair<Int, Map<String, Int>>> = listOf(
 
 val SHAPE_FILL = 0x2563EB
 
+/**
+ * v0.6.0 (p29 / p25) the first entries of [Object ▾]: [Add to selection] (the picked object joins; then pick the next
+ * one and add it too), align › and distribute › once two / three are together, [Group] / [Ungroup], [Clear selection].
+ */
+@Composable
+private fun multiEntries(graph: Graph, s: DeckSession): List<MenuEntry> {
+    if (s.readOnly) return emptyList()
+    val n = s.multiSet().size
+    val picked = s.pickedShape()
+    fun need(ok: Boolean, min: Int, f: () -> Boolean) { if (!ok) graph.say(s, graph.str(R.string.obj_need, min)) else if (!f()) graph.say(s, graph.str(R.string.obj_arrange_none)) }
+    return listOfNotNull(
+        if (picked != null && picked.id !in s.multi) MenuEntry(tr(R.string.obj_multi_add, n), "slides/multi-add") { s.addToMulti() } else null,
+        if (n >= 2) subMenu(tr(R.string.obj_align), "slides/align", listOf(
+            MenuEntry(tr(R.string.align_obj_left), "slides/align-obj-left") { need(true, 2) { s.align(Arrange.Align.LEFT) } },
+            MenuEntry(tr(R.string.align_obj_center), "slides/align-obj-center") { need(true, 2) { s.align(Arrange.Align.CENTER) } },
+            MenuEntry(tr(R.string.align_obj_right), "slides/align-obj-right") { need(true, 2) { s.align(Arrange.Align.RIGHT) } },
+            MenuEntry(tr(R.string.align_obj_top), "slides/align-obj-top") { need(true, 2) { s.align(Arrange.Align.TOP) } },
+            MenuEntry(tr(R.string.align_obj_middle), "slides/align-obj-middle") { need(true, 2) { s.align(Arrange.Align.MIDDLE) } },
+            MenuEntry(tr(R.string.align_obj_bottom), "slides/align-obj-bottom") { need(true, 2) { s.align(Arrange.Align.BOTTOM) } },
+        )) else null,
+        if (n >= 3) subMenu(tr(R.string.obj_distribute), "slides/distribute", listOf(
+            MenuEntry(tr(R.string.dist_h), "slides/dist-h") { need(true, 3) { s.distribute(true) } },
+            MenuEntry(tr(R.string.dist_v), "slides/dist-v") { need(true, 3) { s.distribute(false) } },
+        )) else null,
+        if (n >= 2) MenuEntry(tr(R.string.obj_group, n), "slides/group") { if (s.group() < 0) graph.say(s, graph.str(R.string.obj_group_refused)) } else null,
+        if (picked?.children != null && n < 2) MenuEntry(tr(R.string.obj_ungroup), "slides/ungroup") { s.ungroup() } else null,
+        if (s.multi.isNotEmpty()) MenuEntry(tr(R.string.obj_multi_clear), "slides/multi-clear") { s.clearMulti() } else null,
+    )
+}
+
 /** [Object ▸ Copy] / Ctrl+C on a picked object. */
 fun objCopy(graph: io.embodit.spatialoffice.platform.Graph, s: DeckSession) {
     graph.say(s, graph.str(if (s.copySelected()) R.string.obj_copied else R.string.obj_copy_refused))
@@ -788,6 +872,8 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
                 ))
                 ToolMenu(tr(R.string.menu_page), "slides/page", entries = listOfNotNull(
                     MenuEntry(tr(R.string.dup_slide), "slides/dup") { s.duplicateSlide() },
+                    // v0.6.0 (p28): the title bar's [Rehearse] starts at the current slide; this one at the first
+                    MenuEntry(tr(R.string.rehearse_first), "slides/rehearse-first") { graph.rehearse(s, fromStart = true) },
                     // M3 p26 page background (this slide / all slides)
                     if (!s.readOnly) backgroundEntries(graph, s) else null,
                     // d28 version history (the slides toolbar has no More)
@@ -828,7 +914,7 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
                 ))
                 ToolMenu(tr(R.string.menu_color), "slides/color", enabled = textOn, entries =
                     colorEntries("slides/color", s.textCommon { it.color }, { rgb -> s.formatText { sp, a, b -> RichText.setColor(sp, a, b, rgb) } }))
-                ToolMenu(tr(R.string.menu_object), "slides/object", enabled = hasSel, entries = listOf(
+                ToolMenu(tr(R.string.menu_object), "slides/object", enabled = hasSel || s.multi.isNotEmpty(), entries = multiEntries(graph, s) + listOf(
                     MenuEntry(tr(R.string.obj_left), "slides/obj-left") { s.nudge(-1, 0) },
                     MenuEntry(tr(R.string.obj_right), "slides/obj-right") { s.nudge(1, 0) },
                     MenuEntry(tr(R.string.obj_up), "slides/obj-up") { s.nudge(0, -1) },

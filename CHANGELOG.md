@@ -1,5 +1,26 @@
 # Changelog · 更新记录
 
+## v0.6.0 · 2026-11-22
+
+- 文档：可以从一段中间拖到另一段中间，一次选中好几段；Ctrl+C / Ctrl+X 复制剪切，粘到别处时加粗、颜色、列表都还在（[更多 ▾] 里也有复制 / 剪切 / 粘贴）
+- 文档：[更多 ▾] › 大纲：列出标题，点一下就翻到那里
+- 新建：主页「新建」的文档、演示卡下面各有一行模板：会议纪要 / 周报 / 方案 / 简历，工作汇报 / 产品介绍 / 极简深色；新建出来就是普通的 .docx / .pptx
+- 表格：输入 = 和函数名开头时列出可用的函数，Tab 补全，括号里提示参数
+- 表格：[数据 ▾] › 筛选…：选值、大于、小于、包含；排序…：按好几列排，第一行是表头时表头留在最上面（中文按拼音排）；冻结到这里（如冻结到 B2：上面一行、左边一列不动）
+- 表格：[行列 ▾] › 隐藏 › 隐藏行 / 隐藏列 / 取消隐藏，存进文件
+- 演示：[所选对象 ▾] › 加入多选，几个对象一起左对齐 / 居中 / 右对齐、横向 / 纵向等距，组合后一起拖，也能取消组合；拖动对象时靠近别的对象或页面中线会吸附，出一条细参考线
+- 预演：预演条加了 [跳到…]（点页码直接跳）和 [黑屏]；键盘输入页码按回车跳页，按 B 黑屏 / 恢复；[页面 ▾] › 从第 1 页开始预演
+- 预演结束后，刚放映的那扇窗回到主页旁边最近的位置，主页上一行提示它在左边还是右边；其他窗口留在原来那一侧，不再左右对调
+- Documents: drag from the middle of one paragraph to the middle of another to select across paragraphs; Ctrl+C / Ctrl+X, and pasting keeps bold, colours and lists (Copy / Cut / Paste are also under More)
+- Documents: More › Outline lists the headings; a click scrolls there
+- New: rows of templates under the document and presentation cards: Meeting notes / Weekly report / Proposal / Résumé, Work report / Product pitch / Minimal dark; they are ordinary .docx / .pptx files
+- Sheets: typing = and the start of a name lists the functions, Tab completes, the arguments show inside the brackets
+- Sheets: Data › Filter… (pick values, greater than, less than, contains); Sort… by several columns, headings kept on top (Chinese by pinyin); Freeze here (at B2: the row above and the column left stay)
+- Sheets: Rows & columns › Hide › rows / columns / Unhide, saved in the file
+- Slides: Object › Add to selection, then align left / centre / right, space evenly, group and drag together, ungroup; a dragged object snaps to the others and to the slide centre with a thin guide line
+- Rehearsal: the bar has Go to… (pick a slide number) and Black screen; type a number and Enter to jump, B for black; Page › Rehearse from slide 1
+- After a rehearsal the file just shown comes back right next to the home window, which says on which side; the other windows stay on their own side
+
 ## v0.5.2 · 2026-11-21
 
 - 修好：从主页连开几个文件时，主页也在环绕的一排里占一个位置：第一个文件开在主页旁边，不再和主页叠在同一处；用 [窗口 n] › [主页] 回主页时主页留在原地，不会把哪个文件窗收起来，几扇窗口和主页都在、都朝向你
