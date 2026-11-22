@@ -596,7 +596,10 @@ class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File)
         /** A typed address without a scheme gets one: "example.com" → "https://example.com"; "x@y.z" → "mailto:x@y.z". */
         fun normalizeUrl(url: String): String {
             val u = url.trim()
-            if (u.isEmpty() || SCHEME.containsMatchIn(u)) return u
+            if (u.isEmpty()) return u
+            // v0.5.1 (q13-2): schemes are case-insensitive (RFC 3986) but Android matches them exactly: "Https://…"
+            // found no browser. The scheme is written in lower case; the rest stays as typed.
+            SCHEME.find(u)?.let { m -> return m.value.lowercase() + u.substring(m.value.length) }
             if (EMAIL.matches(u)) return "mailto:$u"
             return "https://$u"
         }

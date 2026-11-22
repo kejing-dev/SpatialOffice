@@ -517,12 +517,12 @@ private fun SheetDeleteDialog(graph: Graph, s: SheetSession) {
 }
 
 @Composable
-fun LabeledField(label: String, value: String, tag: String, onChange: (String) -> Unit) {
+fun LabeledField(label: String, value: String, tag: String, keyboard: androidx.compose.foundation.text.KeyboardOptions = androidx.compose.foundation.text.KeyboardOptions.Default, onChange: (String) -> Unit) {
     Column(Modifier.fillMaxWidth()) {
         Txt(label, "$tag/label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
         Spacer(Modifier.height(6.dp))
         androidx.compose.foundation.text.BasicTextField(
-            value = value, onValueChange = onChange, singleLine = true,
+            value = value, onValueChange = onChange, singleLine = true, keyboardOptions = keyboard,
             textStyle = androidx.compose.ui.text.TextStyle(fontSize = androidx.compose.ui.unit.TextUnit(18f, androidx.compose.ui.unit.TextUnitType.Sp), color = PicoTheme.colorScheme.labelPrimary),
             cursorBrush = androidx.compose.ui.graphics.SolidColor(PicoTheme.colorScheme.interaction),
             modifier = Modifier.typingTarget().fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(14.dp)).background(PicoTheme.colorScheme.fillSecondary)
@@ -578,6 +578,13 @@ private fun InsertTableDialog(graph: Graph, s: DocSession) {
  * M3 d20: add or edit a link. The address is required; with nothing selected the text to show is typed in at the
  * caret (the address itself when left blank). An existing link offers [Remove link].
  */
+/** v0.5.1 (QA #13 q13-2): addresses: the URI keyboard, no automatic capital ("Https://"), no suggestions. */
+val UrlKeyboard = androidx.compose.foundation.text.KeyboardOptions(
+    capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.None,
+    autoCorrect = false,
+    keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+)
+
 @Composable
 private fun LinkSheet(graph: Graph, s: DocSession, o: Overlay.Link) {
     var url by remember(o) { mutableStateOf(o.url) }
@@ -606,7 +613,7 @@ private fun LinkSheet(graph: Graph, s: DocSession, o: Overlay.Link) {
         },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            LabeledField(tr(R.string.link_url), url, "link/url") { url = it; why = false }
+            LabeledField(tr(R.string.link_url), url, "link/url", UrlKeyboard) { url = it; why = false }
             if (typeText) LabeledField(tr(R.string.link_text), text, "link/text") { text = it }
             else Txt(o.text, "link/shown", style = PicoTheme.typography.bodyLarge, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
         }

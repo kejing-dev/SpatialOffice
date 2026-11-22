@@ -105,6 +105,14 @@ class CellEdit {
     var value by mutableStateOf(TextFieldValue(""))
     var editing by mutableStateOf(false)
     val focus = FocusRequester()
+    /**
+     * v0.5.1 (QA #13 q13-1): bumped every time typed text is committed. The formula bar's text field is keyed on it,
+     * so the input method gets a fresh connection for the next cell. Before, the keyboard still held the committed
+     * word as its composing text and wrote it into the next cell ("abc⏎ de⏎" saved Abc / Abcde). Text that arrives
+     * for an older generation ([accept]) is dropped.
+     */
+    var generation by mutableStateOf(0)
+        private set
 
     fun load(s: SheetSession) {
         val t = s.book.cell(s.sheet, s.row, s.col).input
@@ -112,11 +120,62 @@ class CellEdit {
         value = TextFieldValue(t, TextRange(0, t.length)); editing = false
     }
 
-    fun commit(s: SheetSession) {
-        if (editing) s.setCell(s.row, s.col, value.text)
+    /** Writes the typed text into the cell; the buffer is emptied and the input connection renewed. True when there was typed text. */
+    fun commit(s: SheetSession): Boolean {
+        val typed = editing
+        if (typed) {
+            val t = value.text.replace("\n", "")
+            s.setCell(s.row, s.col, t)
+            value = TextFieldValue("")
+            generation++
+            lastCommitted = t; committedAt = clock()
+        }
         editing = false
+        return typed
     }
+
+    /** What the last commit wrote and when (ms); a keyboard re-sending that word right after is not typing. */
+    private var lastCommitted = ""
+    private var committedAt = Long.MIN_VALUE / 2
+    var clock: () -> Long = { android.os.SystemClock.uptimeMillis() }
+
+    /**
+     * The new cell's first text: when, within [ECHO_MS] of a commit, it starts with the whole committed word (an input
+     * method finishing its old composing text into the new connection), that word is taken off again.
+     */
+    private fun dropEcho(nv: TextFieldValue): TextFieldValue {
+        if (editing || nv.text == value.text || lastCommitted.length < 2 || clock() - committedAt > ECHO_MS) return nv
+        if (!nv.text.startsWith(lastCommitted)) return nv
+        val rest = nv.text.substring(lastCommitted.length)
+        android.util.Log.i("SpatialOffice", "CELLEDIT dropped echo of the last cell (${lastCommitted.length} chars)")
+        lastCommitted = ""
+        return TextFieldValue(rest, TextRange(rest.length))
+    }
+
+    /** Enter / Tab / arrows: commit, move the selection by (dr, dc), show the new cell's value. */
+    fun advance(s: SheetSession, dr: Int, dc: Int) {
+        commit(s); s.select(s.row + dr, s.col + dc); load(s)
+    }
+
+    /** Text from the field of generation [gen]; false (dropped) when that field belongs to a cell already committed. */
+    fun accept(gen: Int, nv0: TextFieldValue): Boolean {
+        if (gen != generation) return false
+        val nv = dropEcho(nv0)
+        if (nv.text != value.text) editing = true
+        value = nv
+        return true
+    }
+
+    companion object { const val ECHO_MS = 800L }
 }
+
+/** v0.5.1 (q13-1): cell input: no automatic capital letter, no suggestions (no composing word carried between cells). */
+val CellKeyboard = KeyboardOptions(
+    capitalization = androidx.compose.ui.text.input.KeyboardCapitalization.None,
+    autoCorrect = false,
+    keyboardType = androidx.compose.ui.text.input.KeyboardType.Text,
+    imeAction = ImeAction.Done,
+)
 
 private val ROW_H = 36.dp
 private val HEAD_W = 52.dp
@@ -164,7 +223,7 @@ fun SheetWindow(tag: String? = null) {
  */
 fun sheetKeys(graph: Graph, s: SheetSession, edit: CellEdit, e: KeyEvent): Boolean {
     if (e.type != KeyEventType.KeyDown) return false
-    fun move(dr: Int, dc: Int) { edit.commit(s); s.select(s.row + dr, s.col + dc); edit.load(s) }
+    fun move(dr: Int, dc: Int) = edit.advance(s, dr, dc)
     fun extend(dr: Int, dc: Int) { edit.commit(s); s.extendTo(s.row + dr, s.col + dc); edit.load(s) }
     val arrow = when (e.key) { Key.DirectionUp -> -1 to 0; Key.DirectionDown -> 1 to 0; Key.DirectionLeft -> 0 to -1; Key.DirectionRight -> 0 to 1; else -> null }
     return when {
@@ -208,20 +267,26 @@ fun FormulaBar(s: SheetSession, edit: CellEdit, modifier: Modifier = Modifier) {
         Box(Modifier.width(10.dp))
         Box(Modifier.weight(1f).height(52.dp).clip(RoundedCornerShape(12.dp)).background(Ink.Paper).border(1.5.dp, if (edit.editing) Ink.Select else Ink.Line, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp), contentAlignment = Alignment.CenterStart) {
             if (edit.value.text.isEmpty()) Text(tr(R.string.formula_ph), style = TextStyle(fontSize = 17.sp, color = Ink.Hint))
-            BasicTextField(
-                value = edit.value,
-                onValueChange = { nv ->
-                    if (nv.text.contains('\n')) { edit.commit(s); s.select(s.row + 1, s.col); edit.load(s) } // Enter arriving as text
-                    else { if (nv.text != edit.value.text) edit.editing = true; edit.value = nv }
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                // Enter from a keyboard that the system routes through the input method
-                keyboardActions = KeyboardActions(onDone = { edit.commit(s); s.select(s.row + 1, s.col); edit.load(s) }),
-                textStyle = TextStyle(fontSize = 17.sp, color = Ink.Text),
-                cursorBrush = SolidColor(Ink.Select),
-                modifier = Modifier.fillMaxWidth().focusRequester(edit.focus).typingTarget().semantics { contentDescription = "formula-input" },
-            )
+            // v0.5.1 (q13-1): a new field (and input connection) after every commit; no auto capital, no suggestions
+            val gen = edit.generation
+            androidx.compose.runtime.key(gen) {
+                BasicTextField(
+                    value = edit.value,
+                    onValueChange = { nv ->
+                        if (!edit.accept(gen, nv)) return@BasicTextField // the keyboard finishing a word of the last cell
+                        if (nv.text.contains('\n')) edit.advance(s, 1, 0) // Enter arriving as text
+                    },
+                    singleLine = true,
+                    keyboardOptions = CellKeyboard,
+                    // Enter from a keyboard that the system routes through the input method
+                    keyboardActions = KeyboardActions(onDone = { if (gen == edit.generation) edit.advance(s, 1, 0) }),
+                    textStyle = TextStyle(fontSize = 17.sp, color = Ink.Text),
+                    cursorBrush = SolidColor(Ink.Select),
+                    modifier = Modifier.fillMaxWidth().focusRequester(edit.focus).typingTarget().semantics { contentDescription = "formula-input" },
+                )
+            }
+            // the new field takes the keyboard back at once
+            LaunchedEffect(gen) { if (gen > 0) { kotlinx.coroutines.delay(30); runCatching { edit.focus.requestFocus() } } }
         }
     }
 }

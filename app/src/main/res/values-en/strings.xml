@@ -608,6 +608,7 @@
     <string name="link_need_url" formatted="false">Type an address first</string>
     <string name="link_open" formatted="false">Open</string>
     <string name="link_edit" formatted="false">Edit</string>
+    <string name="link_cant_open">Can\'t open this link: %1$s</string>
     <string name="pagebreak_label" formatted="false">Page break: what follows starts on a new page</string>
     <string name="pagebreak_remove" formatted="false">Remove</string>
     <string name="fmt_sup" formatted="false">Superscript</string>

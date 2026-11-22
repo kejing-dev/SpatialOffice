@@ -96,6 +96,11 @@ fun EditorTitleBar(graph: Graph, win: Win, s: Session, extra: (@Composable () ->
                 WindowsMenu(graph, s)
                 Box {
                     ToolIcon(R.drawable.ic_ellipsis, tr(R.string.more), onClick = { menu = !menu })
+                    val menuKey = androidx.compose.runtime.remember { Any() }
+                    androidx.compose.runtime.DisposableEffect(menu) {
+                        if (menu) io.embodit.spatialoffice.platform.OpenMenus.opened(menuKey) { menu = false } // v0.5.1: BACK closes it
+                        onDispose { io.embodit.spatialoffice.platform.OpenMenus.closed(menuKey) }
+                    }
                     if (menu) {
                         Menu(
                             onDismissRequest = { menu = false },

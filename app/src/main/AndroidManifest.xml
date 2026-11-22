@@ -16,6 +16,10 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
         </intent>
+        <!-- v0.5.1: PICO Browser by package for sign-in pages and links (profile B28) -->
+        <package android:name="com.picoxr.browser" />
+        <package android:name="com.pico.browser" />
+        <package android:name="com.picovr.browser" />
     </queries>
 
     <application

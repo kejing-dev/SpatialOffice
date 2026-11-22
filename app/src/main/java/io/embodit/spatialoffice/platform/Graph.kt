@@ -149,6 +149,8 @@ class Graph(val app: Application) {
         if (u.isEmpty()) return false
         val ok = accounts.launchBrowser(u)
         android.util.Log.i(TAG, "DOCLINK open $u started=$ok")
+        // v0.5.1 (q13-2): never silent: a link nothing can open says so in the document window
+        if (!ok) say(Win.DOC, str(R.string.link_cant_open, u))
         return ok
     }
     var toast by mutableStateOf<Toast?>(null)
@@ -772,9 +774,10 @@ class Graph(val app: Application) {
     // ---------------------------------------------------------------- BACK / controller B (profile D60)
 
     fun onBack(where: String) {
-        val act = BackPolicy.decide(overlay != null, stageMode != null, windows.isOpen(Win.HOME))
+        val act = BackPolicy.decide(overlay != null, stageMode != null, windows.isOpen(Win.HOME), OpenMenus.any)
         Log.i(TAG, "BACK $where -> $act")
         when (act) {
+            BackAct.CLOSE_MENU -> OpenMenus.closeNewest()
             BackAct.CLOSE_OVERLAY -> when (overlay) {
                 is Overlay.Unsaved -> answerUnsaved("cancel")
                 else -> overlay = null

@@ -7,11 +7,26 @@ import android.view.View
 import android.view.Window
 
 /** What BACK / controller B does (profile D60): never exit, never send the app to the background. */
-enum class BackAct { CLOSE_OVERLAY, REOPEN_HOME, NOTHING }
+enum class BackAct { CLOSE_MENU, CLOSE_OVERLAY, REOPEN_HOME, NOTHING }
+
+/**
+ * v0.5.1 (self-test on the 6.2.1 image, where the dropdown menus open for the first time): the open toolbar menus.
+ * BACK / controller B was caught by [BackKeys] before the menu's own window saw it, so a menu stayed open; now BACK
+ * closes the newest open menu first. Main thread only (menus open and keys arrive there).
+ */
+object OpenMenus {
+    private val open = ArrayList<Pair<Any, () -> Unit>>()
+    val any: Boolean get() = open.isNotEmpty()
+    fun opened(key: Any, dismiss: () -> Unit) { open.removeAll { it.first === key }; open.add(key to dismiss) }
+    fun closed(key: Any) { open.removeAll { it.first === key } }
+    /** Closes the newest open menu; false when none is open. */
+    fun closeNewest(): Boolean { val m = open.removeLastOrNull() ?: return false; m.second(); return true }
+}
 
 /** Pure rule, unit-tested (BackKeysTest): a dialog or sheet open = close it; the home window closed = bring it back; else nothing. */
 object BackPolicy {
-    fun decide(overlayOpen: Boolean, stageUp: Boolean, homeOpen: Boolean): BackAct = when {
+    fun decide(overlayOpen: Boolean, stageUp: Boolean, homeOpen: Boolean, menuOpen: Boolean = false): BackAct = when {
+        menuOpen -> BackAct.CLOSE_MENU
         overlayOpen -> BackAct.CLOSE_OVERLAY
         stageUp -> BackAct.NOTHING // the Stage has its own [Collapse]; B there does not leave it
         !homeOpen -> BackAct.REOPEN_HOME

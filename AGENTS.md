@@ -380,7 +380,7 @@ Each command calls the same function as the control it stands for; the app logs 
 | `doc-pick`, `doc-resize` | `<n>` / `<corner> <dx,dy>` | pick the n-th picture or table of the document / resize it (picture: EMU, table: percent in dx) |
 | `front`, `activate`, `close-tag` | window tag (`f1` …) | open-again behaviour / make it the active one of its kind / its title-bar close |
 | `front-home`, `arrange` | — / tag | Windows ▸ Home / Windows ▸ Side by side around that window |
-| `win-place`, `front-mode` | `front` `gap:<dp>` / `auto` `restore` `reopen` | placement trials (emulator only) |
+| `win-place`, `front-mode` | `arc` (default) `front` `gap:<dp>` / `auto` `restore` `reopen` | v0.5.1: `arc` = new editor windows beside the ones up (ArcRing, log `ARC`); `front` = the old in-front rule; placement trials |
 | `cloud-id` | `<service> [client id]` | debug-only client id for this run (shows the service, [Connect] opens the browser) |
 | `mainwatch` | seconds (default 10) | log the longest main-thread frame gap over that time (`MAINWATCH baseline …`), the emulator's own load for comparing with `MAINWATCH chart-open` |
 | `fill-cells` | `down` `right` | v0.5.0 s24: Ctrl+D / Ctrl+R on the selection (`fill` stays the fill colour) |
@@ -408,6 +408,21 @@ a filter, Data / Rows & columns / Chart menus, flat line and pie charts; Account
 Screenshot states: home (5 pages × 2 languages), new-doc / new-sheet / new-slides, doc, sheet, slides, compat,
 save-first, save-as, unsaved, shortcuts, how-to, exit-confirm, chart columns / scatter, spread row / arc / layers
 for each kind, rehearsal.
+
+## v0.5.1 (M3fix)
+
+- Cells: `CellEdit.generation` renews the formula bar's text field (and input connection) after each commit; `CellKeyboard`
+  (no capital, no autocorrect); a keyboard re-sending the last word within 800 ms is dropped (log `CELLEDIT dropped echo`). `M3FixTest`.
+- Links: `UrlKeyboard` (URI type, no capital) on the address; `DocSession.normalizeUrl` lower-cases the scheme; `Graph.openLink`
+  toasts `link_cant_open` when nothing opens it.
+- Windows: `core/layout/ArcRing` + `WindowCtl.ring`: the first editor window opens in front, every next one right / left of the
+  outer window (`Placement.right/left`, 56 dp). `ArcRingTest`.
+- Browser: `BrowserPick` sends http(s) to PICO Browser (`com.picoxr.browser`) by package (sign-in pages and links), manifest `<queries>`.
+- BACK: `OpenMenus` — an open toolbar / title-bar menu is closed first (`BackAct.CLOSE_MENU`).
+- Emulator 6.2.1 (`Pico_Emulator_6_2_a`): menus, Sheets, Stage (rehearsal / storyline) and the 3D chart all work; real clicks
+  through `npx -y @picoxr/pico-cli@0.7.0 interact query|perform` (query is capped at 100 nodes: filter with `--text`). Start it
+  muted: `ANDROID_AVD_HOME` + `ANDROID_SDK_ROOT=<sdk>/6.2/emulator/system-images` + `ANDROID_SDK_HOME=~/.pico`, then
+  `emulator.exe -avd Pico_Emulator_6_2_a -port 5566 -gpu angle_indirect -sysdir <…>/system-images -no-audio`.
 
 ## Cloud accounts
 

@@ -34,6 +34,10 @@ import io.embodit.spatialoffice.ui.space.StageScreen
  * gap leaves the window unshown, a gap ≥ 0 puts it beside the anchor on the circle around the user, mostly outside
  * ±39° (WindowFit.besideYaw) — and it takes the window that was in front off stage. So the windows are switched with
  * the title bar's [Windows] menu; only its [Side by side] (WindowCtl.arrange) asks for a place beside another window.
+ *
+ * v0.5.1 (user 2026-11-21 「直接摆在旁边环绕多窗口这样排布」): that is now the default. The first editor window opens in
+ * front; every next one is placed beside the outer window of the row (ArcRing, alternately right and left, 56 dp gap),
+ * so the windows already up stay where they are and in sight. [Windows] › [Side by side] and [Window n] remain.
  */
 internal fun editorPlacement(containers: List<ContainerProxy>, id: String): Placement {
     val next = Placing.next[id]

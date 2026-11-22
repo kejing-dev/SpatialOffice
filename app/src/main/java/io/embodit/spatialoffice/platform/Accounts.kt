@@ -83,9 +83,16 @@ class Accounts(private val app: Application, private val graph: Graph) {
      * (`CLOUD … browser intent`) and the unit test of [BrowserSignIn] see the same call.
      */
     var launchBrowser: (String) -> Boolean = { url ->
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        val ok = runCatching { app.startActivity(intent) }.onFailure { Log.w(TAG, "CLOUD no browser: $it") }.isSuccess
-        Log.i(TAG, "CLOUD browser intent ${intent.action} ${url.substringBefore('?')} started=$ok")
+        // v0.5.1 (profile B28, user 2026-11-21 "主要是在浏览器里授权那些"): web addresses go to PICO Browser by
+        // package, so a drive's own app (not on PICO) is never looked for or jumped to; other browsers only when
+        // PICO Browser is missing, and mailto: etc. to whatever handles them.
+        val pkg = BrowserPick.packageFor(url) { p -> runCatching { app.packageManager.getPackageInfo(p, 0) }.isSuccess }
+        fun intentFor(p: String?) = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .apply { if (p != null) setPackage(p) }
+        var intent = intentFor(pkg)
+        var ok = runCatching { app.startActivity(intent) }.onFailure { Log.w(TAG, "CLOUD browser $pkg: $it") }.isSuccess
+        if (!ok && pkg != null) { intent = intentFor(null); ok = runCatching { app.startActivity(intent) }.onFailure { Log.w(TAG, "CLOUD no browser: $it") }.isSuccess }
+        Log.i(TAG, "CLOUD browser intent ${intent.action} pkg=${intent.`package`} ${url.substringBefore('?')} started=$ok")
         ok
     }
     /** Version stamp of each open cloud file when it was opened / last saved (for the §9.3 conflict check). */
@@ -692,5 +699,21 @@ class Accounts(private val app: Application, private val graph: Graph) {
         }
 
         fun from(context: Context): Accounts = Graph.from(context).accounts
+    }
+}
+
+/**
+ * v0.5.1 (profile B28): which app opens an address. http / https go to PICO Browser when it is installed (sign-in
+ * pages and document links alike, so no drive's own app is ever looked for); otherwise null = the system's choice.
+ */
+object BrowserPick {
+    const val PICO_BROWSER = "com.picoxr.browser"
+    /** Other PICO Browser package names seen on older system images. */
+    val PICO_BROWSERS = listOf(PICO_BROWSER, "com.pico.browser", "com.picovr.browser")
+
+    fun packageFor(url: String, installed: (String) -> Boolean): String? {
+        val scheme = url.substringBefore(':', "").lowercase()
+        if (scheme != "http" && scheme != "https") return null
+        return PICO_BROWSERS.firstOrNull(installed)
     }
 }

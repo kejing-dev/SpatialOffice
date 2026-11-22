@@ -608,6 +608,7 @@ link_remove	去掉链接	Remove link
 link_need_url	先填一个地址	Type an address first
 link_open	打开	Open
 link_edit	改	Edit
+link_cant_open	打不开这个链接：%1$s	Can't open this link: %1$s
 pagebreak_label	分页符，后面的内容从新的一页开始	Page break: what follows starts on a new page
 pagebreak_remove	去掉	Remove
 fmt_sup	上标	Superscript

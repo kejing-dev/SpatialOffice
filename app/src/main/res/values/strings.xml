@@ -608,6 +608,7 @@
     <string name="link_need_url" formatted="false">先填一个地址</string>
     <string name="link_open" formatted="false">打开</string>
     <string name="link_edit" formatted="false">改</string>
+    <string name="link_cant_open">打不开这个链接：%1$s</string>
     <string name="pagebreak_label" formatted="false">分页符，后面的内容从新的一页开始</string>
     <string name="pagebreak_remove" formatted="false">去掉</string>
     <string name="fmt_sup" formatted="false">上标</string>

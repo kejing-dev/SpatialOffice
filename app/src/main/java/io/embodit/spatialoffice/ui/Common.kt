@@ -321,6 +321,12 @@ fun ToolMenu(label: String, tag: String, entries: List<MenuEntry>, enabled: Bool
     var page by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<MenuEntry?>(null) }
     Box {
         ToolButton(label, tag, onClick = { open = !open; page = null; if (open) io.embodit.spatialoffice.platform.BackKeys.sweepSoon("menu $tag") }, enabled = enabled && entries.isNotEmpty(), icon = icon, width = width)
+        // v0.5.1: BACK / controller B closes the open menu (OpenMenus)
+        val menuKey = androidx.compose.runtime.remember { Any() }
+        androidx.compose.runtime.DisposableEffect(open) {
+            if (open) io.embodit.spatialoffice.platform.OpenMenus.opened(menuKey) { open = false; page = null }
+            onDispose { io.embodit.spatialoffice.platform.OpenMenus.closed(menuKey) }
+        }
         if (open) {
             // the open page follows the entries as they are now (a tick moves after a pick)
             val sub = page?.let { p -> entries.firstOrNull { it.tag == p.tag && it.sub != null }?.sub ?: p.sub }

@@ -166,7 +166,7 @@ object DebugReceiver {
             "front" -> g.sessionByTag(arg)?.let { g.front(it) }
             "activate" -> g.sessionByTag(arg)?.let { g.activate(it) }
             "close-tag" -> g.sessionByTag(arg)?.let { g.requestClose(it) }
-            "win-place" -> Placing.mode = arg.ifEmpty { "front" }
+            "win-place" -> Placing.mode = arg.ifEmpty { "arc" }
             "front-home" -> g.windows.frontHome()
             "arrange" -> (g.sessionByTag(arg) ?: g.sessions.lastOrNull())?.let { g.windows.arrange(g.refOf(it)) }
             "front-mode" -> g.windows.frontMode = arg.ifEmpty { "auto" }

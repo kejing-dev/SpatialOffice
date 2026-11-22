@@ -50,10 +50,13 @@ object Placing {
     /** [besideKey]: window key ([Containers.key]) of the window to stand beside, on [side] ("right" / "left"); null = in front. */
     data class Next(val tag: String, val besideKey: String? = null, val side: String = "right")
     val next = ConcurrentHashMap<String, Next>()
-    /** "front" (default) | "gap:<dp>" (right of the newest window of the kind, for placement trials); debug command `win-place`. */
-    @Volatile var mode: String = "front"
-    /** Gap between two windows set out side by side (dp). */
-    const val BESIDE_GAP_DP = 24.0
+    /**
+     * "arc" (default since v0.5.1: beside the windows already up, ArcRing) | "front" (every new window in front, the
+     * v0.2.5–v0.5.0 rule) | "gap:<dp>" (right of the newest window of the kind, placement trials); debug `win-place`.
+     */
+    @Volatile var mode: String = "arc"
+    /** Gap between two windows set out side by side (dp); v0.5.1: the system's own multi-window spacing (profile D8). */
+    const val BESIDE_GAP_DP = 56.0
 }
 
 /**
@@ -124,7 +127,7 @@ class WindowCtl(private val graph: Graph) {
         }
         Log.i(TAG, "WINDOW $ref $event")
         BackKeys.sweepSoon("window $ref") // v0.4.2: its toolbar / ornament windows attach after the activity resumes
-        if (event == "ON_DESTROY" && !exiting && ref.editor && ref !in closedForStage && ref !in reopen) graph.windowClosed(ref)
+        if (event == "ON_DESTROY" && !exiting && ref.editor && ref !in closedForStage && ref !in reopen) { ring.remove(Containers.key(ref)); graph.windowClosed(ref) }
     }
 
     fun open(win: Win) = open(WinRef(win))
@@ -145,7 +148,12 @@ class WindowCtl(private val graph: Graph) {
             // in front of the user unless [arrange] asked for a place beside another window (Main.kt editorPlacement)
             val beside = besideNext.remove(ref)
             val trial = if (beside == null && Placing.mode.startsWith("gap:")) graph.sessions.lastOrNull { graph.refOf(it) != ref && graph.winOf(it.kind) == ref.win && isOpen(graph.refOf(it)) }?.let { Containers.key(graph.refOf(it)) to "right" } else null
-            Placing.next[Containers.id(ref.win)] = Placing.Next(ref.tag, (beside ?: trial)?.first, (beside ?: trial)?.second ?: "right")
+            // v0.5.1 (user 2026-11-21): a new editor window goes beside the ones already up, on the circle around
+            // the user (ArcRing), not in front of them; the first one opens in front. Windows brought back to the
+            // front ([front] → reopenInFront) and [arrange] keep their own placement.
+            val arc = if (beside == null && trial == null && Placing.mode == "arc" && ref !in reopen) ring.place(Containers.key(ref)) { k -> ringLive(k) } else null
+            if (arc != null || (beside == null && trial == null && Placing.mode == "arc" && ref !in reopen)) Log.i(TAG, "ARC $ref -> ${arc?.let { "${it.second} of ${it.first}" } ?: "front"} row=${ring.order}")
+            Placing.next[Containers.id(ref.win)] = Placing.Next(ref.tag, (beside ?: trial ?: arc)?.first, (beside ?: trial ?: arc)?.second ?: "right")
             unclaimed.getOrPut(ref.win) { ArrayDeque() }.let { if (ref.tag !in it) it.addLast(ref.tag) }
         }
         Log.i(TAG, "WINDOW open $ref")
@@ -203,6 +211,14 @@ class WindowCtl(private val graph: Graph) {
             }
         }
         main.postDelayed(tick, 100)
+    }
+
+    /** v0.5.1: the row of editor windows on the circle around the user (left to right). */
+    val ring = io.embodit.spatialoffice.core.layout.ArcRing()
+    /** A window of the row is still there: open, or asked for in the last 3 s (not up yet). */
+    private fun ringLive(key: String): Boolean {
+        val ref = (state.keys + askedAt.keys).firstOrNull { Containers.key(it) == key } ?: return false
+        return isOpen(ref) || (askedAt[ref]?.let { SystemClock.elapsedRealtime() - it < 3000 } ?: false)
     }
 
     /** Where the next opening of a window goes when [arrange] set it beside another: window key and side. */

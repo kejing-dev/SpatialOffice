@@ -1,5 +1,18 @@
 # Changelog · 更新记录
 
+## v0.5.1 · 2026-11-21
+
+- 修好：表格里打字按回车后，上一格的字不会再带进下一格（「abc」「de」「f」不再存成 Abc / Abcde / Abcdef）；单元格不再自动把首字母变大写
+- 修好：链接地址框用网址键盘、不自动大写；「Https://…」这类大写开头的地址也能打开；打不开的链接会提示「打不开这个链接」，不再没反应
+- 多开窗口直接摆在旁边：再开一个文件，新窗口沿着你周围的弧面摆到已有窗口的右边、左边，依次排开，都朝向你，不再挡在正前方把旧窗口挤到后面；不用先点 [并排摆开]
+- 网盘 [连接] 和文档里的链接都用 PICO 浏览器打开，在网页里授权后回到应用，不去找网盘自己的 App
+- 下拉菜单开着时按返回键 / 手柄 B 先关菜单
+- Fixed: typing in a cell and pressing Enter no longer carries the last cell's text into the next one ("abc", "de", "f" no longer saved as Abc / Abcde / Abcdef); cells no longer capitalise the first letter
+- Fixed: the link address field has the web-address keyboard and no automatic capital; addresses starting "Https://" open; a link that cannot open says so
+- More windows stand beside each other: opening another file puts its window on the circle around you, to the right, then the left of the ones already up, all facing you; none is pushed behind; no need to press Side by side first
+- Drive [Connect] and document links open in PICO Browser: approve on the web page and come back; no drive app is looked for
+- With a dropdown menu open, BACK / controller B closes the menu first
+
 ## v0.5.0 · 2026-11-21
 
 - 表格：Ctrl+D 向下填充、Ctrl+R 向右填充（公式跟着挪），[编辑 ▾] › 填充 › 填充序列：1、2 接着 3、4，日期按天往后，「Q1」接「Q2」
