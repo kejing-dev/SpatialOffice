@@ -50,7 +50,9 @@ import io.embodit.spatialoffice.platform.held
 @Composable
 fun statusLine(graph: Graph, s: Session): String {
     s.version
-    val path = graph.storage.display(s.ref)
+    // v0.5.0: the file name is the title right above; the status line names the folder, so a long name does not push it out of the bar
+    val full = graph.storage.display(s.ref)
+    val path = if (full.endsWith("/" + s.ref.name)) full.substringBeforeLast('/') else full
     val head = when {
         s.isNew -> tr(R.string.status_new, path, s.ref.name.substringAfterLast('.'))
         s.readOnly -> tr(R.string.status_readonly, path)

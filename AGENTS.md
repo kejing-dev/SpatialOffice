@@ -225,6 +225,82 @@ file moves its history. Overlay `History` (doc More ▾, sheet Edit ▾, slides 
 line|spacing`, `SLIDETEXT`, `OBJSTYLE`, `HISTORY kept|restore|list`. Menus: `MenuEntry.sub` / `subMenu()` opens a second
 page of the same menu ([‹ back] first). Tests: `M2Test` (app), `DocxM2Test`, `PptxM2Test`, `XlsxM2Test`, `RotationTest`.
 
+v0.5.0 (M3, design-package roadmap[2]; "Spreadsheet depth, inserts, zoom"; 13 items, no new panels, entries in the
+menus that were there plus a zoom menu in the title bar):
+
+**Spreadsheets.** s24 `XlsxWorkbook.fill(sheet, rect, down)`: the first row (down) / column (right) of the rectangle goes
+into the rest through `copyRange` / `pasteRange` (formulas move, styles copied); a rectangle one row high / one column
+wide takes the row above / column to the left (Ctrl+D / Ctrl+R, [Edit ▾ ▸ Fill ›]). `fillSeries`: per column / row the
+leading filled cells are the seed: numbers (dates included) continue their step (one seed: +1, a day), text ending in a
+number ("Q1") counts that number up, anything else (formulas too) is copied; the seed's style goes with it. Log `FILL`.
+s25 `mergeCells / unmergeCells / merges / mergeAt`: `Sheet.merges` (null = the file's `<mergeCells>` after this
+session's row / column ops) and `mergesChanged`; a merge takes in every merge it touches and empties all but the
+top-left cell; saving rewrites the `<mergeCells>` element only (`mergeEdits`, put after `sheetData` before the
+`AFTER_MERGE` elements when the sheet had none, removed when empty); inserted / deleted rows and columns move it.
+[Rows & columns ▾ ▸ Merge cells] (selection ≥ 2 cells; the merged cell is then selected) / [Unmerge cells] (shown on a
+merged cell). The grid draws a merge as one box across its columns at its first column in view; its top row shows the
+top-left value, the rows below continue the box without inner lines; a click selects the whole merge. Log `MERGE`. The
+compatibility list no longer names merged cells. s26 `Styles.withBorders / borderMask` (thin, automatic colour,
+`Borders.LEFT|RIGHT|TOP|BOTTOM` bits; one `<border>` + `<xf>` appended only when no equal one exists), `XlsxWorkbook.setBorders /
+borderMask`, `SheetSession.setBorders("all"|"outline"|"bottom"|"none")` from [Colour ▾ ▸ Borders ›]; the grid draws the
+file's lines dark 1.5 dp (a merged box only on its outer edge). Log `BORDER`. s27 `Formula.KNOWN` = 108 functions
+(SUMIFS COUNTIFS AVERAGEIFS MAXIFS MINIFS, INDEX MATCH XLOOKUP CHOOSE ROW COLUMN ROWS COLUMNS, TODAY NOW DATE YEAR MONTH
+DAY WEEKDAY DATEDIF EDATE EOMONTH HOUR MINUTE SECOND TIME DAYS, TEXT FIND SEARCH SUBSTITUTE VALUE TEXTJOIN REPLACE PROPER
+CHAR CODE, STDEV(.S/.P) VAR(.S/.P) RANK(.EQ) SUMPRODUCT, IFS SWITCH XOR IFNA ISBLANK ISNUMBER ISTEXT ISERROR ISNA NA, PI
+EXP LN LOG LOG10 TRUNC; `Evaluator.fn3`). `Formula.FUTURE`: functions newer than the 2007 format are stored as
+`_xlfn.NAME(` (what Excel writes; without it Excel shows #NAME?) and `Formula.display` drops the prefix for the formula
+bar; the parser reads `_xlfn.` / `_xlws.` names as the plain function. TEXT's date codes are rendered by
+`core/xlsx/TextFormat` (yyyy mmm dddd hh:mm AM/PM, quoted literals). The hand-worked table of 63 formulas is
+`XlsxM3Test.EXPECTED`, copied for QA to `apps/spatial-office/build/m3-expected.md` in the factory.
+
+**Documents and slides** (d20 d21 d22 d42, p26 p40): see the two paragraphs below.
+
+**Zoom (d43 / s41 / p41).** `Session.zoom` (50–200 %, `ZOOM_STEPS`), `zoomBy(±1)` / `zoomReset()` / `setZoomPct`; the
+title bar's [n % ▾] (`ui/Editor.kt ZoomMenu`: zoom in / out / fit width · 100 % · fit window) and Ctrl+= / Ctrl+- /
+Ctrl+0 in `commonKeys`. Display only (the file and `dirty` are untouched; `M3SheetTest`). Document: the paper is drawn
+under `Zoomed` (a `LocalDensity` scaled by the zoom, so text, widths and hit-testing follow) and scrolls sideways when it
+gets wider than the window; sheet: the grid under `Zoomed` (headers and frozen rows scale with it); slides: the canvas is
+drawn `zoom` × the fitted width inside the fitted frame, which scrolls both ways above 100 %. Log `ZOOM <KIND> -> n%`;
+`DUMP … zoom=DOC:100,SHEET:125,… merges=B7:C8`. The editor status line names the folder only (the name is the title),
+so a long file name no longer overflows it.
+
+v0.5.0 documents (d20 / d21 / d22 / d42). **Links (d20).** `Run.link` / `Span.link` hold the URL of an external
+`w:hyperlink` (`r:id` to a TargetMode="External" relationship of type `…/hyperlink`). A paragraph whose links hold only
+plain runs stays editable. `runsXml` wraps neighbouring runs with the same link in one `<w:hyperlink r:id w:history="1">`
+and reuses an existing relationship for the same URL (`linkRid`, `Rels.add(external = true)`). `RichText.setLink /
+linkAt / links`: a new link is underlined in 0563C1; removing it takes both away. `DocSession.setLink / insertLink` are
+one undo step each; `normalizeUrl` adds `https://` or `mailto:`. [Insert ▾] › Link… / Ctrl+K opens `Overlay.Link`
+(address, text to show when nothing is selected, [Remove link] for an existing link). With the caret in a link, a row
+under the paragraph shows the address with [Open] and [Edit]; a click on a link in a read-only paragraph opens it.
+Opening goes through `Graph.openLink` → `Accounts.launchBrowser` (ACTION_VIEW + BROWSABLE). **Horizontal line / page
+break (d21).** `DocxDocument.insertRuleAfter` writes an empty paragraph with `w:pBdr/w:bottom single` (drawn as a line);
+`insertPageBreakAfter` writes `<w:p><w:r><w:br w:type="page"/></w:r></w:p>` (a labelled line with [Remove]).
+**Superscript / subscript (d22).** `w:vertAlign` on runs: `Run/Span.vertAlign`, `RichText.setVertAlign`, [Text ▾] ›
+Superscript / Subscript (the same again returns to the baseline); drawn at 70 % with a baseline shift. **Table rows &
+columns (d42).** `TableBlock.merges` (`CellMerge`, read from `w:gridSpan` and `w:vMerge`) are drawn spanning. With the
+caret in a table cell, [Insert ▾] shows "Table rows & columns ›": rows above / below, columns left / right, merge with
+right / below, delete row / column (`insertTableRow / deleteTableRow / insertTableColumn / deleteTableColumn /
+mergeTableRight / mergeTableDown`); the grid keeps the table's total width; deleting the last row or column removes the
+table; impossible merges return false with a short message. `DocSession.tableOp` is one undo step. Only the table's own
+XML range is rewritten. Logs `DOCLINK`, `DOCINSERT`, `DOCTABLE`. Tests: `DocxM3Test` (core), `M3DocTest` (app).
+
+v0.5.0 slides (p26 / p40). **Background (p26).** [Page ▾] › Background › eight colours (the Object › Fill swatches),
+Picture… (the picture picker), Layout's background, and Apply to all slides › (the same for every slide).
+`PptxDeck.setSlideBackground(slide, rgb|null)` writes `<p:bg><p:bgPr><a:solidFill><a:srgbClr/></a:solidFill><a:effectLst/>
+</p:bgPr></p:bg>` as the first child of `p:cSld`; null removes the slide's own `p:bg`. `setSlideBackgroundPicture` stores
+the picture once as a media part; `setSlideBackgroundPicturePart` points further slides at the same part (`a:blipFill`,
+stretch); a replaced or removed picture background drops its relationship, and the part once nothing uses it.
+`Slide.backgroundImage` / `ownBackground`; the canvas, thumbnails, storyline, rehearsal and the PDF export draw it.
+`DeckSession.setBackground(rgb, all)` / `setBackgroundPicture(bytes, ext, all)`, one undo step each. **Tables (p40).**
+`core/pptx/TableEdit` reads an `a:tbl` into a grid of owning cells, edits it and writes it back (cells whose merge
+attributes are unchanged keep their exact text; new cells copy their neighbour's `tcPr` / body / run properties; column
+widths refit to the frame's `cx`, the frame's `cy` follows rows): `tableInsertRow / tableDeleteRow / tableInsertCol /
+tableDeleteCol / tableMerge(slide, id, row, col, down) / tableArea`; a merge writes `gridSpan` + `hMerge` or `rowSpan` +
+`vMerge` and appends the second area's text to the first. A click on a cell of the picked table makes it the current cell
+(blue frame; `DeckSession.tableCell / pickCell / currentCell`); [Object ▾] › Table rows & columns (row n, col m) › lists
+what can happen now (`tableAbilities`). Merged tables are typeable (covered cells refuse text). Logs `SLIDEBG`,
+`SLIDETABLE`. Tests: `PptxM3Test` (core), `M3SlidesTest` (app).
+
 ## The save rule
 
 Opening never changes a file. Saving rewrites only the parts that hold an edit, and inside such a part only the
@@ -307,6 +383,22 @@ Each command calls the same function as the control it stands for; the app logs 
 | `win-place`, `front-mode` | `front` `gap:<dp>` / `auto` `restore` `reopen` | placement trials (emulator only) |
 | `cloud-id` | `<service> [client id]` | debug-only client id for this run (shows the service, [Connect] opens the browser) |
 | `mainwatch` | seconds (default 10) | log the longest main-thread frame gap over that time (`MAINWATCH baseline …`), the emulator's own load for comparing with `MAINWATCH chart-open` |
+| `fill-cells` | `down` `right` | v0.5.0 s24: Ctrl+D / Ctrl+R on the selection (`fill` stays the fill colour) |
+| `series` | — / `down` / `right` | Edit ▸ Fill › Fill series (no arg: down when the selection is taller than wide) |
+| `merge`, `unmerge` | — | Rows & columns ▸ Merge cells / Unmerge cells on the selection (log `MERGE`) |
+| `border` | `all` `outline` `bottom` `none` | Colour ▸ Borders › on the selection (log `BORDER`) |
+| `zoom` | `<doc|sheet|slides> in|out|reset|<pct>` | the title bar's zoom menu / Ctrl+= / Ctrl+- / Ctrl+0 (log `ZOOM`) |
+| `doc-link` | `<i> <a>-<b>|all <url>` | v0.5.0 d20: link characters a..b of the i-th editable paragraph; `doc-link-open <i>` opens its first link (as a click), `doc-link-edit <i> <url>`, `doc-unlink <i>`, `doc-link-sheet <i> [<a>-<b>]` opens the link dialog (as Ctrl+K) |
+| `doc-rule`, `doc-pagebreak` | `[<i>]` | d21: Insert ▸ Horizontal line / Page break after the caret paragraph (or paragraph i) |
+| `docfmt` … `sup 1|0`, `sub 1|0` | | d22: superscript / subscript on characters of a paragraph |
+| `doc-tcell`, `doc-trow`, `doc-tcol`, `doc-tmerge` | `<n> <r>,<c>` / `above|below|delete` / `left|right|delete` / `right|down` | d42: caret into a cell of the n-th table, then Insert ▸ Table rows & columns › … (log `DOCTABLE`) |
+| `slide-bg` | `<RRGGBB|none|img:<abs path>> [all]` | p26: Page ▸ Background › on this slide (or all) (log `SLIDEBG`) |
+| `stable-cell`, `stable-row`, `stable-col`, `stable-merge` | `<r>,<c>` / `above|below|delete` / `left|right|delete` / `right|down` | p40: current cell of the picked table, then Object ▸ Table rows & columns › … (log `SLIDETABLE`) |
+
+v0.5.0 screenshot states (both languages, `m3-<lang>-*.png` in the factory's `build/v0.5.0/`): sheet-m3 (four formulas,
+fill down, series, merge, borders), zoom-sheet / zoom-doc / zoom-slides (125 %), doc-m3 (sub / sup, link, line, page
+break, table with a right and a down merge), doc-link-dialog, slides-m3 (background on all + this slide, table with a
+new row and a right merge), unsaved-confirm.
 
 v0.2.0 screenshot states (both languages): doc toolbar menus (Paragraph, Insert, More), find & replace, word count,
 insert table, picture picker, a doc with numbered list + centred heading + strikethrough + picture + table; slides with
@@ -327,7 +419,7 @@ the others do not appear in the app at all.
 ## Not in this version
 
 Fonts (typeface), comments and tracked changes (read-only), charts inside documents and slides,
-animations, merged cells / conditional formats (kept, not editable), web-page editing, pinned cards, named layouts,
+animations, conditional formats (kept, not editable; merged cells are editable since v0.5.0), web-page editing, pinned cards, named layouts,
 3D objects on slides. (v0.2.1 added scan-to-sign-in, the cloud conflict check and the Feishu inbox; none of them has
 run against a real account yet.)
 

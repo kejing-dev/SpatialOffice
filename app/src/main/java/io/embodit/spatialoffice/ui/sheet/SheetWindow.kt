@@ -357,8 +357,11 @@ private fun GridRow(s: SheetSession, edit: CellEdit?, r: Int, cols: List<Int>, r
                 val edges = if (inSel && s.isRange) booleanArrayOf(r == sel.r1, last >= sel.c2, r == sel.r2, c <= sel.c1) else null
                 val alignEnd = when (cell.hAlign) { "right" -> true; "left", "center" -> false; else -> cell.kind == CellKind.NUMBER }
                 val lines = if (m == null) null else booleanArrayOf(r == m[0], true, r == m[2], true)
-                val ruled = if (s.isCsv) 0 else (book.borderMask(s.sheet, r, c) and (io.embodit.spatialoffice.core.xlsx.Borders.LEFT or io.embodit.spatialoffice.core.xlsx.Borders.TOP or io.embodit.spatialoffice.core.xlsx.Borders.BOTTOM)) or
-                    (book.borderMask(s.sheet, r, last) and io.embodit.spatialoffice.core.xlsx.Borders.RIGHT)
+                val bd = io.embodit.spatialoffice.core.xlsx.Borders
+                // a merged box draws the file's lines only on its outer edge (the cells inside may carry their own)
+                val inner = if (m == null) 0 else (if (r != m[0]) bd.TOP else 0) or (if (r != m[2]) bd.BOTTOM else 0)
+                val ruled = if (s.isCsv) 0 else ((book.borderMask(s.sheet, r, c) and (bd.LEFT or bd.TOP or bd.BOTTOM)) or
+                    (book.borderMask(s.sheet, r, last) and bd.RIGHT)) and inner.inv()
                 val showText = m == null || r == m[0]
                 Box(
                     Modifier.width(span.fold(0.dp) { acc, cc -> acc + colWidth(s, cc) }).height(h)

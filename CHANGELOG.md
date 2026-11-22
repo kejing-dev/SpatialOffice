@@ -1,5 +1,19 @@
 # Changelog · 更新记录
 
+## v0.5.0 · 2026-11-21
+
+- 表格：Ctrl+D 向下填充、Ctrl+R 向右填充（公式跟着挪），[编辑 ▾] › 填充 › 填充序列：1、2 接着 3、4，日期按天往后，「Q1」接「Q2」
+- 表格：[行列 ▾] › 合并单元格 / 取消合并（只留左上角的内容）；[颜色 ▾] › 边框：全部框线、外框、下框线、无框线
+- 表格：函数从 46 个加到 108 个，新增 SUMIFS / COUNTIFS / AVERAGEIFS / MAXIFS / MINIFS、INDEX / MATCH / XLOOKUP、TODAY / NOW / DATE / YEAR / MONTH / DAY / WEEKDAY / DATEDIF / EDATE / EOMONTH、TEXT / FIND / SEARCH / SUBSTITUTE / VALUE / TEXTJOIN、STDEV / VAR / RANK / SUMPRODUCT、IFS / SWITCH / IFNA、ISBLANK 等；新函数按 Excel 的写法存进文件，Excel / WPS 打开不会显示 #NAME?
+- 文档：[插入 ▾] › 链接…（Ctrl+K），点链接用浏览器打开；分隔线、分页符；[文字 ▾] 里加了上标、下标；光标在表格里时 [插入 ▾] 多出「表格行列」：插入 / 删除行列、与右侧合并、与下方合并
+- 演示：[页面 ▾] › 背景：几种底色或一张图片，这一页或所有页；选中表格时 [所选对象 ▾] 多出「表格行列」：插入 / 删除行列、和右边 / 下面合并
+- 三类窗口都能缩放：标题栏的「100 %」菜单，或 Ctrl+= / Ctrl+- / Ctrl+0；只改显示，不动文件
+- Sheets: Ctrl+D fill down, Ctrl+R fill right (formulas move along), Edit › Fill › Fill series (1, 2 → 3, 4; dates by day; "Q1" → "Q2")
+- Sheets: Rows & columns › Merge cells / Unmerge (only the top-left value stays); Colour › Borders: all, outside, bottom, none
+- Sheets: 108 functions (was 46): SUMIFS / COUNTIFS / AVERAGEIFS / MAXIFS / MINIFS, INDEX / MATCH / XLOOKUP, dates (TODAY, DATE, DATEDIF, EDATE, EOMONTH…), text (TEXT, FIND, SEARCH, SUBSTITUTE, TEXTJOIN…), STDEV / VAR / RANK / SUMPRODUCT, IFS / SWITCH / IFNA, ISBLANK and more; newer ones are saved the way Excel writes them, so Excel and WPS show them, not #NAME?
+- Documents: Insert › Link… (Ctrl+K), a click opens the link in the browser; horizontal line, page break; superscript and subscript in Text; with the caret in a table, Insert › Table rows & columns: insert / delete rows and columns, merge with right / below
+- Slides: Page › Background: a few colours or a picture, this slide or all; with a table picked, Object › Table rows & columns: insert / delete rows and columns, merge with right / below
+- Zoom in all three windows: the title bar's "100 %" menu, or Ctrl+= / Ctrl+- / Ctrl+0; display only, the file is not touched
 ## v0.4.2 · 2026-11-21
 
 - 修好：手柄 A / X / Y、回车、确认键不会再「点」到窗口里的按钮。之前在演示窗口按几下会多出空白页，在「找回没保存的改动？」上按 A 会把改动删掉

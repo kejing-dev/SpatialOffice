@@ -316,7 +316,7 @@ object DebugReceiver {
             "font-size" -> g.sheet?.let { s -> when (arg) { "up" -> s.stepFontSize(1); "down" -> s.stepFontSize(-1); else -> s.setFontSize(arg.toFloat()) } }
             "font-clear" -> g.sheet?.clearFont()
             // v0.5.0 (M3 sheets): the same calls as [Edit ▾ ▸ Fill ›], [Rows & columns ▾ ▸ Merge], [Colour ▾ ▸ Borders ›]
-            "fill" -> g.sheet?.let { s -> io.embodit.spatialoffice.ui.sheet.fillCells(g, s, arg != "right") }
+            "fill-cells" -> g.sheet?.let { s -> io.embodit.spatialoffice.ui.sheet.fillCells(g, s, arg != "right") }
             "series" -> g.sheet?.let { s -> if (arg.isEmpty()) io.embodit.spatialoffice.ui.sheet.fillSeries(g, s) else s.fillSeries(arg != "right") }
             "merge" -> g.sheet?.merge()
             "unmerge" -> g.sheet?.unmerge()
