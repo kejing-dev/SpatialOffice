@@ -424,6 +424,15 @@ for each kind, rehearsal.
   muted: `ANDROID_AVD_HOME` + `ANDROID_SDK_ROOT=<sdk>/6.2/emulator/system-images` + `ANDROID_SDK_HOME=~/.pico`, then
   `emulator.exe -avd Pico_Emulator_6_2_a -port 5566 -gpu angle_indirect -sysdir <…>/system-images -no-audio`.
 
+## v0.5.2 (M3fix2, QA #14 q14-1)
+
+- Windows: the home window is the hub of the row (`ArcRing.place(key, hub = Containers.HOME)`): with Home up and no file
+  window in the row, Home becomes the row's first window and the first file goes `Placement.right(home)`; next ones
+  alternate left / right as before. `frontHome` / `front` only reopen a window the system took off stage (`onstage=false`),
+  never one that is on stage but out of sight (reopening it in front put it on the spot of the window being looked at and
+  the system then hid that one). `ArcRingTest` (home + 3 files, home closed, all files closed). Log `ARC … row=[…]`,
+  `WINDOW front HOME … row=[…]`.
+
 ## Cloud accounts
 
 `platform/Accounts.kt` (sign-in, tokens in EncryptedSharedPreferences, file calls) on top of the pure

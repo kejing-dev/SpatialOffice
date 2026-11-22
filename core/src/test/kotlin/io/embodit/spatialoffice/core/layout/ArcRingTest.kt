@@ -52,4 +52,40 @@ class ArcRingTest {
         assertTrue(withGap > touching)
         assertEquals(touching, ArcRing.neighbourAngle(580.0, 580.0, 0.0, 1.33 / 2, 0.0016), 1e-9)
     }
+
+    // v0.5.2 (QA #14 q14-1): home → open 3 files in a row, going back home between them (the real path)
+    @Test fun homeWindowTakesAPlaceOfItsOwnAndNoFileOpensOnItsSpot() {
+        val r = ArcRing()
+        val home = "SpatialOfficeHome"
+        val up = mutableSetOf(home)
+        val live: (String) -> Boolean = { it in up }
+        // file 1: beside the home window (v0.5.1: null = in front, on the home window's spot)
+        assertEquals(home to "right", r.place("SpatialOfficeSheet/f1", hub = home, live = live)); up += "SpatialOfficeSheet/f1"
+        // [Window 1] › [Home] only restores the home window in its own place; then file 2, file 3
+        assertEquals(home to "left", r.place("SpatialOfficeSheet/f2", hub = home, live = live)); up += "SpatialOfficeSheet/f2"
+        assertEquals("SpatialOfficeSheet/f1" to "right", r.place("SpatialOfficeSheet/f3", hub = home, live = live)); up += "SpatialOfficeSheet/f3"
+        assertEquals(listOf("SpatialOfficeSheet/f2", home, "SpatialOfficeSheet/f1", "SpatialOfficeSheet/f3"), r.order)
+        // four windows, four places: no two share a slot, no file in front (slot 0 is the home window)
+        val slots = r.order.map { r.slot(it) }
+        assertEquals(slots.toSet().size, slots.size)
+        assertEquals(0, r.slot(home))
+        r.order.filter { it != home }.forEach { assertTrue(it, r.slot(it) != 0) }
+        // every new window stands beside one already up, never on the spot of one
+        assertTrue(r.order.zipWithNext().all { (a, b) -> r.slot(b)!! - r.slot(a)!! == 1 })
+    }
+
+    @Test fun homeWindowNotUpOrFilesAlreadyUpLeavesTheOldRule() {
+        val r = ArcRing()
+        assertNull(r.place("doc/f1", hub = "home") { it != "home" }) // home closed (Stage): first file in front
+        assertEquals("doc/f1" to "right", r.place("doc/f2", hub = "home")) // home came back later: not counted in
+        assertEquals(listOf("doc/f1", "doc/f2"), r.order)
+    }
+
+    @Test fun allFilesClosedTheNextOneGoesBesideHomeAgain() {
+        val r = ArcRing()
+        val up = mutableSetOf("home")
+        assertEquals("home" to "right", r.place("a", hub = "home") { it in up }); up += "a"
+        up -= "a"; r.remove("a")
+        assertEquals("home" to "right", r.place("b", hub = "home") { it in up })
+    }
 }

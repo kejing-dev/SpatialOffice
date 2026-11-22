@@ -151,7 +151,8 @@ class WindowCtl(private val graph: Graph) {
             // v0.5.1 (user 2026-11-21): a new editor window goes beside the ones already up, on the circle around
             // the user (ArcRing), not in front of them; the first one opens in front. Windows brought back to the
             // front ([front] → reopenInFront) and [arrange] keep their own placement.
-            val arc = if (beside == null && trial == null && Placing.mode == "arc" && ref !in reopen) ring.place(Containers.key(ref)) { k -> ringLive(k) } else null
+            // v0.5.2 (q14-1): the home window has a place of its own in the row, so the first file goes beside it.
+            val arc = if (beside == null && trial == null && Placing.mode == "arc" && ref !in reopen) ring.place(Containers.key(ref), hub = Containers.HOME) { k -> ringLive(k) } else null
             if (arc != null || (beside == null && trial == null && Placing.mode == "arc" && ref !in reopen)) Log.i(TAG, "ARC $ref -> ${arc?.let { "${it.second} of ${it.first}" } ?: "front"} row=${ring.order}")
             Placing.next[Containers.id(ref.win)] = Placing.Next(ref.tag, (beside ?: trial ?: arc)?.first, (beside ?: trial ?: arc)?.second ?: "right")
             unclaimed.getOrPut(ref.win) { ArrayDeque() }.let { if (ref.tag !in it) it.addLast(ref.tag) }
@@ -174,7 +175,10 @@ class WindowCtl(private val graph: Graph) {
         val n = navigators[ref] ?: nav() ?: return
         val r = runCatching { n.restoreWindowContainer(Containers.id(ref.win), ref.tag) }
         val s = seen[ref]
-        val hidden = s == null || !s.second || !s.third
+        // v0.5.2 (q14-1): a window on stage but out of sight stands in its own place of the row; reopening it in
+        // front would put it on the spot of the window being looked at and take that one off stage. Only a window
+        // the system took off stage is opened again.
+        val hidden = s == null || !s.second
         Log.i(TAG, "WINDOW front $ref restore=${r.getOrNull() ?: r.exceptionOrNull()} onstage=${s?.second} sighted=${s?.third} mode=$frontMode")
         if (frontMode == "reopen" || (frontMode == "auto" && r.getOrNull() != true && hidden)) reopenInFront(ref)
     }
@@ -217,6 +221,7 @@ class WindowCtl(private val graph: Graph) {
     val ring = io.embodit.spatialoffice.core.layout.ArcRing()
     /** A window of the row is still there: open, or asked for in the last 3 s (not up yet). */
     private fun ringLive(key: String): Boolean {
+        if (key == Containers.HOME) return isOpen(home) || (homeAskedAt?.let { SystemClock.elapsedRealtime() - it < 3000 } ?: false)
         val ref = (state.keys + askedAt.keys).firstOrNull { Containers.key(it) == key } ?: return false
         return isOpen(ref) || (askedAt[ref]?.let { SystemClock.elapsedRealtime() - it < 3000 } ?: false)
     }
@@ -268,8 +273,11 @@ class WindowCtl(private val graph: Graph) {
         val n = navigators[home] ?: nav() ?: return
         val s = seen[home]
         val r = if (isOpen(home)) runCatching { n.restoreWindowContainer() }.getOrNull() else null
-        Log.i(TAG, "WINDOW front HOME open=${isOpen(home)} restore=$r onstage=${s?.second} sighted=${s?.third}")
-        if (isOpen(home) && (r == true || (s != null && s.second && s.third))) return
+        Log.i(TAG, "WINDOW front HOME open=${isOpen(home)} restore=$r onstage=${s?.second} sighted=${s?.third} row=${ring.order}")
+        // v0.5.2 (QA #14 q14-1): the home window stands in its own place of the row (ArcRing hub). While it is on
+        // stage it stays there, also when it is out of sight: reopening it would put it in front of the user, on
+        // the spot of the file window being looked at, and the system would take that file off stage.
+        if (isOpen(home) && (r == true || (s != null && s.second))) return
         if (isOpen(home)) {
             // an editor's navigator closes and reopens it; the app always has that editor window meanwhile
             val other = navigators.entries.firstOrNull { it.key.editor && isOpen(it.key) }?.value ?: return
@@ -413,12 +421,16 @@ class WindowCtl(private val graph: Graph) {
     private fun reopenHome(n: SpatialNavigator) {
         if (isOpen(home)) return
         Log.i(TAG, "WINDOW reopen HOME")
+        homeAskedAt = SystemClock.elapsedRealtime()
         val ok = runCatching { n.openWindowContainer(Containers.HOME, homeTag, null) }.onFailure { Log.w(TAG, "reopen home by id failed: $it") }.isSuccess
         if (!ok) runCatching {
             val i = graph.app.packageManager.getLaunchIntentForPackage(graph.app.packageName)
             graph.app.startActivity(i?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         }
     }
+
+    /** When [reopenHome] last asked for the home window (it counts as up in the row for 3 s). */
+    private var homeAskedAt: Long? = null
 
     /** Tag the system gave the default container (learned from the placement context; empty until then). */
     var homeTag: String = ""

@@ -17,10 +17,20 @@ class ArcRing {
 
     val order: List<String> get() = row.toList()
 
-    /** Where window [key] goes: null = in front (row empty), else (anchor key, "right" | "left"). Adds it to the row. */
-    fun place(key: String, live: (String) -> Boolean = { true }): Pair<String, String>? {
+    /**
+     * Where window [key] goes: null = in front (row empty), else (anchor key, "right" | "left"). Adds it to the row.
+     *
+     * v0.5.2 (QA #14 q14-1): [hub] is the home window. It takes a place of its own in the row: when the row is empty
+     * and the home window is up, the home window is the row's first window (in front, where the system put it) and
+     * the first file goes beside it, not on its spot. v0.5.1 left the home window out, so the first file opened on
+     * the home window's spot, and [Window n] › [Home] then put the home window back there and the system took that
+     * file off stage. A home window that came back while files are up (the system puts it in front of the user,
+     * somewhere unknown) is left out of the bookkeeping.
+     */
+    fun place(key: String, hub: String? = null, live: (String) -> Boolean = { true }): Pair<String, String>? {
         row.removeAll { it == key || !live(it) }
         if (center != null && center !in row) center = row.getOrNull(row.size / 2)
+        if (hub != null && hub != key && row.isEmpty() && live(hub)) { row.add(hub); center = hub }
         if (row.isEmpty()) { row.add(key); center = key; return null }
         val c = row.indexOf(center).coerceAtLeast(0)
         val rightCount = row.size - 1 - c

@@ -38,6 +38,9 @@ import io.embodit.spatialoffice.ui.space.StageScreen
  * v0.5.1 (user 2026-11-21 「直接摆在旁边环绕多窗口这样排布」): that is now the default. The first editor window opens in
  * front; every next one is placed beside the outer window of the row (ArcRing, alternately right and left, 56 dp gap),
  * so the windows already up stay where they are and in sight. [Windows] › [Side by side] and [Window n] remain.
+ *
+ * v0.5.2 (QA #14 q14-1): the home window is one of the row (ArcRing hub): with the home window up, the first file
+ * goes beside it (`Placement.right(home)`), not on its spot, and [Window n] › [Home] leaves it where it stands.
  */
 internal fun editorPlacement(containers: List<ContainerProxy>, id: String): Placement {
     val next = Placing.next[id]

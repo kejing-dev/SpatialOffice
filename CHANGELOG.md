@@ -1,5 +1,10 @@
 # Changelog · 更新记录
 
+## v0.5.2 · 2026-11-21
+
+- 修好：从主页连开几个文件时，主页也在环绕的一排里占一个位置：第一个文件开在主页旁边，不再和主页叠在同一处；用 [窗口 n] › [主页] 回主页时主页留在原地，不会把哪个文件窗收起来，几扇窗口和主页都在、都朝向你
+- Fixed: opening several files from Home, the home window now has its own place in the row around you: the first file opens beside it, not on top of it; Windows › Home leaves the home window where it is and no file window is put away, so Home and every file window stay up, all facing you
+
 ## v0.5.1 · 2026-11-21
 
 - 修好：表格里打字按回车后，上一格的字不会再带进下一格（「abc」「de」「f」不再存成 Abc / Abcde / Abcdef）；单元格不再自动把首字母变大写
