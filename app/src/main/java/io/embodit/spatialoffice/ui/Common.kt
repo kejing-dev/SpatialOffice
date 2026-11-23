@@ -317,11 +317,11 @@ fun subMenu(label: String, tag: String, entries: List<MenuEntry>): MenuEntry = M
  * "More"). The menu opens above the bottom toolbar.
  */
 @Composable
-fun ToolMenu(label: String, tag: String, entries: List<MenuEntry>, enabled: Boolean = true, icon: Int? = null, above: Boolean = true, width: Dp? = null) {
+fun ToolMenu(label: String, tag: String, entries: List<MenuEntry>, enabled: Boolean = true, icon: Int? = null, above: Boolean = true, width: Dp? = null, lit: Boolean = false) {
     var open by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var page by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<MenuEntry?>(null) }
     Box {
-        ToolButton(label, tag, onClick = { open = !open; page = null; if (open) io.embodit.spatialoffice.platform.BackKeys.sweepSoon("menu $tag") }, enabled = enabled && entries.isNotEmpty(), icon = icon, width = width)
+        ToolButton(label, tag, onClick = { open = !open; page = null; if (open) io.embodit.spatialoffice.platform.BackKeys.sweepSoon("menu $tag") }, enabled = enabled && entries.isNotEmpty(), icon = icon, width = width, primary = lit)
         // v0.5.1: BACK / controller B closes the open menu (OpenMenus)
         val menuKey = androidx.compose.runtime.remember { Any() }
         androidx.compose.runtime.DisposableEffect(open) {

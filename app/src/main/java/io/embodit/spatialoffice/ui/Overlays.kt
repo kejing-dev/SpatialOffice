@@ -238,9 +238,10 @@ private fun ShortcutsSheet(graph: Graph) {
         leadingAction = { SheetClose { graph.overlay = null } },
         title = { Txt(tr(R.string.shortcuts), "keys/title", style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold) },
     ) {
-        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // v0.7.0: two more rows (comment, track / painter): 12 rows at 36 + 4 dp, and the list scrolls if a window is too low for them
+        Column(Modifier.fillMaxWidth().heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             rows.forEach { (label, keys) ->
-                Row(Modifier.fillMaxWidth().heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
                     Txt(tr(label), "keys/label", Modifier.weight(1f).padding(end = 12.dp), style = PicoTheme.typography.bodyLarge, maxLines = 2)
                     Tag(keys, "keys")
                 }

@@ -301,6 +301,58 @@ tableDeleteCol / tableMerge(slide, id, row, col, down) / tableArea`; a merge wri
 what can happen now (`tableAbilities`). Merged tables are typeable (covered cells refuse text). Logs `SLIDEBG`,
 `SLIDETABLE`. Tests: `PptxM3Test` (core), `M3SlidesTest` (app).
 
+## v0.7.0 (M5, design-package roadmap[4]; "Review: comments, revisions, headers"; gate B passed 2026-11-22 for the pane)
+
+**Review pane** (`ui/ReviewPane.kt`, one component for the three editors): INSIDE the editor window at its right edge
+(336 dp; document 24 + paper 760 + 16 + pane 336 + 24 = 1160), never a window of its own, so the ring of windows does
+not move (`m5-ring`: no new `PLACE` line when it opens / closes). Title bar `[Review n]` (`ReviewButton`, n = open
+threads + changes that can be resolved); closed, a file with comments / changes says so in its status line. Open state
+and "Track my edits" are kept per file in app data (`ReviewStore`), never in the file. Shared model:
+`core/review/Review.kt` (`ReviewComment`, `ReviewReply`, `Revision`). `Session` carries the calls (`comments()`,
+`addComment`, `replyComment`, `resolveComment`, `editComment`, `deleteComment`, `revisions()`, `acceptRevision` …);
+each is one undo step (`reviewEdit`, a failed change is rolled back).
+
+- **Documents** (`core/docx/DocxComments.kt`, `DocxRevisions.kt`, `Tracking.kt`; API in `handover/core-api-m5-docx.md`):
+  comments with replies / resolve (`comments.xml`, `commentsExtended.xml`, range anchors that `setParagraph` keeps in
+  place); tracked insertions / deletions are part of the model (`Run.rev` / `Span.rev`, drawn underlined / struck
+  through; `Paragraph.text` includes deleted text, `cleanText` does not); accept / reject one or all; "Track my edits"
+  = `DocSession.trackedEdit` → `Tracking.mergeAt` after the normal edit (the field is reset when the stored text is
+  longer than what it reported). A paragraph with a tracked format change, move or paragraph mark stays read-only.
+  Header / footer text (`setHeaderFooter`, `HeaderFooterSheet`), format painter (`runFormatAt` / `paintFormat`,
+  `DocSession.pickPainter` / `paint`; applied by a pointer tap / drag on the paper or by the caret arriving in a paragraph).
+- **Sheets** (`core/xlsx/Comments.kt`; `handover/core-api-m5-xlsx.md`): threads (threadedComments + persons, with the
+  old-style copy and VML shape on the same cell) and old-style notes (edit / delete only). Corner markers on the grid
+  (`commentCorner`). `addComment` on a note cell is refused (`rv_note_here`).
+- **Slides** (`core/pptx/SlideComments.kt`; `handover/core-api-m5-pptx.md`): threads written in the modern form,
+  old-style comments kept and editable; bubbles on the editing canvas only (`CommentBubbles`). Slide number / footer
+  placeholders (`setFooter`, `Shape.footerKind`: drawn, not picked or dragged; `SlideFooterSheet`).
+- **Keys after a toolbar menu**: the system Toolbar window keeps the keyboard. `Session.composing` + `draft`: the
+  toolbars pass typed keys to the comment being written (`composeKeys`); a press in the window ends it.
+- **Formula bar guard** (`CellEdit.accept`): an empty text within 700 ms of the bar taking focus is dropped (an input
+  method finishing elsewhere used to wipe the selected cell value after a reply box closed). Log `CELLEDIT dropped …`.
+- BACK / B order: menu → dialog / sheet → format painter → review pane (`BackPolicy`).
+- Settings › My name (`Settings.myName`, `Graph.setMyName`); the home window is 1120 × 720 dp.
+
+Accessibility names for QA clicks (labels that are not unique on screen): `review-pane`, `review-close`, `review-field`,
+`review-reply-field`, `review-edit-field`, `review-name-field`, `review-track`, `review-card`, `review-revision`,
+`post-comment`, `post-reply`, `card-reply`, `card-resolve`, `card-edit`, `card-edit-save`, `card-reopen`,
+`change-accept`, `change-reject`, `all-accept`, `all-reject`, `slide-comment`, `painter-chip`, `doc-header`, `doc-footer`,
+`hf/header`, `hf/footer`, `snf/number`, `snf/footer`, `snf/text`, `snf/not-title`, `settings-name-field`.
+
+Debug commands (v0.7.0): `review <win> open|close|comments|changes`, `myname <name>`, `compose <win>`,
+`comment <win> <text>`, `comment-pick <win> <i>`, `comment-reply <win> <i> <text>`, `comment-resolve <win> <i> [0|1]`,
+`comment-edit <win> <i> <text>`, `comment-del <win> <i>`, `track 0|1`, `rev-accept <i>`, `rev-reject <i>`,
+`rev-accept-all`, `rev-reject-all`, `painter pick <para> [offset] | apply <para> [a b] | drop`,
+`hf header=<text>|footer=<text>`, `hf-sheet`, `snf <all|this> <number> <footer> <notOnTitle> <text>`, `snf-sheet`.
+`DUMP` ends with `review=[tag:open|closed:tab:comments=…:revisions=…:sel=…:track=…] myNameLen=… painter=…`.
+Samples: `tools/fixtures/m5_review_samples.py <dir>` (a contract with 3 comments + 7 tracked changes, a notes sheet,
+a 4-slide deck, zh + en; a format-painter document). Verify: `tools/verify/m5_docx_verify.py`, `m5_xlsx_verify.py`,
+`m5_pptx_verify.py` (files the core tests write to `core/build/m5-*/`).
+
+Screenshot states (both languages): review-pane-doc (card picked, one reply), review-pane-doc-name (`myname ''`),
+review-revisions (+ tracking on, a word changed), review-pane-sheet, review-pane-slides, settings-myname,
+format-painter (`painter pick 0`), doc-header-footer (`hf-sheet`), slides-number-footer (`snf-sheet`), m5-ring.
+
 ## v0.6.0 (M4, design-package roadmap[3]; "Organising, layout tools, templates"; gateB=false, no new panels)
 
 **Documents.** d23 a selection across paragraphs: every editable paragraph is its own text field, so the paper
@@ -506,7 +558,8 @@ the others do not appear in the app at all.
 
 ## Not in this version
 
-Fonts (typeface), comments and tracked changes (read-only), charts inside documents and slides,
+Fonts (typeface), tracked format changes / moves / paragraph marks (listed, read-only; since v0.7.0 comments and tracked
+insertions / deletions are editable), comments on table cells and pictures, charts inside documents and slides,
 animations, conditional formats (kept, not editable; merged cells are editable since v0.5.0), web-page editing, pinned cards, named layouts,
 3D objects on slides. (v0.2.1 added scan-to-sign-in, the cloud conflict check and the Feishu inbox; none of them has
 run against a real account yet.)

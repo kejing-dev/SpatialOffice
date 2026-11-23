@@ -1051,7 +1051,8 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                 // M2 d15 / d16 / d18: [Text ▾] sizes, strikethrough (moved from More), clear formatting; [Colour ▾] colours and highlights
                 // one [Text ▾] (the document toolbar has no room for a second button: [Save] stays in view in English):
                 // larger / smaller, then pages for the fixed sizes, colours and highlights
-                ToolMenu(tr(R.string.menu_text), "doc/text", enabled = canEdit && s.richText, icon = if (s.painter != null) R.drawable.ic_format_paint else null, entries = sizeEntries("doc/text", null, { docStepSize(s, focus, it) }, {}).take(2) + listOf(
+                // M5 d24: lit while the format painter is in hand (an icon would widen the button and squeeze [Save] in English)
+                ToolMenu(tr(R.string.menu_text), "doc/text", enabled = canEdit && s.richText, lit = s.painter != null, entries = sizeEntries("doc/text", null, { docStepSize(s, focus, it) }, {}).take(2) + listOf(
                     subMenu(tr(R.string.size_menu), "doc/size", sizeEntries("doc/text", docCommon(s, focus) { it.size ?: para?.baseSizeHp }, { docStepSize(s, focus, it) }, { docSetSize(s, focus, it) }).drop(2)),
                     subMenu(tr(R.string.menu_color), "doc/color", colorEntries("doc/color", docCommon(s, focus) { it.color }, { docSetColor(s, focus, it) })),
                     subMenu(tr(R.string.hl_menu), "doc/highlight", io.embodit.spatialoffice.ui.TextPalette.HIGHLIGHT.map { (name, v) ->
@@ -1216,7 +1217,7 @@ fun PainterChip(modifier: Modifier = Modifier) {
 @Composable
 private fun HeaderFooterLine(text: String, tag: String, onClick: (() -> Unit)?) {
     Text(
-        text, style = paraStyle(ParaStyle.BODY).copy(color = Ink.Hint, fontSize = 13.sp), maxLines = 2,
+        text, style = paraStyle(ParaStyle.BODY).copy(color = androidx.compose.ui.graphics.Color(0xFF646A74), fontSize = 13.sp), maxLines = 2, // grey, 5.4 : 1 on the paper
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).then(if (onClick != null) Modifier.noKeyFocus().clickable { onClick() } else Modifier)
             .padding(vertical = 12.dp).semantics { contentDescription = tag },
     )

@@ -105,8 +105,9 @@ object ReviewLook {
     val Mine = Color(0xFF1F5FD0)
     /** Marker on commented text / the quote bar. */
     val Mark = Color(0xFFFFBF00)
-    val MarkFill = Color(0x59FFD24D)
-    val MarkFillOn = Color(0xB3FFBF00)
+    /** Marker fills are light on purpose: tracked-change colours on them stay ≥ 4.5 : 1 (purple 4.7 / 4.5, red 4.8 / 4.6). */
+    val MarkFill = Color(0xFFFFEFC1)
+    val MarkFillOn = Color(0xFFFFEC9E)
     /** Corner marker of a cell: comment / old-style note. */
     val CellThread = Color(0xFF2A6FDB)
     val CellNote = Color(0xFF7A808C)
