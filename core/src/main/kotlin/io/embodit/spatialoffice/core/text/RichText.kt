@@ -1,5 +1,13 @@
 package io.embodit.spatialoffice.core.text
 
+import io.embodit.spatialoffice.core.review.RevisionKind
+
+/**
+ * M5 (d30 / d36): a tracked change on a stretch of text. [kind] is INSERT (drawn underlined) or DELETE (drawn struck
+ * through; the text is still in the paragraph's text). [date] is ISO-8601 or "".
+ */
+data class RunRev(val kind: RevisionKind, val author: String, val date: String = "")
+
 /**
  * A stretch of text with one format. [src] = index of the run in the opened file whose other formatting it keeps (−1 = none).
  * M2 (v0.4.0): [color] text colour 0xRRGGBB (null = automatic / inherited), [highlight] marker colour by its Word name
@@ -10,6 +18,8 @@ data class Span(
     val color: Int? = null, val highlight: String? = null, val size: Int? = null,
     /** M3: [link] external hyperlink URL (documents), [vertAlign] "superscript" | "subscript" (null = baseline). */
     val link: String? = null, val vertAlign: String? = null,
+    /** M5: the tracked change this text is part of (documents); null = ordinary text. Typed text never inherits it. */
+    val rev: RunRev? = null,
 )
 
 enum class Attr { BOLD, ITALIC, UNDERLINE, STRIKE }
@@ -51,7 +61,7 @@ object RichText {
         val fmt = formatAt(spans, if (p > 0) p - 1 else 0)
         val (left, rest) = split(spans, p)
         val (_, right) = split(rest, old.length - s - p)
-        val mid = if (inserted.isEmpty()) emptyList() else listOf((fmt ?: Span("")).copy(text = inserted))
+        val mid = if (inserted.isEmpty()) emptyList() else listOf((fmt ?: Span("")).copy(text = inserted, rev = null))
         return normalize(left + mid + right)
     }
 
@@ -186,7 +196,7 @@ object RichText {
     }
 
     private fun sameFormat(a: Span, b: Span) = a.bold == b.bold && a.italic == b.italic && a.underline == b.underline && a.strike == b.strike && a.src == b.src &&
-        a.color == b.color && a.highlight == b.highlight && a.size == b.size && a.link == b.link && a.vertAlign == b.vertAlign
+        a.color == b.color && a.highlight == b.highlight && a.size == b.size && a.link == b.link && a.vertAlign == b.vertAlign && a.rev == b.rev
     private fun get(s: Span, attr: Attr) = when (attr) { Attr.BOLD -> s.bold; Attr.ITALIC -> s.italic; Attr.UNDERLINE -> s.underline; Attr.STRIKE -> s.strike }
     private fun with(s: Span, attr: Attr, on: Boolean) = when (attr) {
         Attr.BOLD -> s.copy(bold = on); Attr.ITALIC -> s.copy(italic = on); Attr.UNDERLINE -> s.copy(underline = on); Attr.STRIKE -> s.copy(strike = on)
@@ -213,7 +223,7 @@ object RichText {
             val fmt = formatAt(cur, at) ?: Span("")
             val (left, rest) = split(cur, at)
             val (_, right) = split(rest, find.length)
-            val mid = if (replacement.isEmpty()) emptyList() else listOf(fmt.copy(text = replacement))
+            val mid = if (replacement.isEmpty()) emptyList() else listOf(fmt.copy(text = replacement, rev = null))
             cur = normalize(left + mid + right)
         }
         return cur to hits.size
@@ -226,7 +236,7 @@ object RichText {
         val fmt = formatAt(spans, at) ?: spans.lastOrNull()?.copy(text = "") ?: Span("")
         val (left, rest) = split(spans, at)
         val (_, right) = split(rest, len)
-        val mid = if (replacement.isEmpty()) emptyList() else listOf(fmt.copy(text = replacement))
+        val mid = if (replacement.isEmpty()) emptyList() else listOf(fmt.copy(text = replacement, rev = null))
         return normalize(left + mid + right)
     }
 }
