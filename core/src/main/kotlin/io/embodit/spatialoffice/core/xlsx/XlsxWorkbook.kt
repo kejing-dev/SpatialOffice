@@ -7,6 +7,8 @@ import io.embodit.spatialoffice.core.pkg.ContentTypes
 import io.embodit.spatialoffice.core.pkg.OoxmlPackage
 import io.embodit.spatialoffice.core.pkg.Rels
 import io.embodit.spatialoffice.core.pkg.Xml
+import io.embodit.spatialoffice.core.review.CommentKind
+import io.embodit.spatialoffice.core.review.ReviewComment
 import java.math.BigDecimal
 import java.util.BitSet
 import java.util.Locale
@@ -91,6 +93,8 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         var frozenCols = 0
         var freezeSet = false
         var pendingDrawingRid: String? = null
+        /** M5 (s35): relationship id of a legacy drawing made for the sheet's first comment; `<legacyDrawing>` is written on save. */
+        var pendingLegacyRid: String? = null
         var usedRows = -1
         var usedCols = -1
         /** v0.5.0 (s25): merged ranges once merged / unmerged here (null = as in the file, after [ops]); written on save when [mergesChanged]. */
@@ -153,12 +157,25 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
     }
     private val evaluator = Evaluator(host)
 
+    /** M5 (s35): comments and notes; reads and writes their parts in the package directly (see [CommentStore]). */
+    private val commentStore = CommentStore(pkg, object : CommentStore.Host {
+        override fun workbookPart(): String = wbPart
+        override fun sheetParts(): List<String> = sheets.map { it.part }
+        override fun legacyDrawingRid(sheet: Int): String? {
+            val s = sheets.getOrNull(sheet) ?: return null
+            return s.pendingLegacyRid ?: s.rootKids.firstOrNull { Xml.local(it.name) == "legacyDrawing" }?.let { XmlX.prefixedAttr(s.xml, it, "id") }
+        }
+        override fun pendingLegacyDrawing(sheet: Int, rid: String) { sheets[sheet].pendingLegacyRid = rid }
+        override fun changed() { dirty = true }
+    })
+
     init { load() }
 
     // ---- loading ----
 
     private fun load() {
         chartDefs = null
+        commentStore.invalidate()
         formulaLayoutChanged = false
         val rootRels = Rels.of(pkg, "")
         wbPart = rootRels.firstOrNull { it.type.endsWith("/officeDocument") }?.let { OoxmlPackage.resolve("", it.target) } ?: "xl/workbook.xml"
@@ -718,15 +735,16 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
     /**
      * Inserts an empty row below [row]. Rows further down move by one; references to them are adjusted in the formulas
      * of every sheet, in merged ranges, conditional-format and validation ranges of this sheet, in chart series
-     * references and in defined names. What is not adjusted (tables, filters, links, anchors of drawings, formulas inside
-     * conditional formats and validations) is reported through [compat] with an `insert-row:` code.
+     * references and in defined names; comments and notes follow their cells (M5). What is not adjusted (tables, filters,
+     * links, anchors of drawings, formulas inside conditional formats and validations) is reported through [compat] with
+     * an `insert-row:` code.
      */
     fun insertRowBelow(sheet: Int, row: Int) {
         if (row < 0 || row >= A1.MAX_ROW) throw IndexOutOfBoundsException("row $row")
         restructure(sheet, cols = false, at = row + 1, delta = 1)
     }
 
-    /** Deletes row [row]; rows below move up. References to the deleted row become `#REF!` (as in every spreadsheet). */
+    /** Deletes row [row]; rows below move up. References to the deleted row become `#REF!` (as in every spreadsheet); comments on the row go with it. */
     fun deleteRow(sheet: Int, row: Int) {
         if (row < 0 || row > A1.MAX_ROW) throw IndexOutOfBoundsException("row $row")
         restructure(sheet, cols = false, at = row, delta = -1)
@@ -811,11 +829,12 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             "autoFilter" -> note("$what:filter")
             "hyperlinks" -> note("$what:links")
             "drawing" -> note("$what:drawing-anchor")
-            "legacyDrawing" -> note("$what:comments")
             "conditionalFormatting" -> if (XmlX.findAllLocal(s.xml, k, "formula").isNotEmpty()) note("$what:conditional-format-formula")
             "dataValidations" -> if (XmlX.findAllLocal(s.xml, k, "formula1").isNotEmpty()) note("$what:data-validation-formula")
         }
         for (c in formulaCells) if (!c.opaque) { c.state = TODO; c.precs = null }
+        // M5 (s35): comments and notes follow their cells; those of a deleted row / column go with it
+        commentStore.shift(sheet, cols, at, delta)
         chartDefs = null
         formulaLayoutChanged = true
         s.usedRows = -1; s.usedCols = -1
@@ -1694,6 +1713,10 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             if (c.sharedSi >= 0) { c.sharedSi = -1; c.sharedMaster = false; if (c.formula != null) c.contentChanged = true }
         }
         for (c in formulaCells) if (!c.opaque) { c.state = TODO; c.precs = null }
+        // M5 (s35): comments and notes go with their rows
+        val newIndex = IntArray(n)
+        for (i in 0 until n) newIndex[order[i]] = i
+        commentStore.remap(sheet) { r, c -> if (r in firstRow..lastRow) Pair(firstRow + newIndex[r - firstRow], c) else Pair(r, c) }
         formulaLayoutChanged = true
         s.usedRows = -1; s.usedCols = -1
         dirty = true
@@ -1828,6 +1851,60 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         return charts().first { it.part == chartPart }
     }
 
+    // ---- M5 (s35): comments and notes on cells ----
+
+    /**
+     * Comments of one sheet, by cell (top to bottom, left to right). A THREAD carries its replies and whether it is
+     * resolved; a NOTE (old-style comment) is text only. `sheet` = the sheet index, `cell` = `quote` = the A1 reference.
+     * Ids are unique in the workbook and stay the same while it is open: a thread's and a reply's id is the id the file
+     * gives it; a note's is made here (`note:<sheet>:<cell when first read>`) and stays with the note when its cell moves.
+     */
+    fun comments(sheet: Int): List<ReviewComment> { sheetAt(sheet); return commentStore.comments(sheet) }
+
+    /** Comments of every sheet, in sheet order. */
+    fun comments(): List<ReviewComment> = commentStore.comments()
+
+    /** The comment on a cell ("C2"), or null. */
+    fun commentAt(sheet: Int, cell: String): ReviewComment? { sheetAt(sheet); return commentStore.commentAt(sheet, cell) }
+
+    /** The comment with this id; for a reply's id the thread it belongs to. Null when there is none. */
+    fun comment(id: String): ReviewComment? = commentStore.comment(id)
+
+    /** Cells of a sheet that carry a comment (A1 reference → kind), for the corner marker. Cached between changes. */
+    fun commentCells(sheet: Int): Map<String, CommentKind> { sheetAt(sheet); return commentStore.commentCells(sheet) }
+
+    /**
+     * Starts a thread on [cell] ("C2"; a cell inside a merged range means the range's first cell) and returns its id.
+     * A cell that already has a thread gets a reply instead and the reply's id is returned. A cell that holds a note:
+     * [IllegalStateException] ("cell has a note"); edit the note with [editComment]. [dateIso] is ISO-8601
+     * (`2026-11-22T10:00:00Z`; blank = now). The author is looked up in the workbook's list of people by name and added
+     * when new. The thread also gets its note-form copy and shape on the same cell, for programs that only know notes.
+     */
+    fun addComment(sheet: Int, cell: String, author: String, text: String, dateIso: String): String {
+        sheetAt(sheet)
+        val pos = A1.parse(cell.trim()) ?: throw IllegalArgumentException("not a cell: $cell")
+        val m = mergeAt(sheet, pos.first, pos.second)
+        return commentStore.add(sheet, m?.get(0) ?: pos.first, m?.get(1) ?: pos.second, author, text, dateIso)
+    }
+
+    /**
+     * Adds a reply to a thread ([id] = the thread's id or the id of one of its replies) and returns the reply's id.
+     * [IllegalArgumentException] for an unknown id, [IllegalStateException] for a note. A resolved thread stays resolved.
+     */
+    fun replyComment(id: String, author: String, text: String, dateIso: String): String = commentStore.reply(id, author, text, dateIso)
+
+    /** Marks a thread resolved or open again. [IllegalStateException] for a note. */
+    fun setCommentResolved(id: String, resolved: Boolean) = commentStore.setResolved(id, resolved)
+
+    /** New text for a thread's first message, a reply or a note ([id] says which). */
+    fun editComment(id: String, text: String) = commentStore.edit(id, text)
+
+    /**
+     * Deletes a thread with all its replies ([id] = the thread's id), one reply (the reply's id) or a note. The
+     * thread's / note's entry and shape in the sheet's note parts go too. Parts left without comments stay in the file.
+     */
+    fun deleteComment(id: String) = commentStore.delete(id)
+
     // ---- other outputs ----
 
     /** Things in the file this module keeps untouched but does not edit (READ_ONLY) or shows approximately (APPROX). */
@@ -1844,7 +1921,6 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
         }
         val names = pkg.names()
         add(ro, "pivot-table", names.count { it.startsWith("xl/pivotTables/") && it.endsWith(".xml") && !it.contains("/_rels/") })
-        add(ro, "comments", names.count { (it.startsWith("xl/comments") || it.startsWith("xl/threadedComments/")) && it.endsWith(".xml") })
         add(ro, "image", names.count { it.startsWith("xl/media/") })
         add(ro, "macros", names.count { it.endsWith("vbaProject.bin") })
         pkg.text(wbPart)?.let { wbXml ->
@@ -2091,6 +2167,20 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             val declared = Xml.attr(s.xml, root, "xmlns:r") == REL
             edits.add(Triple(pos, pos, "<${s.pfx}drawing " + (if (declared) "" else "xmlns:r=\"$REL\" ") + "r:id=\"$rid\"/>"))
         }
+        val legacyRid = s.pendingLegacyRid
+        if (legacyRid != null && root != null) {
+            val old = s.rootKids.firstOrNull { Xml.local(it.name) == "legacyDrawing" }
+            val oldId = old?.let { e -> XmlX.attrSpans(s.xml, e).firstOrNull { it.name.indexOf(':') >= 0 && it.name.substringAfter(':') == "id" } }
+            if (oldId != null) {
+                // the sheet named a legacy drawing that is not in the file: its element now names the new one
+                edits.add(Triple(oldId.valStart, oldId.valEnd, legacyRid))
+            } else if (old == null) {
+                // M5 (s35): after <drawing> (also one added in this save: same position, added before this one), before what follows it
+                val pos = s.rootKids.firstOrNull { Xml.local(it.name) in AFTER_LEGACY_DRAWING }?.start ?: root.closeStart
+                val declared = Xml.attr(s.xml, root, "xmlns:r") == REL
+                edits.add(Triple(pos, pos, "<${s.pfx}legacyDrawing " + (if (declared) "" else "xmlns:r=\"$REL\" ") + "r:id=\"$legacyRid\"/>"))
+            }
+        }
         return if (edits.isEmpty()) null else Xml.splice(s.xml, edits)
     }
 
@@ -2235,6 +2325,7 @@ class XlsxWorkbook private constructor(private val pkg: OoxmlPackage) {
             "legacyDrawing", "legacyDrawingHF", "drawingHF", "picture", "oleObjects", "controls", "webPublishItems", "tableParts", "extLst",
         )
         private val TRAILING_NUM = Regex("(.*?)([0-9]+)([^0-9]*)", RegexOption.DOT_MATCHES_ALL)
+        private val AFTER_LEGACY_DRAWING = setOf("legacyDrawingHF", "drawingHF", "picture", "oleObjects", "controls", "webPublishItems", "tableParts", "extLst")
         private val AFTER_DRAWING = setOf("legacyDrawing", "legacyDrawingHF", "drawingHF", "picture", "oleObjects", "controls", "webPublishItems", "tableParts", "extLst")
         private val NUMBER_INPUT = Regex("([+-]?)([\\$¥€£￥₩₹]?)([+-]?)((?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\\.[0-9]*)?|\\.[0-9]+)([eE][+-]?[0-9]+)?\\s*(%?)")
         private val DATE_INPUT = Regex("([0-9]{4})[-/]([0-9]{1,2})[-/]([0-9]{1,2})(?:[ T]([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?)?")
