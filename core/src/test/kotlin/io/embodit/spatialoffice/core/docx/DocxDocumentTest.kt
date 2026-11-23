@@ -80,19 +80,21 @@ class DocxDocumentTest {
 
     @Test fun flagsWhatItCannotEdit() {
         val d = open()
+        // M5: a commented paragraph and one with tracked insertions / deletions are editable
         val comment = d.blocks[3] as Paragraph
-        assertFalse(comment.editable); assertEquals("complex", comment.readOnlyWhy)
+        assertTrue(comment.editable); assertNull(comment.readOnlyWhy)
         val tracked = d.blocks[18] as Paragraph
-        assertFalse(tracked.editable); assertEquals("tracked-changes", tracked.readOnlyWhy)
-        assertEquals("the inserted text is shown, the deleted text is not", "Costs were slightly lower than forecast.", tracked.text)
+        assertTrue(tracked.editable); assertNull(tracked.readOnlyWhy)
+        assertEquals("the deleted text is on the paper too (struck through)", "Costs were flatslightly lower than forecast.", tracked.text)
+        assertEquals("what the document says leaves it out", "Costs were slightly lower than forecast.", tracked.cleanText)
         val field = d.blocks[20] as Paragraph
         assertFalse(field.editable); assertEquals("field", field.readOnlyWhy)
         assertEquals("Printed on page 1.", field.text)
         assertNull((d.blocks[2] as Paragraph).readOnlyWhy)
 
         val notes = d.compat().associate { it.code to it }
-        assertEquals(CompatNote(CompatKind.READ_ONLY, "tracked-changes", 2), notes["tracked-changes"])
-        assertEquals(CompatNote(CompatKind.READ_ONLY, "comments", 1), notes["comments"])
+        assertNull("M5: tracked insertions / deletions are no longer read-only", notes["tracked-changes"])
+        assertNull("M5: comments are no longer read-only", notes["comments"])
         assertEquals(CompatNote(CompatKind.READ_ONLY, "text-box", 1), notes["text-box"])
         assertEquals(CompatNote(CompatKind.READ_ONLY, "section", 1), notes["section"])
         assertNull(notes["table"])                                  // tables are editable since v0.2
@@ -104,7 +106,7 @@ class DocxDocumentTest {
 
     @Test fun readOnlyBlocksRefuseEdits() {
         val d = open()
-        for (id in listOf(3, 18, 20)) {
+        for (id in listOf(20)) {   // M5: 3 (a comment) and 18 (tracked changes) are editable now
             expectReadOnly { d.setParagraph(id, listOf(Run("x")), ParaStyle.BODY) }
             expectReadOnly { d.deleteBlock(id) }
         }
@@ -382,10 +384,10 @@ class DocxDocumentTest {
         val d = open()
         val before = d.blocks
         val editable = before.filterIsInstance<Paragraph>().filter { it.editable }
-        assertEquals(19, editable.size)
+        assertEquals(21, editable.size)   // M5: with the commented paragraph and the one with tracked changes
         for (p in editable) d.setParagraph(p.id, p.runs, p.style)
         assertEquals(before, d.blocks)
-        assertTrue(d.dirty); assertEquals(19, d.changedBlockCount)
+        assertTrue(d.dirty); assertEquals(21, d.changedBlockCount)
         val out = d.save()
         // this fixture's paragraphs carry nothing a rewrite drops (no revision ids, no spell-check marks), so the
         // regenerated XML is the original XML, character for character

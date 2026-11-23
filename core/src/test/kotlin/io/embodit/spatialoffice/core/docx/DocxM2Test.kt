@@ -196,7 +196,7 @@ class DocxM2Test {
         val x = text(d.save(), doc)
         assertTrue(x.contains("<w:spacing w:line=\"276\" w:lineRule=\"auto\"/>"))
         assertEquals(276, para(DocxDocument.open(d.save()), 13).lineSpacing)
-        expectIllegal { d.setIndent(3, 720) }       // read-only paragraph (comment range)
+        expectIllegal { d.setIndent(20, 720) }      // read-only paragraph (a field)
         expectIllegal { d.setLineSpacing(14, 360) } // a table
     }
 }

@@ -1,5 +1,8 @@
 package io.embodit.spatialoffice.core.docx
 
+import io.embodit.spatialoffice.core.review.RevisionKind
+import io.embodit.spatialoffice.core.text.RunRev
+
 enum class ParaStyle { BODY, TITLE, H1, H2, H3, BULLET, NUMBERED }
 
 /**
@@ -26,11 +29,20 @@ data class Run(
     val link: String? = null,
     /** M3 (d22): the run's own `w:vertAlign`: "superscript" | "subscript"; null = baseline. */
     val vertAlign: String? = null,
+    /**
+     * M5 (d30 / d36): the tracked change the run is part of: INSERT (`w:ins`, drawn underlined) or DELETE (`w:del`,
+     * drawn struck through). The text of a DELETE run is still part of [Paragraph.text]. null = ordinary text.
+     */
+    val rev: RunRev? = null,
 )
 
 sealed class DocBlock { abstract val id: Int }
 
-/** [readOnlyWhy] is null when [editable], otherwise "tracked-changes" | "field" | "complex". */
+/**
+ * [readOnlyWhy] is null when [editable], otherwise "tracked-changes" | "field" | "complex".
+ * M5: insertions and deletions of text are part of the model ([Run.rev]) and leave the paragraph editable;
+ * "tracked-changes" is now only a paragraph with a tracked move, format change or paragraph mark.
+ */
 data class Paragraph(
     override val id: Int,
     val style: ParaStyle,
@@ -53,7 +65,10 @@ data class Paragraph(
     /** M3 (d21): the paragraph has a bottom border (`w:pBdr/w:bottom`): drawn as a horizontal line under it. */
     val rule: Boolean = false,
 ) : DocBlock() {
+    /** Everything on the paper, in order — including text of tracked deletions ([Run.rev] DELETE). Offsets count in this. */
     val text: String get() = runs.joinToString("") { it.text }
+    /** M5: what the document says: [text] without the tracked deletions. */
+    val cleanText: String get() = if (runs.none { it.rev?.kind == RevisionKind.DELETE }) text else runs.filter { it.rev?.kind != RevisionKind.DELETE }.joinToString("") { it.text }
     /** M3 (d21): a paragraph that holds nothing but page breaks. */
     val pageBreak: Boolean get() = runs.isNotEmpty() && text.all { it == '\u000C' }
 }
