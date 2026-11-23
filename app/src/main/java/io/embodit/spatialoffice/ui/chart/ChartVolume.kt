@@ -247,7 +247,7 @@ internal object ChartResources {
             // gate:allow geometry data marks of a chart (columns, points) and its base plate; abstract, no prop or character
             if (kept(meshes, b.meshKey) { ChartPlan.size(b.meshKey).let { (w, h, d) -> MeshResource.createBox(Vector3(w, h, d), 0f) } }) made++
             // gate:allow geometry invisible hit box of one chart mark (a little larger than the mark, so thin columns are easy to hit)
-            b.hitKey?.let { hk -> if (kept(hits, hk) { ChartPlan.size(hk).let { (w, h, d) -> ShapeResource.createBox(Vector3(w, h, d)) } }) made++ }
+            b.hitKey?.let { hk -> if (kept(hits, hk) { ChartPlan.size(hk).let { (w, h, d) -> ShapeResource.createBox(Vector3(w, h, d)) } }) made++ } // kept() makes it global: r.toGlobal()
         }
         Log.i(TAG, "CHART prepared ${boxes.size} boxes on ${Thread.currentThread().name}: $made new resources in ${SystemClock.uptimeMillis() - t0} ms")
         made

@@ -379,6 +379,7 @@ private fun EditBox(text: String, onDone: (String?) -> Unit) {
     var v by remember { mutableStateOf(text) }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    // gate:allow button-gap a text box above its button row, not buttons side by side (the two buttons in that row are 16 dp apart)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         PaneField(v, { v = it }, "", "review-edit-field", minHeight = 48.dp, focus = focus, onSend = { onDone(v) })
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End)) {
@@ -396,8 +397,10 @@ private fun ReplyBox(graph: Graph, s: Session, c: ReviewComment, me: String, clo
     val send = {
         if (v.isNotBlank() && me.isNotBlank() && s.replyComment(c.id, me, v.trim())) { v = ""; close() }
     }
+    // gate:allow button-gap the reply box above its one-button row, not buttons side by side
     Column(Modifier.fillMaxWidth().padding(start = 36.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         PaneField(v, { v = it }, tr(R.string.rv_reply_ph), "review-reply-field", minHeight = 48.dp, focus = focus, onSend = send)
+        // gate:allow button-gap a caption and ONE button in the row (the signature line and Post), not buttons side by side
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Said(if (me.isBlank()) tr(R.string.my_name_ask) else tr(R.string.rv_as_me, me), Modifier.weight(1f), maxLines = 1, style = PicoTheme.typography.bodySmall, color = PicoTheme.colorScheme.labelSecondary)
             ToolButton(tr(R.string.rv_post), "review/reply-post", icon = R.drawable.ic_send, primary = true, name = "post-reply", enabled = v.isNotBlank() && me.isNotBlank(), onClick = send)
@@ -427,6 +430,7 @@ private fun Composer(graph: Graph, s: Session, me: String) {
     // Ctrl+Alt+M / Insert › Comment put the caret here
     LaunchedEffect(s.composeTick) { if (s.composeTick > 0) runCatching { focus.requestFocus() } }
     val send: () -> Unit = { postDraft(graph, s) }
+    // gate:allow button-gap the comment box above its one-button row (and the one-time name question), not buttons side by side
     Column(Modifier.fillMaxWidth().semantics { contentDescription = "review-composer" }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (me.isBlank()) {
             Txt(tr(R.string.my_name_ask), "review/ask-name", style = PicoTheme.typography.labelLarge, weight = FontWeight.SemiBold, maxLines = 2)
@@ -442,6 +446,7 @@ private fun Composer(graph: Graph, s: Session, me: String) {
             else -> tr(if (s.commentOnSelection) R.string.rv_compose_sel else R.string.rv_compose_para)
         }
         PaneField(text, { s.draft = it }, hint, "review-field", focus = focus, onSend = send)
+        // gate:allow button-gap a caption and ONE button in the row (the signature line and Post), not buttons side by side
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Said(tr(R.string.rv_as_me, me.ifBlank { "—" }), Modifier.weight(1f), maxLines = 1, style = PicoTheme.typography.bodySmall, color = PicoTheme.colorScheme.labelSecondary)
             ToolButton(tr(R.string.rv_post), "review/post", icon = R.drawable.ic_send, primary = true, name = "post-comment", enabled = text.isNotBlank() && me.isNotBlank(), onClick = send)
@@ -557,6 +562,7 @@ private fun androidx.compose.foundation.layout.ColumnScope.RevisionList(graph: G
 @Composable
 private fun NameAsk(graph: Graph) {
     var name by remember { mutableStateOf("") }
+    // gate:allow button-gap the name question: a caption above a field + one button, not buttons side by side
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Txt(tr(R.string.my_name_ask), "review/ask-name", style = PicoTheme.typography.labelLarge, weight = FontWeight.SemiBold, maxLines = 2)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
