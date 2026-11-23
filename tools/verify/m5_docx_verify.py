@@ -154,6 +154,8 @@ def comment_checks(p, overrides):
     check(len(ids) == len(set(ids)), "comment ids are not unique: %r" % ids)
     for c in comments.findall(W + "comment"):
         check(c.get(W + "author") is not None, "comment %s has no author" % c.get(W + "id"))
+        if c.get(W + "date") is not None:
+            check(ISO.match(c.get(W + "date")) is not None, "comment %s has a date that is not ISO: %r" % (c.get(W + "id"), c.get(W + "date")))
         check(len(c.findall(W + "p")) >= 1, "comment %s has no paragraph" % c.get(W + "id"))
     known = set(ids)
     sid = [e.get(W + "id") for e in starts]

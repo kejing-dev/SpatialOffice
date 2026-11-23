@@ -70,7 +70,8 @@ fun deleteComment(id: String)
   last section.)
 - `addComment` — `start == end` comments the whole paragraph; offsets are clamped and may come in either order.
   A read-only paragraph can be commented (always as a whole, offsets ignored). Tables, pictures and opaque blocks:
-  `IllegalStateException`. Returns the id. `text` may hold `\n` (one paragraph per line).
+  `IllegalStateException`. Returns the id. `text` may hold `\n` (one paragraph per line). `dateIso` is written as
+  given (`2026-11-22T10:00:00Z`); "" writes no date.
 - `replyComment` — `id` may be a thread's first comment or one of its replies; the reply always joins the thread.
   Unknown id: `IllegalArgumentException`. Same for `setCommentResolved` and `editComment`.
 - `setCommentResolved` — works with any id of the thread; `comments()` reports the state on the thread.

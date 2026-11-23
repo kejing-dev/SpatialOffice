@@ -93,7 +93,8 @@ internal object DocxComments {
         val pPr = if (pStyle != null) "<w:pPr><w:pStyle w:val=\"${Xml.escape(pStyle)}\"/></w:pPr>" else ""
         val ref = "<w:r>" + (if (rStyle != null) "<w:rPr><w:rStyle w:val=\"${Xml.escape(rStyle)}\"/></w:rPr>" else "") + "<w:annotationRef/></w:r>"
         val ls = lines(text)
-        val sb = StringBuilder("<w:comment w:id=\"$id\" w:author=\"${XmlEx.esc(author)}\" w:date=\"${XmlEx.esc(date)}\" w:initials=\"${XmlEx.esc(initials)}\">")
+        // no date given: no attribute (an empty one is not a date)
+        val sb = StringBuilder("<w:comment w:id=\"$id\" w:author=\"${XmlEx.esc(author)}\"" + (if (date.isBlank()) "" else " w:date=\"${XmlEx.esc(date.trim())}\"") + " w:initials=\"${XmlEx.esc(initials)}\">")
         ls.forEachIndexed { i, line ->
             sb.append(if (i == ls.lastIndex) paraOpen("<w:p>", paraId, w14) else "<w:p>").append(pPr)
             if (i == 0) sb.append(ref)

@@ -289,8 +289,10 @@ class DocxM5Test {
         assertTrue(x, x.contains("<w:r><w:t xml:space=\"preserve\">Alpha </w:t></w:r>${cStart(c.toInt())}${cEnd(c.toInt())}${cRef(c.toInt())}<w:r><w:t xml:space=\"preserve\"> gamma</w:t></w:r>"))
         val re = DocxDocument.open(saved)
         assertEquals(Triple(6, 6, ""), at(re))
-        // and it still takes a reply; typing there afterwards keeps it
-        re.replyComment(c, "Bob", "gone?", "")
+        // and it still takes a reply (written without a date when none is given); typing there afterwards keeps it
+        val undated = re.replyComment(c, "Bob", "gone?", "")
+        assertTrue(text(re.save(), cPart).contains("<w:comment w:id=\"$undated\" w:author=\"Bob\" w:initials=\"B\">"))
+        assertEquals("", re.comments().single().replies.single().date)
         type(re, 0, "Alpha new gamma")
         assertEquals(1, re.comments().single().replies.size)
         assertConsistent(re.save())
