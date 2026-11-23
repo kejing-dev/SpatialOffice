@@ -638,6 +638,36 @@ class DocxM5Test {
         assertConsistent(saved)
     }
 
+    @Test fun changesInATableCellAreListedAndResolvedInPlace() {
+        val base = handMade(
+            "<w:p>${r("Before")}</w:p><w:tbl><w:tr><w:tc><w:p>${r("Total ")}<w:del w:id=\"3\" w:author=\"Ann\"><w:r><w:delText>120</w:delText></w:r></w:del><w:ins w:id=\"4\" w:author=\"Ann\"><w:r><w:t>144</w:t></w:r></w:ins></w:p></w:tc>" +
+                "<w:tc><w:p>${r("other cell")}</w:p></w:tc></w:tr></w:tbl><w:p>${r("After")}</w:p>",
+        )
+        val before = text(base, doc)
+        val d = DocxDocument.open(base)
+        assertEquals(listOf("r3|DELETE|120|1", "r4|INSERT|144|1"), d.revisions().map { "${it.id}|${it.kind}|${it.text}|${it.block}" })
+        assertEquals("Total 144", (d.blocks[1] as TableBlock).rows[0][0])
+        assertTrue(d.rejectRevision("r4"))
+        assertTrue(d.rejectRevision("r3"))
+        assertEquals("Total 120", (d.blocks[1] as TableBlock).rows[0][0])
+        val saved = out("m5-revisions-table.docx", d.save())
+        val tbl = bodyChild(before, 1)
+        val seg = assertOnlyRangeChanged(before, text(saved, doc), tbl.start, tbl.end)
+        assertTrue(seg, seg.contains("<w:tc><w:p>${r("Total ")}<w:r><w:t>120</w:t></w:r></w:p></w:tc><w:tc><w:p>${r("other cell")}</w:p></w:tc>"))
+        assertTrue(DocxDocument.open(saved).revisions().isEmpty())
+    }
+
+    @Test fun runsAndSpansCarryTheSameFields() {
+        val run = Run("x", bold = true, italic = true, underline = true, src = 3, strike = true, color = 0x112233, highlight = "yellow", size = 28, link = "https://example.com", vertAlign = "superscript", rev = RunRev(RevisionKind.INSERT, "Ann", "2026-01-01T00:00:00Z"))
+        assertEquals(run, run.toSpan().toRun())
+        assertEquals(run.rev, run.toSpan().rev)
+        // the editor keeps a tracked span apart from its neighbours and never hands the mark on to typed text
+        val spans = listOf(Run("ab").toSpan(), run.copy(text = "cd").toSpan())
+        assertEquals(2, RichText.normalize(spans).size)
+        assertNull(RichText.applyEdit(spans, "abcdX").last().rev)
+        assertNull(RichText.replaceAt(spans, 2, 2, "Z").last().rev)
+    }
+
     // ================================================================================================ C. recording my own changes
 
     private val me = "王小明"
@@ -920,6 +950,38 @@ class DocxM5Test {
     }
 
     // ================================================================================================ the save rule
+
+    @Test fun savingBeforeEveryStepAsUndoDoesGivesTheSameFile() {
+        // the app takes an undo snapshot (save) before each change and restores by opening one
+        val base = docOf("Alpha beta gamma", "Second paragraph")
+        fun steps(d: DocxDocument, snap: () -> Unit): ByteArray {
+            snap(); val c = d.addComment(0, 6, 10, me, "one", now)
+            snap(); d.replyComment(c, "Bob", "two", now)
+            snap(); typeTracked(d, 1, "Second new paragraph", me, now)
+            snap(); d.setCommentResolved(c, true)
+            snap(); d.setHeaderFooter("Head", "Foot")
+            snap(); d.paintFormat(0, 0, 1, 0, 6)
+            snap(); type(d, 0, "Alpha beta gamma delta")
+            return d.save()
+        }
+        val plain = steps(DocxDocument.open(base)) {}
+        val d = DocxDocument.open(base)
+        val snaps = ArrayList<ByteArray>()
+        val snapped = steps(d) { snaps.add(d.save()) }
+        assertEquals(PackageAsserts.parts(plain).mapValues { String(it.value, Charsets.UTF_8) }, PackageAsserts.parts(snapped).mapValues { String(it.value, Charsets.UTF_8) })
+        assertConsistent(out("m5-all-steps.docx", snapped))
+        // every snapshot opens and saves to itself; going back to one and on again gives the same result
+        for (s in snaps) assertArrayEquals(s, DocxDocument.open(s).save())
+        assertArrayEquals(base, snaps[0])
+        val undone = DocxDocument.open(snaps[3])
+        assertEquals(listOf(false), undone.comments().map { it.resolved })
+        assertEquals(1, undone.comments().single().replies.size)
+        // (the insertion's id is above the two comment ids already in the text)
+        assertEquals(listOf("r2|INSERT|new "), undone.revisions().map { "${it.id}|${it.kind}|${it.text}" })
+        // a format picked up before an undo still paints after it
+        val fmt = d.runFormatAt(1, 0)
+        assertTrue(undone.paintFormat(fmt, 0, 0, 0))
+    }
 
     @Test fun readingReviewDataNeverChangesAFile() {
         for (bytes in listOf(src, handMade(twoAuthors), docOf("a", "b"))) {

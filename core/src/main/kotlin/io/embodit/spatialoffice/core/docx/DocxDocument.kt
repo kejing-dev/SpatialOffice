@@ -579,11 +579,12 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
             pPr = restylePPr("", style, anchorIdx, anchorIdx + 1)
         }
         val clean = normRuns(runs)
-        val newXml = "<w:p>" + pPr + runsXml(clean, srcRPr) + "</w:p>"
+        val ids = RevIds(emptyList())
+        val newXml = "<w:p>" + pPr + runsXml(clean, srcRPr, emptyList(), ids) + "</w:p>"
         xml = xml.substring(0, pos) + newXml + xml.substring(pos)
         for (k in anchorIdx + 1 until entries.size) { entries[k].start += newXml.length; entries[k].end += newXml.length }
         val newId = nextId++
-        entries.add(anchorIdx + 1, Entry(newId, pos, pos + newXml.length, paraOf(newId, style, clean, true, null, pPr), srcRPr, true))
+        entries.add(anchorIdx + 1, Entry(newId, pos, pos + newXml.length, paraOf(newId, style, clean, true, null, pPr), srcRPr, true, revIds = ids.used))
         changedIds.add(newId)
         touched()
         return newId
