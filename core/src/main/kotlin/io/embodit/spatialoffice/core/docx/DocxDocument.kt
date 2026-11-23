@@ -821,7 +821,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
     }
 
     /** One comment anchor found in source text: [start] until [end] is what to remove to take it out. */
-    private class Found(val kind: Int, val cid: Int, val start: Int, val end: Int, val raw: String)
+    private class Found(val kind: Int, val cid: Int, val start: Int, val end: Int, val raw: String, /** where its run ends */ val after: Int = end)
 
     /** Every comment anchor in [seg] (one element as text), in order; a reference counts as its whole run. */
     private fun anchorElems(seg: String): List<Found> {
@@ -840,7 +840,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
                         val alone = kids.all { it.name == "w:rPr" || it === ref }
                         // a reference that shares its run with something else is taken out (and kept) on its own
                         if (alone) out.add(Found(Mark.C_REF, id(ref), c.start, c.end, seg.substring(c.start, c.end)))
-                        else out.add(Found(Mark.C_REF, id(ref), ref.start, ref.end, "<w:r>" + seg.substring(ref.start, ref.end) + "</w:r>"))
+                        else out.add(Found(Mark.C_REF, id(ref), ref.start, ref.end, "<w:r>" + seg.substring(ref.start, ref.end) + "</w:r>", c.end))
                     }
                 }
                 "w:pPr", "w:rPr", "w:tblPr", "w:tcPr", "w:trPr", "w:tblGrid" -> {}
@@ -1109,7 +1109,7 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
             for (f in anchorElems(seg)) {
                 if (f.cid !in members) continue
                 if (f.kind == Mark.C_START) sHit = i to f.end
-                if (f.kind == Mark.C_REF) rHit = i to (if (f.raw.startsWith("<w:r>" + "<w:commentReference")) runEndAfter(seg, f.end) else f.end)
+                if (f.kind == Mark.C_REF) rHit = i to f.after
             }
         }
         val r = rHit
@@ -1131,12 +1131,6 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
             }
         }
         return cid.toString()
-    }
-
-    /** End of the run that holds position [at] of [seg] (a reference sharing its run with other content): the place after that run. */
-    private fun runEndAfter(seg: String, at: Int): Int {
-        val close = seg.indexOf("</w:r>", at)
-        return if (close < 0) at else close + 6
     }
 
     /**
@@ -1303,14 +1297,17 @@ class DocxDocument private constructor(private val pkg: OoxmlPackage, private va
             if (m == null) break
             if (m.range.first >= e.end) continue
             var changed = false
+            var open = -1
             while (true) {
                 val seg = xml.substring(e.start, e.end)
-                val g = DocxRevisions.groups(seg).firstOrNull { it.kind == RevisionKind.INSERT || it.kind == RevisionKind.DELETE } ?: break
+                val gs = DocxRevisions.groups(seg).filter { it.kind == RevisionKind.INSERT || it.kind == RevisionKind.DELETE }
+                // counted: the changes that are gone afterwards (rejecting an insertion takes a deletion nested in it along)
+                if (open < 0) { open = gs.size; n += open }
+                val g = gs.firstOrNull() ?: break
                 val out = DocxRevisions.resolve(seg, g, accept)
-                if (out == seg) break
+                if (out == seg) { n -= gs.size; break }
                 replaceEntry(idx, out)
                 changed = true
-                n++
             }
             if (changed) { reparse(idx); changedIds.add(e.id); m = TRACKED.find(xml, e.end) }
         }

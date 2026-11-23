@@ -105,7 +105,11 @@ internal object DocxRevisions {
             }
         }
 
-        if (root.name == "w:p") walk(around(root)) else walk(root)
+        when {
+            root.name == "w:p" -> walk(around(root))
+            root.name in PROPS -> props(root)
+            else -> walk(root)
+        }
         return out
     }
 

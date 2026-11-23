@@ -137,7 +137,7 @@ internal object DocxComments {
         ls.forEachIndexed { i, line ->
             val open = when {
                 i == ls.lastIndex -> XmlEx.openTag(xml, last)
-                i == 0 -> XmlEx.openTag(xml, first)
+                i == 0 && first !== last -> XmlEx.openTag(xml, first)
                 else -> "<w:p>"
             }
             sb.append(open).append(pPr)
