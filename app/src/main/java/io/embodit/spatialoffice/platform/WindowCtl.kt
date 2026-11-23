@@ -400,9 +400,30 @@ class WindowCtl(private val graph: Graph) {
             val r = runCatching { n.openStage(Containers.STAGE, StageStyle.Mixed) }
             Log.i(TAG, "STAGE open result=${r.getOrNull() ?: r.exceptionOrNull()}")
             if (r.isFailure) { closedForStage.clear(); return@launch }
-            for (w in closedForStage.toList()) runCatching { n.closeWindowContainer(Containers.id(w.win), w.tag) }
-            if (isOpen(home)) { closedForStage.add(home); runCatching { (navigators[home] ?: n).closeWindowContainer() }.onFailure { Log.w(TAG, "close home: $it") } }
-            Log.i(TAG, "STAGE entered, closed windows=$closedForStage")
+            // The windows stay up until the Stage has something to show (it takes the system 2–3 s to bring the Stage up and
+            // bind its panels); closing them at once left an empty room for that long. They go when the pieces start to
+            // deal out ([stageReady]), or after 3 s whatever happens.
+            closeForStage = {
+                for (w in closedForStage.toList()) runCatching { n.closeWindowContainer(Containers.id(w.win), w.tag) }
+                if (isOpen(home)) { closedForStage.add(home); runCatching { (navigators[home] ?: n).closeWindowContainer() }.onFailure { Log.w(TAG, "close home: $it") } }
+                Log.i(TAG, "STAGE entered, closed windows=$closedForStage")
+            }
+            main.postDelayed({ stageReady("3 s passed") }, 3000)
+        }
+    }
+
+    private var closeForStage: (() -> Unit)? = null
+
+    /** How long the Stage's panels take to gather before the home window comes back (ms); StageScene.EXIT_MS is the same span. */
+    private val GATHER_MS = 300L
+
+    /** The Stage's first panels are on their way (called from the scene's frame thread, or by the timeout): the windows behind them go now. */
+    fun stageReady(why: String) {
+        main.post {
+            val close = closeForStage ?: return@post
+            closeForStage = null
+            Log.i(TAG, "STAGE ready ($why): closing the windows it replaces")
+            close()
         }
     }
 
@@ -410,14 +431,19 @@ class WindowCtl(private val graph: Graph) {
 
     fun leaveStage(back: WinRef?) {
         val n = navigators[stage] ?: nav() ?: return
-        // the home window comes back first, so the app is never left without a container
-        reopenHome(n)
+        // windows that never got closed (the Stage was left before it was ready) are not reopened twice
+        closeForStage?.let { closeForStage = null; closedForStage.clear() }
+        // 1. the panels gather into one stack (StageScene, GATHER_MS); 2. the home window comes back, so the app is never
+        // left without a container; 3. the Stage closes. Reopening the home window at once made the gathering stutter.
         main.postDelayed({
-            graph.scope.launch {
-                runCatching { n.closeStage() }.onFailure { Log.w(TAG, "STAGE close: $it") }
-                stageClosed(back)
-            }
-        }, 350)
+            reopenHome(n)
+            main.postDelayed({
+                graph.scope.launch {
+                    runCatching { n.closeStage() }.onFailure { Log.w(TAG, "STAGE close: $it") }
+                    stageClosed(back)
+                }
+            }, 350)
+        }, GATHER_MS)
     }
 
     private fun reopenHome(n: SpatialNavigator) {

@@ -13,6 +13,7 @@ import com.pico.spatial.core.math.Vector3
 import com.pico.spatial.ui.foundation.content.SpatialViewAttachments
 import io.embodit.spatialoffice.core.files.FileKind
 import io.embodit.spatialoffice.core.layout.LayoutRules
+import io.embodit.spatialoffice.core.layout.Motion
 import io.embodit.spatialoffice.core.layout.PanelPose
 import io.embodit.spatialoffice.core.layout.Seat
 import io.embodit.spatialoffice.platform.Graph
@@ -60,7 +61,7 @@ object StagePanels {
 /**
  * The Stage (Mixed): the pieces of one file around the seat, a layout bar under the focused piece, or the rehearsal
  * set (big screen, notes, next slide, bar). Every 2D surface is an attachment panel parented to a holder entity in
- * Stage space; holders glide to their target pose each frame. Nothing is dragged and nothing follows the head: the
+ * Stage space; holders move to their target pose as damped springs (core/layout/Motion), played by [choreograph]. Nothing is dragged and nothing follows the head: the
  * seat is fixed when the layout is entered and when the user presses [Bring back to front].
  */
 class StageScene(private val graph: Graph) {
@@ -75,6 +76,31 @@ class StageScene(private val graph: Graph) {
     private val boundAt = HashMap<String, Long>()
     private val current = HashMap<String, FloatArray>() // x, y, z, yaw, scale
     private var seat: Seat? = null
+    // ---- motion (core/layout/Motion): every panel is a spring towards its pose ----
+    private val bodies = HashMap<String, Motion.Body>()
+    /** How each panel moves right now (the focused piece lands with a small give). */
+    private val feels = HashMap<String, Motion.Feel>()
+    /** Where a panel that is about to appear starts from, and how long it waits (set by [choreograph], used once). */
+    private val starts = HashMap<String, FloatArray>()
+    private val delays = HashMap<String, Float>()
+    /** Panels on their way out (the Stage is closing): the pose they gather to. */
+    private val exits = HashMap<String, FloatArray>()
+    private var exitAt = 0L
+    private var lastFrameAt = 0L
+    private var prevMode: StageMode? = null
+    private var prevArrangement: io.embodit.spatialoffice.core.layout.Arrangement? = null
+    private var prevFocus = -1
+    private var lastFocusPose: FloatArray? = null
+    private var moveName: String? = null
+    private var moveAt = 0L
+    private var moveFrame = 0L
+    private var seenRecenterForMotion = -1
+    /** An opening move is waiting for calm frames ([onFrame]). */
+    private var holding = false
+    private var holdSince = 0L
+    private var calm = 0
+    /** An opening move has begun and its first panel is not shown yet (the windows behind the Stage close at that moment). */
+    private var opening = false
     private var seenRecenter = -1
     private var frames = 0L
     private var lastLog = 0L
@@ -115,6 +141,7 @@ class StageScene(private val graph: Graph) {
         if (ActiveStage.scene === this) ActiveStage.scene = null
         for (h in holders.values) runCatching { h.removeAllChildren() }
         panels.clear(); holders.clear(); current.clear()
+        bodies.clear(); exits.clear(); starts.clear(); delays.clear(); feels.clear(); prevMode = null; lastFrameAt = 0L; moveName = null
         root = null
         Log.i(TAG, "STAGE detached")
     }
@@ -157,28 +184,182 @@ class StageScene(private val graph: Graph) {
             wanted[StagePanels.BAR] = target(st, r.getValue("bar"), 1f, tiltDeg = -22f)
         }
         val now = SystemClock.elapsedRealtime()
+        // real time between frames: the motion is the same whatever the container's frame rate (the system lowers it at will)
+        val dt = if (lastFrameAt == 0L) 1f / 72f else ((now - lastFrameAt) / 1000f).coerceIn(0.001f, Motion.MAX_DT)
+        lastFrameAt = now
+        choreograph(st, mode, wanted, now)
+        // An opening move waits out the stall that comes with it (the panels are composed for the first time, the windows
+        // close): it starts on the second calm frame in a row, or after half a second. The pieces stand in their stack meanwhile.
+        var step = dt
+        if (holding) {
+            calm = if (dt < 0.05f) calm + 1 else 0
+            if (calm >= 2 || now - holdSince > 500) { holding = false; Log.i(TAG, "MOTION go after ${now - holdSince} ms hold (calm frames=$calm)") } else step = 0f
+        }
+        var moving = 0
         for (id in StagePanels.all) {
             val h = holders[id] ?: continue
-            val w = wanted[id]
             val settled = boundAt[id]?.let { now - it > 600L } == true
+            val leaving = exits[id]
+            val w = wanted[id] ?: leaving
             if (w != null && settled) {
                 if (!h.enabled) h.enabled = true
-                val c = current[id]
-                // glide: 18 % of the way per frame; a panel that was hidden appears in place
-                val next = if (c == null || shown[id] != true) w else FloatArray(6) { i -> c[i] + (w[i] - c[i]) * 0.18f }
-                current[id] = next
-                apply(h, next)
-                if (shown[id] != true) { shown[id] = true; Log.i(TAG, "PANEL show $id at=${"%.2f,%.2f,%.2f".format(w[0], w[1], w[2])} scale=${"%.2f".format(w[4])}") }
+                var body = bodies[id]
+                if (body == null || (shown[id] != true && leaving == null)) {
+                    // a panel that was hidden: it starts where the choreography put it, or in place
+                    body = Motion.Body((starts.remove(id) ?: w).copyOf(), delay = delays.remove(id) ?: 0f)
+                    bodies[id] = body
+                }
+                Motion.step(body, w, step, feels[id] ?: Motion.GLIDE)
+                apply(h, body.pos)
+                val there = Motion.arrived(body, w)
+                if (!there) moving++
+                if (leaving != null && (there || now - exitAt > EXIT_MS)) {
+                    exits.remove(id); bodies.remove(id); shown[id] = false; park(h)
+                    Log.i(TAG, "PANEL hide $id (gathered)")
+                } else if (shown[id] != true) {
+                    // the first panel of an opening move: the windows behind the Stage can go now
+                    if (opening) { opening = false; graph.windows.stageReady("first panel") }
+                    shown[id] = true
+                    Log.i(TAG, "PANEL show $id at=${"%.2f,%.2f,%.2f".format(w[0], w[1], w[2])} scale=${"%.2f".format(w[4])}")
+                }
             } else {
+                if (w != null) moving++ // wanted, but its panel is not bound long enough yet: the move has not begun
                 if (shown[id] == true) { shown[id] = false; Log.i(TAG, "PANEL hide $id") }
+                bodies.remove(id)
                 park(h)
                 if (settled && h.enabled) h.enabled = false
             }
+        }
+        // one line when a move has come to rest: what it was and how long it took (QA reads these)
+        val name = moveName
+        if (name != null && moving == 0 && now - moveAt > 80) {
+            val ms = (now - moveAt).coerceAtLeast(1)
+            Log.i(TAG, "MOTION done $name in $ms ms frames=${frames - moveFrame} (${"%.0f".format((frames - moveFrame) * 1000f / ms)} fps)")
+            moveName = null
         }
         if (now - lastLog > 5000) {
             lastLog = now
             Log.i(TAG, "STAGE frame=$frames mode=$mode head=${head?.let { "%.2f,%.2f,%.2f pitch=%.0f".format(it.x, it.y, it.z, it.pitchDeg) }} shown=${shown.filterValues { it }.keys.sorted()}")
         }
+    }
+
+    private fun began(name: String, now: Long) { moveName = name; moveAt = now; moveFrame = frames; Log.i(TAG, "MOTION start $name") }
+
+    private fun hold(now: Long) { holding = true; holdSince = now; calm = 0; opening = true }
+
+    private fun slotOf(id: String): Int = id.removePrefix("piece-").toIntOrNull() ?: 0
+
+    /**
+     * Decides how this frame's change is played. Nothing here moves a panel: it only sets where new panels start,
+     * how long each waits and how each moves; [Motion.step] does the rest.
+     * - entering the spread: the pieces are dealt out of one stack at the focused place, the focused one first;
+     * - another arrangement: the pieces leave for their new places one after the other, from the focus outwards;
+     * - another piece in front: it comes with a small give, the rest glide;
+     * - rehearsal: the slide in front grows into the big screen, notes and next slide come in from the sides, the bar rises;
+     * - leaving: everything gathers back into the stack within the 350 ms before the Stage closes.
+     */
+    private fun choreograph(st: Seat?, mode: StageMode?, wanted: HashMap<String, FloatArray>, now: Long) {
+        val focus = graph.focus
+        if (st != null && mode == StageMode.SPREAD) {
+            val count = graph.stageSession?.pieceCount ?: 0
+            val start = windowStart(count, focus.coerceIn(0, (count - 1).coerceAtLeast(0)))
+            val focusId = StagePanels.piece(focus - start)
+            val focusPose = wanted[focusId]
+            if (focusPose != null) lastFocusPose = focusPose
+            val entering = prevMode != StageMode.SPREAD
+            if (entering && focusPose != null) {
+                val stack = stackAt(st, focusPose)
+                // coming back from the rehearsal, the big screen shrinks into the piece in front
+                val from = bodies[StagePanels.SCREEN]?.pos
+                for (id in wanted.keys) {
+                    val w = wanted.getValue(id)
+                    if (id == StagePanels.BAR) {
+                        starts[id] = w.copyOf().also { it[Motion.Y] -= 0.16f; it[Motion.SCALE] *= 0.6f }
+                        delays[id] = 0.22f
+                    } else {
+                        starts[id] = if (id == focusId && from != null) from.copyOf() else stack
+                        delays[id] = Motion.fanDelay(start + slotOf(id), focus)
+                    }
+                    bodies.remove(id)
+                }
+                began("spread-open pieces=${wanted.size - 1} arrangement=${graph.arrangement}", now)
+                hold(now)
+            } else if (!entering && prevArrangement != null && prevArrangement != graph.arrangement) {
+                for ((id, body) in bodies) {
+                    if (id.startsWith("piece-") && body.delay <= 0f) body.delay = Motion.fanDelay(start + slotOf(id), focus, stepMs = 30, maxMs = 240)
+                }
+                began("arrange $prevArrangement -> ${graph.arrangement}", now)
+            } else if (!entering && prevFocus != focus && prevFocus >= 0) {
+                began("focus $prevFocus -> $focus", now)
+            }
+            for (id in wanted.keys) feels[id] = if (id == focusId) Motion.FOCUS else Motion.GLIDE
+            prevArrangement = graph.arrangement
+        } else if (st != null && mode == StageMode.REHEARSAL) {
+            if (prevMode != StageMode.REHEARSAL) {
+                val screen = wanted[StagePanels.SCREEN]
+                // the slide in front (coming from the spread) grows into the screen; otherwise it rises from a small one in front of the seat
+                val front = if (prevMode == StageMode.SPREAD) lastFocusPose else null
+                if (screen != null) {
+                    starts[StagePanels.SCREEN] = front?.copyOf() ?: stackAt(st, screen).also { it[Motion.SCALE] = screen[Motion.SCALE] * 0.12f }
+                    bodies.remove(StagePanels.SCREEN)
+                }
+                for (id in listOf(StagePanels.NOTES, StagePanels.NEXT)) {
+                    val w = wanted[id] ?: continue
+                    // from further out on the same side, small
+                    starts[id] = w.copyOf().also {
+                        it[Motion.X] = st.x + (w[Motion.X] - st.x) * 1.5f; it[Motion.Z] = st.z + (w[Motion.Z] - st.z) * 1.5f; it[Motion.SCALE] *= 0.5f
+                    }
+                    delays[id] = 0.18f
+                    bodies.remove(id)
+                }
+                wanted[StagePanels.BAR]?.let { w ->
+                    starts[StagePanels.BAR] = w.copyOf().also { it[Motion.Y] -= 0.16f; it[Motion.SCALE] *= 0.6f }
+                    delays[StagePanels.BAR] = 0.28f
+                    bodies.remove(StagePanels.BAR)
+                }
+                began("rehearsal-open from=${if (front != null) "the slide in front" else "the seat"}", now)
+                hold(now)
+            }
+            feels[StagePanels.SCREEN] = Motion.GRAND
+            for (id in listOf(StagePanels.NOTES, StagePanels.NEXT, StagePanels.BAR)) feels[id] = Motion.GLIDE
+        } else if (mode == null && prevMode != null && st != null) {
+            // [Collapse] / the rehearsal ending: gather, then the Stage closes (WindowCtl.leaveStage waits 350 ms)
+            val focusPose = lastFocusPose
+            val shownNow = bodies.keys.filter { shown[it] == true }
+            val pieces = shownNow.filter { it.startsWith("piece-") }.sortedBy { slotOf(it) }
+            val focusAt = pieces.indexOfFirst { feels[it] == Motion.FOCUS }.coerceAtLeast(0)
+            for (id in shownNow) {
+                val body = bodies[id] ?: continue
+                val to = when {
+                    id.startsWith("piece-") && focusPose != null -> stackAt(st, focusPose)
+                    id == StagePanels.SCREEN -> body.pos.copyOf().also { q ->
+                        q[Motion.X] = st.x + (q[Motion.X] - st.x) * 0.35f; q[Motion.Z] = st.z + (q[Motion.Z] - st.z) * 0.35f
+                        q[Motion.Y] -= 0.45f; q[Motion.SCALE] *= 0.1f
+                    }
+                    else -> body.pos.copyOf().also { q -> q[Motion.Y] -= 0.14f; q[Motion.SCALE] *= 0.4f }
+                }
+                exits[id] = to
+                body.delay = if (id.startsWith("piece-")) Motion.gatherDelay(pieces.indexOf(id), focusAt, pieces.size) else 0f
+            }
+            for (id in shownNow) feels[id] = Motion.GATHER
+            exitAt = now
+            holding = false
+            if (shownNow.isNotEmpty()) began("gather panels=${shownNow.size} from=$prevMode", now)
+        }
+        if (mode != null) exits.clear()
+        if (seat != null && seenRecenterForMotion != graph.recenterTick) {
+            if (seenRecenterForMotion >= 0 && mode != null) began("recenter", now)
+            seenRecenterForMotion = graph.recenterTick
+        }
+        // without a seat nothing was laid out yet: the change is still to be played once there is one
+        if (st != null) { prevMode = mode; prevFocus = focus }
+    }
+
+    /** The stack the pieces are dealt from and gathered to: at the piece in front, a little lower and nearer the seat, small. */
+    private fun stackAt(st: Seat, focusPose: FloatArray): FloatArray {
+        val dx = st.x - focusPose[Motion.X]; val dz = st.z - focusPose[Motion.Z]
+        val len = kotlin.math.sqrt(dx * dx + dz * dz).coerceAtLeast(1e-4f)
+        return Motion.stack(focusPose, dx / len, dz / len)
     }
 
     /** Seat-local pose → Stage-space target (x, y, z, yaw, scale, tilt). */
@@ -204,4 +385,9 @@ class StageScene(private val graph: Graph) {
     }
 
     fun seatForDebug(): Seat? = seat
+
+    private companion object {
+        /** Longest a gathering panel is still drawn: the span WindowCtl.leaveStage gives the gathering before the home window comes back. */
+        const val EXIT_MS = 300L
+    }
 }
