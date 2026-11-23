@@ -43,6 +43,15 @@ internal object PptxTemplates {
             (if (xfrm.isEmpty()) "<p:spPr/>" else "<p:spPr>$xfrm</p:spPr>") +
             (if (text) "<p:txBody>$bodyPr$lstStyle$paras</p:txBody>" else "") + "</p:sp>"
 
+    /**
+     * M5 p32: a footer-row placeholder (footer text or slide number). [ph] = the attribute text of its `p:ph`; an empty
+     * [spPr] inherits the layout's box.
+     */
+    fun footerPlaceholder(id: Int, name: String, ph: String, spPr: String, bodyPr: String, paras: String, nsDecl: String): String =
+        "<p:sp$nsDecl><p:nvSpPr><p:cNvPr id=\"$id\" name=\"${Xml.escape(name)}\"/><p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr>" +
+            "<p:nvPr><p:ph $ph/></p:nvPr></p:nvSpPr>" + (if (spPr.isEmpty()) "<p:spPr/>" else "<p:spPr>$spPr</p:spPr>") +
+            "<p:txBody>$bodyPr<a:lstStyle/>$paras</p:txBody></p:sp>"
+
     fun xfrm(x: Long, y: Long, w: Long, h: Long): String = "<a:xfrm><a:off x=\"$x\" y=\"$y\"/><a:ext cx=\"$w\" cy=\"$h\"/></a:xfrm>"
 
     /** A slide whose shape tree holds [shapes] (already serialised). */

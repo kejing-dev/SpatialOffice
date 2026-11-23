@@ -7,6 +7,7 @@ import io.embodit.spatialoffice.core.pkg.ContentTypes
 import io.embodit.spatialoffice.core.pkg.OoxmlPackage
 import io.embodit.spatialoffice.core.pkg.Rels
 import io.embodit.spatialoffice.core.pkg.Xml
+import io.embodit.spatialoffice.core.review.ReviewComment
 import io.embodit.spatialoffice.core.text.RichText
 import io.embodit.spatialoffice.core.text.Span
 
@@ -16,10 +17,16 @@ import io.embodit.spatialoffice.core.text.Span
  * Text edits replace only the paragraphs of the one shape inside its slide part. Adding, deleting and moving
  * slides touch the presentation part, its relationships and the content-type list, and add or remove whole parts;
  * every other part keeps the bytes it was read with.
+ *
+ * M5 (v0.7.0): comments ([comments], [addComment], [replyComment], [setCommentResolved], [editComment],
+ * [deleteComment]; see [SlideComments]) and the slide-number / footer placeholders ([footerInfo], [setFooter]).
  */
 class PptxDeck private constructor(private val pkg: OoxmlPackage, private var source: ByteArray?) {
 
-    private class SlideData(val shapes: List<Shape>, val notes: String, val backgroundRgb: Int?, val backgroundImage: String? = null, val ownBackground: Boolean = false)
+    private class SlideData(val shapes: List<Shape>, val notes: String, val backgroundRgb: Int?, val backgroundImage: String? = null, val ownBackground: Boolean = false) {
+        /** Some text of the slide holds a slide-number field (kept as [NUM_MARK] until the slide's position is known). */
+        val numbered: Boolean = shapes.any { hasMark(it) }
+    }
 
     /** A layout or master part with its placeholder shapes located. Such parts are never edited here. */
     private class PartDoc(val part: String, val xml: String, val root: Xml.Elem?, val phs: List<Ph>)
@@ -41,6 +48,22 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
     private val docCache = HashMap<String, PartDoc>()
     private val themeCache = HashMap<String, Map<String, Int>>()
 
+    private val commentStore = SlideComments(pkg, presPart, object : SlideComments.Host {
+        override fun slideParts(): List<String> = this@PptxDeck.slideParts()
+        override val widthEmu: Long get() = this@PptxDeck.widthEmu
+        override val heightEmu: Long get() = this@PptxDeck.heightEmu
+        override fun slideId(slidePart: String): String? {
+            val px = pkg.text(presPart) ?: return null
+            return slideEntries(px).firstOrNull { it.second == slidePart }?.let { Xml.attr(px, it.first, "id") }
+        }
+        override fun shapeBox(slidePart: String, shapeId: Int): LongArray? {
+            val i = this@PptxDeck.slideParts().indexOf(slidePart)
+            return slides.getOrNull(i)?.shapes?.firstOrNull { it.id == shapeId }?.let { longArrayOf(it.x, it.y, it.w, it.h) }
+        }
+        override fun slideEdited(slidePart: String) = slideChanged(slidePart)
+        override fun edited() { changed = true }
+    })
+
     init {
         if (!pkg.has(presPart)) throw IllegalArgumentException("not a presentation: no $presPart")
     }
@@ -53,7 +76,8 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
     val slides: List<Slide>
         get() = slidesCache ?: slideParts().mapIndexed { i, part ->
             val d = slideCache.getOrPut(part) { readSlide(part) }
-            Slide(i, d.shapes, d.notes, d.backgroundRgb, d.backgroundImage, d.ownBackground)
+            val shapes = if (d.numbered) (firstSlideNum() + i).toString().let { n -> d.shapes.map { numbered(it, n) } } else d.shapes
+            Slide(i, shapes, d.notes, d.backgroundRgb, d.backgroundImage, d.ownBackground)
         }.also { slidesCache = it }
 
     /** Current bytes of a package part (e.g. a [Shape.imagePart]); null when the part does not exist. */
@@ -66,7 +90,7 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         val all = slides
         fun text(s: Shape) = s.paras.joinToString(" ") { it.text.replace('\n', ' ') }.trim()
         for (sl in all) for (s in sl.shapes) if (s.kind == ShapeKind.TITLE) text(s).let { if (it.isNotEmpty()) return it }
-        for (sl in all) for (s in sl.shapes) if (s.paras.isNotEmpty()) text(s).let { if (it.isNotEmpty()) return it }
+        for (sl in all) for (s in sl.shapes) if (s.paras.isNotEmpty() && s.footerKind == null) text(s).let { if (it.isNotEmpty()) return it }
         return ""
     }
 
@@ -248,14 +272,18 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
     /**
      * Copies slide [index] (shapes, pictures, layout, speaker notes) and puts the copy right after it; returns the
      * copy's index. Parts the slide points at (pictures, layout) are shared, not copied.
+     * M5: comments are not copied. The copy has no relationship to the original's comment parts (a comment part
+     * belongs to one slide) and no `commentRel` entry in its extension list.
      */
     fun duplicateSlide(index: Int): Int {
         val part = slidePart(index)
         val notesText = slides[index].notes
         val dir = part.substringBeforeLast('/')
         val copy = freeName(dir, "slide", ".xml")
-        pkg.put(copy, pkg.bytes(part)!!)
-        val rels = Rels.of(pkg, part).filter { !it.type.endsWith("/notesSlide") }
+        val own = pkg.text(part)!!
+        val bare = SlideComments.withoutCommentRel(own, null)
+        if (bare == own) pkg.put(copy, pkg.bytes(part)!!) else pkg.putText(copy, bare)
+        val rels = Rels.of(pkg, part).filter { !it.type.endsWith("/notesSlide") && !it.type.endsWith("/comments") }
         val sb = StringBuilder(XmlEx.XML_DECL).append("<Relationships xmlns=\"${PptxTemplates.REL_PKG}\">")
         for (r in rels) {
             sb.append("<Relationship Id=\"").append(Xml.escape(r.id)).append("\" Type=\"").append(Xml.escape(r.type)).append("\" Target=\"")
@@ -897,6 +925,153 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
             ?: relTarget(presPart, "/slideMaster")
     }
 
+    // ---- M5 (v0.7.0) p33: comments
+
+    /**
+     * Every comment of the deck, slide by slide in slide order (within a slide: the order of the file). Threads people
+     * can reply to and resolve are [io.embodit.spatialoffice.core.review.CommentKind.THREAD]; old-style comments are
+     * NOTE (text only). [ReviewComment.slide] = slide index, x / y = where it is pinned as a share of the slide (0–1).
+     * Ids are unique in the deck and are the ids the file itself keeps, so they stay the same while the deck is open,
+     * after a save and in a reopened deck. Nothing is changed by reading.
+     */
+    fun comments(): List<ReviewComment> = commentStore.all()
+
+    /** The comments of slide [slide]. */
+    fun comments(slide: Int): List<ReviewComment> { slidePart(slide); return commentStore.all().filter { it.slide == slide } }
+
+    /**
+     * Adds a thread on slide [slide], pinned at ([x], [y]) (shares of the slide, 0–1), and returns its id. [dateIso] is
+     * ISO-8601 (`2026-11-22T10:00:00Z`). The first comment of a slide creates that slide's comment part (with its
+     * relationship, content type and the slide's extension-list entry), the first comment of an author adds the author
+     * to the deck's authors part (created with its relationship and content type when the deck has none). Old-style
+     * comments of the slide are left exactly as they are.
+     */
+    fun addComment(slide: Int, x: Float, y: Float, author: String, text: String, dateIso: String): String = commentStore.add(slide, x, y, author, text, dateIso)
+
+    /**
+     * Adds a reply at the end of the thread [id] belongs to ([id] = the comment or one of its replies); returns the reply's id.
+     * @throws IllegalArgumentException when there is no such comment.
+     * @throws IllegalStateException for an old-style comment.
+     */
+    fun replyComment(id: String, author: String, text: String, dateIso: String): String = commentStore.reply(id, author, text, dateIso)
+
+    /** Resolves / reopens the thread [id] belongs to. @throws IllegalStateException for an old-style comment. */
+    fun setCommentResolved(id: String, resolved: Boolean) = commentStore.setResolved(id, resolved)
+
+    /** Replaces the text of a comment, a reply or an old-style comment (one paragraph per line). */
+    fun editComment(id: String, text: String) = commentStore.edit(id, text)
+
+    /**
+     * Deletes a reply, a thread with all its replies, or an old-style comment. When it was the last one in its part, the
+     * part goes too (with the slide's relationship to it and its content type).
+     */
+    fun deleteComment(id: String) = commentStore.delete(id)
+
+    // ---- M5 (v0.7.0) p32: slide number and footer
+
+    private fun footerShapes(sx: String, type: String): List<Xml.Elem> =
+        topShapes(sx).filter { e -> e.name == "p:sp" && Xml.find(sx, e, "p:ph")?.let { Xml.attr(sx, it, "type") } == type }
+
+    private fun shapeText(sx: String, sp: Xml.Elem): String =
+        Xml.child(sx, sp, "p:txBody")?.let { tb -> Xml.children(sx, tb, "a:p").joinToString("\n") { paraText(sx, it) } } ?: ""
+
+    /** Whether slide [slide] has a slide-number placeholder and a footer placeholder of its own, and the footer's text. */
+    fun footerInfo(slide: Int): SlideFooter {
+        val sx = pkg.text(slidePart(slide))!!
+        val ftr = footerShapes(sx, "ftr").firstOrNull()
+        return SlideFooter(footerShapes(sx, "sldNum").isNotEmpty(), ftr != null, ftr?.let { shapeText(sx, it) } ?: "")
+    }
+
+    private fun isTitleLayout(slidePart: String): Boolean =
+        relTarget(slidePart, "/slideLayout")?.let { doc(it) }?.let { d -> d.root?.let { Xml.attr(d.xml, it, "type") } } == "title"
+
+    /**
+     * Turns the slide number and the footer on or off for [slides] (null = every slide) and sets the footer's text.
+     * With [hideOnTitle], slides whose layout is the title layout (`type="title"`) get neither (ones they have are
+     * removed). Returns how many slides changed; a slide that already is as asked keeps its bytes.
+     *
+     * Turning on adds a placeholder shape (`p:ph type="sldNum"` with a slide-number field / `type="ftr"`) at the end of
+     * the slide's shape tree. It takes `idx` and its box from the same placeholder of the slide's layout (it inherits
+     * them, as a slide made from that layout would); when the layout has none it gets a box of its own: the slide
+     * master's, else one at the bottom of the slide (footer in the middle, number on the right). Turning off deletes
+     * the slide's own placeholders of that type. A footer that is there and only has another text gets the text.
+     */
+    fun setFooter(slides: List<Int>?, number: Boolean, footer: Boolean, text: String, hideOnTitle: Boolean): Int {
+        val parts = slideParts()
+        val targets = (slides ?: parts.indices.toList()).distinct()
+        for (i in targets) if (i !in parts.indices) throw IndexOutOfBoundsException("slide $i of ${parts.size}")
+        var n = 0
+        for (i in targets) {
+            val hide = hideOnTitle && isTitleLayout(parts[i])
+            if (applyFooter(parts[i], number && !hide, footer && !hide, text)) n++
+        }
+        return n
+    }
+
+    private fun applyFooter(part: String, wantNumber: Boolean, wantFooter: Boolean, text: String): Boolean {
+        val orig = pkg.text(part)!!
+        var sx = orig
+        fun drop(type: String) { sx = Xml.splice(sx, footerShapes(sx, type).map { Triple(it.start, it.end, "") }) }
+        val lines = cleanText(text).split('\n')
+        val ftr = footerShapes(sx, "ftr").firstOrNull()
+        when {
+            !wantFooter -> drop("ftr")
+            ftr == null -> sx = addFooterShape(part, sx, "ftr", lines)
+            shapeText(sx, ftr) != lines.joinToString("\n") -> sx = replaceText(sx, ftr, lines.map { TextPara(it) }, styleChain(sx, ftr, part), masterOf(part))
+        }
+        when {
+            !wantNumber -> drop("sldNum")
+            footerShapes(sx, "sldNum").isEmpty() -> sx = addFooterShape(part, sx, "sldNum", emptyList())
+        }
+        if (sx == orig) return false
+        pkg.putText(part, sx)
+        slideChanged(part)
+        return true
+    }
+
+    /** [sx] with a new footer ([type] "ftr", showing [lines]) or slide-number ("sldNum") placeholder as its topmost shape. */
+    private fun addFooterShape(part: String, sx: String, type: String, lines: List<String>): String {
+        val root = Xml.root(sx) ?: throw IllegalStateException("slide part $part is not readable")
+        val tree = Xml.find(sx, root, "p:spTree") ?: throw IllegalStateException("slide part $part has no shape tree")
+        val id = maxShapeId(sx) + 1
+        val layout = relTarget(part, "/slideLayout")?.let { doc(it) }
+        val master = masterOf(part)
+        val lph = layout?.phs?.firstOrNull { it.type == type }
+        val mph = master?.phs?.firstOrNull { it.type == type }
+        val inherited = lph?.let { boxOf(layout.xml, it.sp) } ?: (if (lph != null) mph?.let { boxOf(master.xml, it.sp) } else null)
+        val ph: String
+        val spPr: String
+        val own: Boolean // the layout gives it nothing: box, size and alignment are written into the shape itself
+        if (lph != null && inherited != null) {
+            val phEl = Xml.find(layout.xml, lph.sp, "p:ph")!!
+            ph = layout.xml.substring(phEl.start + "<p:ph".length, phEl.openEnd).trimEnd('>').trimEnd('/').trim()
+            spPr = ""
+            own = false
+        } else {
+            val used = topShapes(sx).mapNotNull { e -> Xml.find(sx, e, "p:ph")?.let { Xml.attr(sx, it, "idx")?.toIntOrNull() ?: 0 } }.toSet()
+            val wish = lph?.idx?.toIntOrNull() ?: if (type == "ftr") 11 else 12
+            val idx = if (wish !in used) wish else (used.maxOrNull() ?: 0).coerceAtLeast(12) + 1
+            ph = "type=\"$type\" sz=\"quarter\" idx=\"$idx\""
+            val w = widthEmu; val h = heightEmu
+            // the usual footer row: 5.3 % of the slide high, ending 2 % above its bottom edge; footer in the middle third, number on the right
+            val b = mph?.let { boxOf(master.xml, it.sp) }
+                ?: if (type == "ftr") longArrayOf(w * 53 / 160, h * 1001 / 1080, w * 27 / 80, h * 23 / 432) else longArrayOf(w * 113 / 160, h * 1001 / 1080, w * 9 / 40, h * 23 / 432)
+            spPr = PptxTemplates.xfrm(b[0], b[1], b[2], b[3]) + "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>"
+            own = true
+        }
+        val rAttrs = "lang=\"en-US\"" + (if (own) " sz=\"1200\"" else "")
+        val pPr = if (own) "<a:pPr algn=\"${if (type == "ftr") "ctr" else "r"}\"/>" else ""
+        val paras = if (type == "sldNum") {
+            "<a:p>$pPr<a:fld id=\"${SlideComments.guid()}\" type=\"slidenum\"><a:rPr $rAttrs/><a:t>‹#›</a:t></a:fld><a:endParaRPr $rAttrs/></a:p>"
+        } else lines.joinToString("") { line ->
+            if (line.isEmpty()) "<a:p>$pPr<a:endParaRPr $rAttrs/></a:p>" else "<a:p>$pPr<a:r><a:rPr $rAttrs/><a:t>${Xml.escape(line)}</a:t></a:r></a:p>"
+        }
+        val bodyPr = if (own) "<a:bodyPr vert=\"horz\" lIns=\"91440\" tIns=\"45720\" rIns=\"91440\" bIns=\"45720\" rtlCol=\"0\" anchor=\"ctr\"/>" else "<a:bodyPr/>"
+        val ns = if (Xml.attr(sx, root, "xmlns:a") == PptxTemplates.NS_A) "" else " xmlns:a=\"${PptxTemplates.NS_A}\""
+        val name = (if (type == "ftr") "Footer Placeholder " else "Slide Number Placeholder ") + (id - 1)
+        return insertIntoTree(sx, tree, PptxTemplates.footerPlaceholder(id, name, ph, spPr, bodyPr, paras, ns))
+    }
+
     /** What is shown approximately or kept read-only. Counts are occurrences across the deck. */
     fun compat(): List<CompatNote> {
         val readOnly = LinkedHashMap<String, Int>()
@@ -993,6 +1168,7 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
     private fun structureChanged() {
         slidePartsCache = null
         slidesCache = null
+        commentStore.invalidate()
         changed = true
     }
 
@@ -1235,11 +1411,12 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         return NO_SOLID
     }
 
-    private fun paraText(xml: String, p: Xml.Elem): String {
+    /** [mark]: a slide-number field reads as [NUM_MARK] instead of the text stored for it. */
+    private fun paraText(xml: String, p: Xml.Elem, mark: Boolean = false): String {
         val sb = StringBuilder()
         for (c in Xml.children(xml, p)) {
             when (c.name) {
-                "a:r", "a:fld" -> Xml.child(xml, c, "a:t")?.let { sb.append(Xml.text(xml, it)) }
+                "a:r", "a:fld" -> if (mark && isNumberField(xml, c)) sb.append(NUM_MARK) else Xml.child(xml, c, "a:t")?.let { sb.append(Xml.text(xml, it)) }
                 "a:br" -> sb.append('\n')
             }
         }
@@ -1269,7 +1446,7 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
      * Paragraph [p] as the model shows it. [srcBase] = how many `a:r` of the same text body come before this paragraph,
      * so every run's [Span.src] counts all runs of the body.
      */
-    private fun paraModel(xml: String, p: Xml.Elem, chain: List<StyleSrc>, master: PartDoc? = null, srcBase: Int = 0): TextPara {
+    private fun paraModel(xml: String, p: Xml.Elem, chain: List<StyleSrc>, master: PartDoc? = null, srcBase: Int = 0, mark: Boolean = false): TextPara {
         val pPr = Xml.child(xml, p, "a:pPr")
         val level = (pPr?.let { Xml.attr(xml, it, "lvl")?.toIntOrNull() } ?: 0).coerceIn(0, 8)
         val runs = ArrayList<Span>()
@@ -1278,7 +1455,7 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         for (c in Xml.children(xml, p)) {
             when (c.name) {
                 "a:r", "a:fld" -> {
-                    val t = Xml.child(xml, c, "a:t")?.let { Xml.text(xml, it) } ?: ""
+                    val t = if (mark && isNumberField(xml, c)) NUM_MARK.toString() else Xml.child(xml, c, "a:t")?.let { Xml.text(xml, it) } ?: ""
                     val src = if (c.name == "a:r") n++ else -1
                     val text = pending.toString() + t
                     pending = StringBuilder()
@@ -1288,13 +1465,30 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
             }
         }
         if (pending.isNotEmpty()) runs.add(spanOf(pending.toString(), runFmt(xml, Xml.child(xml, p, "a:endParaRPr"), chain, level, master), -1))
-        return TextPara(paraText(xml, p), level, explicitBullet(xml, pPr) ?: inheritedBullet(chain, level), runs, effectiveAlign(xml, pPr, chain, level))
+        return TextPara(paraText(xml, p, mark), level, explicitBullet(xml, pPr) ?: inheritedBullet(chain, level), runs, effectiveAlign(xml, pPr, chain, level))
     }
 
     /** Paragraphs of a text body, with run indexes counted across the whole body. */
-    private fun parasOf(xml: String, ps: List<Xml.Elem>, chain: List<StyleSrc>, master: PartDoc?): List<TextPara> {
+    private fun parasOf(xml: String, ps: List<Xml.Elem>, chain: List<StyleSrc>, master: PartDoc?, mark: Boolean = false): List<TextPara> {
         var base = 0
-        return ps.map { p -> paraModel(xml, p, chain, master, base).also { base += Xml.children(xml, p, "a:r").size } }
+        return ps.map { p -> paraModel(xml, p, chain, master, base, mark).also { base += Xml.children(xml, p, "a:r").size } }
+    }
+
+    private fun isNumberField(xml: String, e: Xml.Elem): Boolean = e.name == "a:fld" && Xml.attr(xml, e, "type") == "slidenum"
+
+    /** [s] with every slide-number field showing [n] (its own text and that of a group's objects). */
+    private fun numbered(s: Shape, n: String): Shape {
+        if (!hasMark(s)) return s
+        return s.copy(
+            paras = s.paras.map { p -> if (p.text.indexOf(NUM_MARK) < 0) p else p.copy(text = p.text.replace(NUM_MARK.toString(), n), runs = p.runs?.map { it.copy(text = it.text.replace(NUM_MARK.toString(), n)) }) },
+            children = s.children?.map { numbered(it, n) },
+        )
+    }
+
+    /** The number the first slide shows (`firstSlideNum` of the presentation, 1 when it says nothing). */
+    private fun firstSlideNum(): Int {
+        val px = pkg.text(presPart) ?: return 1
+        return Xml.root(px)?.let { Xml.attr(px, it, "firstSlideNum")?.toIntOrNull() } ?: 1
     }
 
     private fun simpleText(xml: String, txBody: Xml.Elem): Boolean {
@@ -1444,12 +1638,12 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         if (txBody == null) {
             val isText = kind == ShapeKind.TITLE || kind == ShapeKind.BODY || kind == ShapeKind.TEXT
             val font = if (isText) (fromChain(styleChain(sx, e, part), 0) { x, l -> Xml.child(x, l, "a:defRPr")?.let { Xml.attr(x, it, "sz")?.toFloatOrNull() } } ?: 1800f) / 100f else null
-            return Shape(id, kind, b[0], b[1], b[2], b[3], emptyList(), font, false, null, 0, imagePart, editable, geom, fill)
+            return Shape(id, kind, b[0], b[1], b[2], b[3], emptyList(), font, false, null, 0, imagePart, editable, geom, fill, footerKind = footerKindOf(phType))
         }
 
         val chain = styleChain(sx, e, part)
         val ps = Xml.children(sx, txBody, "a:p")
-        val paras = parasOf(sx, ps, chain, master)
+        val paras = parasOf(sx, ps, chain, master, mark = true)
         val first = ps.firstOrNull { p -> Xml.children(sx, p).any { it.name == "a:r" || it.name == "a:fld" } } ?: ps.firstOrNull()
         val pPr = first?.let { Xml.child(sx, it, "a:pPr") }
         val level = (pPr?.let { Xml.attr(sx, it, "lvl")?.toIntOrNull() } ?: 0).coerceIn(0, 8)
@@ -1463,9 +1657,11 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         val algn = pPr?.let { Xml.attr(sx, it, "algn") } ?: fromChain(chain, level) { x, l -> Xml.attr(x, l, "algn") }
         return Shape(
             id, kind, b[0], b[1], b[2], b[3], paras, sz / 100f, boldAttr == "1" || boldAttr == "true", color,
-            when (algn) { "ctr" -> 1; "r" -> 2; else -> 0 }, imagePart, editable, geom, fill,
+            when (algn) { "ctr" -> 1; "r" -> 2; else -> 0 }, imagePart, editable, geom, fill, footerKind = footerKindOf(phType),
         )
     }
+
+    private fun footerKindOf(phType: String?): FooterKind? = when (phType) { "sldNum" -> FooterKind.NUMBER; "ftr" -> FooterKind.FOOTER; "dt" -> FooterKind.DATE; else -> null }
 
     // ------------------------------------------------------------------------------------------------ writing
 
@@ -1700,6 +1896,9 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
         fun blank(): PptxDeck = PptxDeck(PptxTemplates.blankPackage(), null)
 
         private const val NO_SOLID = -1
+        /** Stands for a slide-number field in a cached slide; [slides] puts the number in. A private-use character. */
+        private const val NUM_MARK = '\uE83A'
+        private fun hasMark(s: Shape): Boolean = s.paras.any { it.text.indexOf(NUM_MARK) >= 0 } || s.children?.any { hasMark(it) } == true
         private val CNVPR_ID = Regex("(<p:cNvPr\\b[^>]*?\\sid=\")(\\d+)\"")
         private val CXN_ID = Regex("(<a:(?:stCxn|endCxn)\\b[^>]*?\\sid=\")(\\d+)\"")
         private val R_ATTR = Regex("(?<![\\w:.-])([A-Za-z_][\\w.-]*):(embed|link|id|pict|dm|lo|qs|cs)=\"([^\"]*)\"")

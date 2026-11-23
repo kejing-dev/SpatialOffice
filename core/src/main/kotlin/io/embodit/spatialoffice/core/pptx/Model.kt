@@ -4,6 +4,15 @@ import io.embodit.spatialoffice.core.text.Span
 
 enum class ShapeKind { TITLE, BODY, TEXT, PICTURE, CHART, OTHER }
 
+/** M5 p32: which of a slide's footer-row placeholders a shape is (`p:ph type` = `sldNum` / `ftr` / `dt`). */
+enum class FooterKind { NUMBER, FOOTER, DATE }
+
+/**
+ * M5 p32: what a slide shows in its footer row: [number] = it has a slide-number placeholder, [footer] = it has a
+ * footer placeholder, [text] = the footer placeholder's text ("" without one).
+ */
+data class SlideFooter(val number: Boolean, val footer: Boolean, val text: String)
+
 /**
  * One paragraph of a shape. A `\n` inside [text] is a line break within the paragraph.
  * M2 (v0.4.0): read from a file, [runs] holds one [Span] per text run with its effective bold / italic / underline /
@@ -46,6 +55,12 @@ data class Shape(
     val tableRowH: List<Long>? = null,
     /** v0.6.0 (M4 p29): a group's objects (back to front) with their boxes in slide coordinates; null for anything else. */
     val children: List<Shape>? = null,
+    /**
+     * M5 p32: set on the slide-number, footer and date placeholders of a slide (their [kind] stays [ShapeKind.TEXT], so
+     * they are never a slide's title or body). They are placed by the layout: draw them, do not offer them for dragging.
+     * A slide-number field anywhere in [paras] already reads as the slide's number.
+     */
+    val footerKind: FooterKind? = null,
 )
 
 /**
