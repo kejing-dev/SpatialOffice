@@ -229,12 +229,13 @@ fun SecondaryButton(text: String, tag: String, onClick: () -> Unit, modifier: Mo
  * apart inside the system Toolbar ornament.
  */
 @Composable
-fun ToolButton(text: String, tag: String, onClick: () -> Unit, enabled: Boolean = true, icon: Int? = null, primary: Boolean = false, width: Dp? = null) {
+fun ToolButton(text: String, tag: String, onClick: () -> Unit, enabled: Boolean = true, icon: Int? = null, primary: Boolean = false, width: Dp? = null, name: String? = null) {
     val fg = if (primary) PicoTheme.colorScheme.labelPrimaryLight else PicoTheme.colorScheme.labelPrimary
     Button(
         onClick = onClick, enabled = enabled,
         // a fixed width for buttons whose label follows the state (paragraph style), so the row never reflows
-        modifier = (if (width != null) Modifier.width(width) else Modifier).noKeyFocus(),
+        // [name]: an accessibility name for buttons whose label is not unique on screen (two [Post] buttons, [Accept] next to [Accept all])
+        modifier = (if (width != null) Modifier.width(width) else Modifier).noKeyFocus().then(if (name != null) Modifier.semantics { contentDescription = name } else Modifier),
         // gate:allow button-height editor toolbar: 14–16 tools in one system Toolbar (PRD §11), 48 dp targets
         size = ButtonDefaults.Small.copy(height = 48.dp, minWidth = 64.dp),
         shape = RoundedCornerShape(24.dp),

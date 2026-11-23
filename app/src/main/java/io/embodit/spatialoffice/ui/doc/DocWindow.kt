@@ -86,6 +86,7 @@ import com.pico.spatial.ui.design.windows.Toolbar
 import com.pico.spatial.ui.design.windows.popup.HorizontalPlacement
 import com.pico.spatial.ui.design.windows.popup.VerticalPlacement
 import io.embodit.spatialoffice.R
+import io.embodit.spatialoffice.ui.probe
 import io.embodit.spatialoffice.core.docx.ParaStyle
 import io.embodit.spatialoffice.core.text.Attr
 import io.embodit.spatialoffice.core.text.RichText
@@ -126,6 +127,8 @@ class DocFocus {
     var dragTick by mutableIntStateOf(0)
     /** M5: the caret as last seen by the comment-marker check, so the same position does not pick a card twice. */
     var lastCaret: TextRange = TextRange.Zero
+    /** M5 d24: a drag over text is under way (its release paints the dragged range; focus moving meanwhile must not paint). */
+    var dragging = false
 }
 
 /**
@@ -568,9 +571,10 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
                         else s.crossSel?.let { s.paintParts() } ?: focus!!.dragSel?.let { d -> s.paint(d.first, d.second, d.third) } ?: false
                         if (done) graph?.say(s, graph.str(R.string.painter_done), graph.str(R.string.undo_short)) { s.undo() }
                     }
+                    focus?.dragging = false
                     break
                 }
-                if (!dragging && (ch.position - down.position).getDistance() > slop) dragging = true
+                if (!dragging && (ch.position - down.position).getDistance() > slop) { dragging = true; focus?.dragging = true }
                 if (!dragging) continue
                 ch.consume()
                 val cur = geo.hit(ch.position) ?: continue
@@ -786,7 +790,15 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
             modifier = Modifier.weight(1f).heightIn(min = 32.dp).focusRequester(requester).typingTarget()
                 .then(if (geo != null) Modifier.onGloballyPositioned { geo.coords(b.id, it) } else Modifier)
                 .semantics { contentDescription = "paragraph-${b.id}" }
-                .onFocusChanged { if (it.isFocused) { focus.id = b.id; s.caretBlock = b.id; focus.selection = value.selection; s.picked = -1 } }
+                .onFocusChanged {
+                    if (it.isFocused) {
+                        focus.id = b.id; s.caretBlock = b.id; focus.selection = value.selection; s.picked = -1
+                        // M5 d24: the painter in hand and the caret arriving in another paragraph without a pointer press
+                        // (a click through the accessibility layer, the keyboard): that paragraph takes the format
+                        if (s.painter != null && !focus.dragging && s.painterFrom != b.id && s.paint(b.id, 0, 0)) graph?.say(s, graph.str(R.string.painter_done), graph.str(R.string.undo_short)) { s.undo() }
+                    }
+                }
+                .then(if (s.painter != null) Modifier.probe("para-${b.id}") else Modifier)
                 .onPreviewKeyEvent { e ->
                     if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     val editable = all.filterIsInstance<UiBlock.Para>().filter { it.editable && !it.pageBreak }
@@ -1022,6 +1034,7 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
     // the cell with the caret: Insert ▸ Table, then typing, lands in the first cell (q1-3).
     val keys = remember(s) { FocusRequester() }
     LaunchedEffect(s.tableCaretTick) { if (s.tableCaret != null) { kotlinx.coroutines.delay(520); runCatching { keys.requestFocus() } } }
+    LaunchedEffect(s.composeTick) { if (s.composing) { kotlinx.coroutines.delay(520); runCatching { keys.requestFocus() } } }
     Toolbar(
         supportingContent = { FileTools(graph, Win.DOC, s) },
         content = {
@@ -1121,6 +1134,8 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
 
 /** Keys that reach the toolbar window: shortcuts as everywhere, typing into the cell with the caret. */
 private fun toolbarKeys(graph: Graph, s: DocSession, e: androidx.compose.ui.input.key.KeyEvent): Boolean {
+    // M5: Insert › Comment was just picked: what is typed goes to the comment being written
+    if (io.embodit.spatialoffice.ui.composeKeys(graph, s, e)) return true
     if (commonKeys(graph, s, e)) return true
     if (e.type != KeyEventType.KeyDown || e.isCtrlPressed || s.tableCaret == null) return false
     return when (e.key) {

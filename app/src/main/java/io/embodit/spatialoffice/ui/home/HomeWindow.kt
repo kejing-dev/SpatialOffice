@@ -218,7 +218,8 @@ private fun RecentPage(graph: Graph) {
         if (items.size <= 3) {
             GroupLabel(tr(R.string.group_quick_new), "recent")
             // without the cloud group under it (this build offers no drive) the cards are taller, so the page is not half empty
-            QuickNewRow(graph, cover = if (graph.accounts.shown.isEmpty()) 148.dp else 96.dp)
+            // v0.7.0: the home window is 60 dp higher (Settings › My name); the cards take that height, so the page stays as full as it was
+            QuickNewRow(graph, cover = if (graph.accounts.shown.isEmpty()) 208.dp else 156.dp)
         }
         if (!graph.settings.value.hintSeen && items.isNotEmpty()) LaunchedEffect(Unit) { graph.settings.update { it.copy(hintSeen = true) } }
         // cloud files only where a drive can be connected in this build; otherwise the page does not mention them
@@ -269,7 +270,7 @@ private fun NewPage(graph: Graph) {
     PageHeader(tr(R.string.nav_new), tr(R.string.new_sub), "new")
     val context = LocalContext.current
     PageBody {
-        QuickNewRow(graph, cover = 132.dp, top = 8.dp)
+        QuickNewRow(graph, cover = 192.dp, top = 8.dp) // v0.7.0: +60 dp with the window
         // v0.6.0 (d26 / p27): a row of templates under the document and presentation cards
         GroupLabel(tr(R.string.tpl_group), "new/tpl")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {

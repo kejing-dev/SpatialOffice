@@ -837,7 +837,7 @@ class Graph(val app: Application) {
     fun setReview(s: Session, open: Boolean) {
         if (!s.canReview || s.reviewOpen == open) return
         s.reviewOpen = open
-        if (!open) s.selComment = null
+        if (!open) { s.selComment = null; s.composing = false }
         review.setOpen(s.ref.key, open)
         Log.i(TAG, "REVIEW pane ${if (open) "open" else "closed"} ${s.kind} ${s.tag} ${s.ref.name} count=${s.reviewCount()}")
     }
@@ -848,7 +848,7 @@ class Graph(val app: Application) {
     fun startComment(s: Session) {
         if (!s.canReview || s.readOnly) return
         setReview(s, true)
-        s.reviewTab = 0; s.selComment = null; s.composeTick++
+        s.reviewTab = 0; s.selComment = null; s.composing = true; s.composeTick++
         Log.i(TAG, "REVIEW compose ${s.kind} ${s.tag} onSelection=${s.commentOnSelection}")
     }
 

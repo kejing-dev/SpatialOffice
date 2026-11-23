@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -162,13 +163,23 @@ class CellEdit {
     /** Text from the field of generation [gen]; false (dropped) when that field belongs to a cell already committed. */
     fun accept(gen: Int, nv0: TextFieldValue): Boolean {
         if (gen != generation) return false
+        // v0.7.0: the bar just took the keyboard back (a reply box or dialog closed) and the input method, finishing what it
+        // was doing there, replaces the selected value with nothing. Nobody typed that: the cell keeps its value.
+        if (!editing && nv0.text.isEmpty() && value.text.isNotEmpty() && clock() - focusedAt < REFOCUS_MS) {
+            android.util.Log.i(io.embodit.spatialoffice.platform.TAG, "CELLEDIT dropped an empty text ${clock() - focusedAt} ms after the bar took focus (value kept)")
+            return false
+        }
         val nv = dropEcho(nv0)
         if (nv.text != value.text) editing = true
         value = nv
         return true
     }
 
-    companion object { const val ECHO_MS = 800L }
+    /** When the formula bar last took the keyboard (ms, [clock]). */
+    var focusedAt = 0L
+    fun focused() { focusedAt = clock() }
+
+    companion object { const val ECHO_MS = 800L; const val REFOCUS_MS = 700L }
 }
 
 /** v0.5.1 (q13-1): cell input: no automatic capital letter, no suggestions (no composing word carried between cells). */
@@ -360,7 +371,7 @@ fun FormulaBar(s: SheetSession, edit: CellEdit, modifier: Modifier = Modifier) {
                     keyboardActions = KeyboardActions(onDone = { if (gen == edit.generation) edit.advance(s, 1, 0) }),
                     textStyle = TextStyle(fontSize = 17.sp, color = Ink.Text),
                     cursorBrush = SolidColor(Ink.Select),
-                    modifier = Modifier.fillMaxWidth().focusRequester(edit.focus).typingTarget().semantics { contentDescription = "formula-input" },
+                    modifier = Modifier.fillMaxWidth().focusRequester(edit.focus).typingTarget().onFocusChanged { if (it.isFocused) edit.focused() }.semantics { contentDescription = "formula-input" },
                 )
             }
             // the new field takes the keyboard back at once
@@ -773,11 +784,13 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
     // The system Toolbar window keeps the keyboard after its menus (the app cannot hand the window focus back), so
     // the toolbar itself takes the keys and treats them as the grid would: typing goes into the selected cell.
     val keys = remember(s) { FocusRequester() }
+    // M5: Edit › Comment was just picked: the toolbar takes the keys and passes them to the comment being written
+    LaunchedEffect(s.composeTick) { if (s.composing) { kotlinx.coroutines.delay(520); runCatching { keys.requestFocus() } } }
     fun run(f: () -> Unit) { edit.commit(s); f(); edit.load(s); runCatching { edit.focus.requestFocus() }; runCatching { keys.requestFocus() } }
     Toolbar(
         supportingContent = { FileTools(graph, Win.SHEET, s) },
         content = {
-            Box(Modifier.focusRequester(keys).onPreviewKeyEvent { e -> commonKeys(graph, s, e) || sheetKeys(graph, s, edit, e) || typeIntoCell(s, edit, e) }.typingTarget().focusable()) {
+            Box(Modifier.focusRequester(keys).onPreviewKeyEvent { e -> io.embodit.spatialoffice.ui.composeKeys(graph, s, e) || commonKeys(graph, s, e) || sheetKeys(graph, s, edit, e) || typeIntoCell(s, edit, e) }.typingTarget().focusable()) {
             ToolRow {
                 // M2 s23: [Text ▾] takes the B button's place (B / I / U / strikethrough, sizes, clear formatting); the groups stay 8
                 ToolMenu(tr(R.string.menu_text), "sheet/text", enabled = !s.isCsv, entries = listOf(

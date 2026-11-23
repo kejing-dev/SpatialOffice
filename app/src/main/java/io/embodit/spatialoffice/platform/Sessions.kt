@@ -232,6 +232,14 @@ abstract class Session(ref: FileRef, val kind: FileKind) {
 
     /** Bumped by Ctrl+Alt+M / Insert › Comment: the pane's text box takes the caret. */
     var composeTick by mutableIntStateOf(0)
+    /** The comment being written in the pane's text box. Kept here so keys can reach it from outside the box (see [composing]). */
+    var draft by mutableStateOf("")
+    /**
+     * True from Insert › Comment (a toolbar menu) until the text is posted or the window is pressed. After a toolbar menu
+     * the system Toolbar window keeps the keyboard and the app cannot hand it back, so the toolbar passes what is typed
+     * on to [draft]; without this the words would land in the cell or paragraph instead of the comment.
+     */
+    var composing by mutableStateOf(false)
     /** Why the last [addComment] could not be done here (a string resource), shown instead of the general message. */
     var reviewHint: Int? = null
     /** The card's quote line for a sheet comment ("C2", or "Sheet2 · C2" on another sheet). */
@@ -395,8 +403,12 @@ class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File)
     /** The character format in hand (d24): an opaque token of the document, put on the next text that is tapped or dragged over; null = none. */
     var painter by mutableStateOf<DocxDocument.RunFormat?>(null)
         private set
+    /** Paragraph the format in hand was taken from: the caret coming back to it does not paint it. */
+    var painterFrom = -1
+        private set
     fun pickPainter(id: Int, offset: Int): Boolean {
         val d = docx ?: return false
+        painterFrom = id
         painter = runCatching { d.runFormatAt(id, offset) }.onFailure { android.util.Log.w(TAG, "PAINTER pick failed: $it") }.getOrNull()
         android.util.Log.i(TAG, "PAINTER picked para=$id offset=$offset ok=${painter != null}")
         return painter != null

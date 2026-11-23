@@ -114,6 +114,7 @@ import io.embodit.spatialoffice.core.layout.UnitBox
 import io.embodit.spatialoffice.core.pptx.Shape
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.focusRequester
 import io.embodit.spatialoffice.ui.CornerDot
 import io.embodit.spatialoffice.ui.MoveTab
@@ -874,10 +875,13 @@ fun objPaste(graph: io.embodit.spatialoffice.platform.Graph, s: DeckSession) {
 private fun SlidesToolbar(graph: Graph, s: DeckSession) {
     s.version
     val hasSel = s.selected >= 0
+    val keys = remember(s) { FocusRequester() }
+    LaunchedEffect(s.composeTick) { if (s.composing) { kotlinx.coroutines.delay(520); runCatching { keys.requestFocus() } } }
     Toolbar(
         supportingContent = { FileTools(graph, Win.SLIDES, s, spreadLabel = R.string.storyline) },
         content = {
-            ToolRow {
+            // M5: after a toolbar menu the Toolbar window has the keyboard: what is typed goes to the comment being written, and Ctrl+S / Z / Y still work
+            Box(Modifier.focusRequester(keys).onPreviewKeyEvent { e -> io.embodit.spatialoffice.ui.composeKeys(graph, s, e) || commonKeys(graph, s, e) }.typingTarget().focusable()) { ToolRow {
                 ToolMenu(tr(R.string.add_slide), "slides/add", icon = R.drawable.ic_plus, entries = listOf(
                     MenuEntry(tr(R.string.lay_title), "slides/lay-title") { s.addSlide(SlideLayoutKind.TITLE) },
                     MenuEntry(tr(R.string.lay_body), "slides/lay-body") { s.addSlide(SlideLayoutKind.TITLE_BODY) },
@@ -948,7 +952,7 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
                 ).filter { s.canReorder(it.first) }.map { (op, label) -> MenuEntry(tr(label), "slides/z-" + op.name.lowercase()) { s.reorder(op) } })
                 ToolDivider()
                 UndoRedo(s)
-            }
+            } }
         },
     )
 }
@@ -959,8 +963,10 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
  */
 @Composable
 private fun androidx.compose.foundation.layout.BoxScope.CommentBubbles(graph: io.embodit.spatialoffice.platform.Graph, s: DeckSession, width: Dp) {
-    val list = remember(s.version, s.current) { runCatching { s.comments().filter { it.slide == s.current && !it.resolved } }.getOrDefault(emptyList()) }
+    val all = remember(s.version) { runCatching { s.comments() }.getOrDefault(emptyList()) }
+    val list = all.filter { it.slide == s.current && !it.resolved }
     if (list.isEmpty()) return
+    val people = remember(all) { io.embodit.spatialoffice.ui.ReviewLook.authors(all, emptyList()) }
     val height = width * (s.deck.heightEmu.toFloat() / s.deck.widthEmu)
     val seen = HashMap<Pair<Int, Int>, Int>()
     for (c in list) {
@@ -977,7 +983,7 @@ private fun androidx.compose.foundation.layout.BoxScope.CommentBubbles(graph: io
             contentAlignment = Alignment.Center,
         ) {
             Box(
-                Modifier.size(32.dp).clip(androidx.compose.foundation.shape.CircleShape).background(io.embodit.spatialoffice.ui.ReviewLook.avatar(c.author))
+                Modifier.size(32.dp).clip(androidx.compose.foundation.shape.CircleShape).background(io.embodit.spatialoffice.ui.ReviewLook.avatar(c.author, people))
                     .then(if (on) Modifier.border(3.dp, Ink.Select, androidx.compose.foundation.shape.CircleShape) else Modifier.border(2.dp, Color.White, androidx.compose.foundation.shape.CircleShape)),
                 contentAlignment = Alignment.Center,
             ) {

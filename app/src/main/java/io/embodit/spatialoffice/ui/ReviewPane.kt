@@ -3,6 +3,7 @@ package io.embodit.spatialoffice.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -112,7 +113,15 @@ object ReviewLook {
     /** Avatar colours, picked by the author's name; white initial on each is ≥ 4.5 : 1. */
     val Avatars = listOf(Color(0xFF2A5FD0), Color(0xFF5B4CE0), Color(0xFF0E7C61), Color(0xFFB8430F), Color(0xFFA23A8C), Color(0xFF4A6572))
 
-    fun avatar(author: String): Color = Avatars[Math.floorMod(author.trim().lowercase().hashCode(), Avatars.size)]
+    /** The colour of [author] among [authors] (the file's people in the order they first appear): everyone their own while there are colours left. */
+    fun avatar(author: String, authors: List<String> = emptyList()): Color {
+        val i = authors.indexOf(author)
+        return Avatars[if (i >= 0) i % Avatars.size else Math.floorMod(author.trim().lowercase().hashCode(), Avatars.size)]
+    }
+
+    /** Everyone who wrote a comment, a reply or a tracked change, in order of first appearance. */
+    fun authors(comments: List<ReviewComment>, revisions: List<Revision>): List<String> =
+        (comments.flatMap { c -> listOf(c.author) + c.replies.map { it.author } } + revisions.map { it.author }).distinct()
 
     /** `2026-11-22T10:05:00Z` → `11-22 10:05` in the headset's time zone; "" when the file gives no usable time. */
     fun time(iso: String): String = runCatching {
@@ -131,9 +140,12 @@ private fun Said(text: String, modifier: Modifier = Modifier, maxLines: Int = 2,
     Text(text = text, modifier = modifier, maxLines = maxLines, overflow = TextOverflow.Ellipsis, style = style, color = color, fontWeight = weight)
 }
 
+/** The file's authors, so each keeps one avatar colour all over the pane. */
+val LocalReviewAuthors = androidx.compose.runtime.staticCompositionLocalOf<List<String>> { emptyList() }
+
 @Composable
 private fun Avatar(author: String, size: Dp = 28.dp) {
-    Box(Modifier.size(size).clip(CircleShape).background(ReviewLook.avatar(author)), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(size).clip(CircleShape).background(ReviewLook.avatar(author, LocalReviewAuthors.current)), contentAlignment = Alignment.Center) {
         Text(ReviewText.initial(author), style = PicoTheme.typography.labelMedium, color = Color.White, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
@@ -201,8 +213,11 @@ fun ReviewPane(graph: Graph, s: Session, modifier: Modifier = Modifier) {
                 s.reviewTab, "review/tab", itemWidth = 146.dp,
             ) { s.reviewTab = it }
         }
-        if (s.hasRevisions && s.reviewTab == 1) RevisionList(graph, s, revisions, me)
-        else CommentList(graph, s, comments, me)
+        val people = remember(comments, revisions) { ReviewLook.authors(comments, revisions) }
+        androidx.compose.runtime.CompositionLocalProvider(LocalReviewAuthors provides people) {
+            if (s.hasRevisions && s.reviewTab == 1) RevisionList(graph, s, revisions, me)
+            else CommentList(graph, s, comments, me)
+        }
     }
 }
 
@@ -227,6 +242,16 @@ private fun androidx.compose.foundation.layout.ColumnScope.CommentList(graph: Gr
         if (editing != null && editing != id && all.none { c -> c.id == id && c.replies.any { it.id == editing } }) editing = null
         val idx = (first + rest).indexOfFirst { it.id == id }
         if (idx >= 0) runCatching { list.animateScrollToItem(idx + (if (here != null) 1 else 0) + (if (here != null && idx >= first.size) 1 else 0)) }
+    }
+    // the reply / edit box opens at the bottom of its card: the list moves up until the whole card (its Post button) shows
+    LaunchedEffect(replying, editing) {
+        val id = replying ?: s.selComment?.takeIf { editing != null } ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(180)
+        val info = list.layoutInfo
+        val item = info.visibleItemsInfo.firstOrNull { it.key == id } ?: return@LaunchedEffect
+        val over = item.offset + item.size - info.viewportEndOffset
+        val room = item.offset - info.viewportStartOffset
+        if (over > 0) runCatching { list.animateScrollBy(minOf(over, room).toFloat()) }
     }
     LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (open.isEmpty() && done.isEmpty()) item("empty") {
@@ -310,12 +335,12 @@ private fun CommentCard(
         // gate:allow button-gap the picked card's three actions in a 276 dp row: 48 dp targets 8 dp apart, as the editor toolbar (design M5 reviewPane.card)
         Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (!note) {
-                ToolButton(tr(R.string.rv_reply), "review/reply", icon = R.drawable.ic_reply, onClick = { setReplying(if (replying) null else c.id) })
-                ToolButton(tr(R.string.rv_resolve), "review/resolve", icon = R.drawable.ic_check, primary = true, onClick = {
+                ToolButton(tr(R.string.rv_reply), "review/reply", icon = R.drawable.ic_reply, name = "card-reply", onClick = { setReplying(if (replying) null else c.id) })
+                ToolButton(tr(R.string.rv_resolve), "review/resolve", icon = R.drawable.ic_check, primary = true, name = "card-resolve", onClick = {
                     if (s.resolveComment(c.id, true)) { s.selComment = null; graph.say(s, graph.str(R.string.rv_resolved_snack)) }
                 })
             } else {
-                ToolButton(tr(R.string.rv_edit), "review/edit", onClick = { setEditing(c.id) })
+                ToolButton(tr(R.string.rv_edit), "review/edit", name = "card-edit", onClick = { setEditing(c.id) })
                 if (s.editor == FileKind.SLIDES) ToolButton(tr(R.string.rv_write_new), "review/write-new", onClick = { s.selComment = null })
             }
             Spacer(Modifier.weight(1f))
@@ -357,7 +382,7 @@ private fun EditBox(text: String, onDone: (String?) -> Unit) {
         PaneField(v, { v = it }, "", "review-edit-field", minHeight = 48.dp, focus = focus, onSend = { onDone(v) })
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End)) {
             ToolButton(tr(R.string.cancel), "review/edit-cancel", onClick = { onDone(null) })
-            ToolButton(tr(R.string.rv_save_edit), "review/edit-save", primary = true, enabled = v.isNotBlank(), onClick = { onDone(v) })
+            ToolButton(tr(R.string.rv_save_edit), "review/edit-save", primary = true, name = "card-edit-save", enabled = v.isNotBlank(), onClick = { onDone(v) })
         }
     }
 }
@@ -374,7 +399,7 @@ private fun ReplyBox(graph: Graph, s: Session, c: ReviewComment, me: String, clo
         PaneField(v, { v = it }, tr(R.string.rv_reply_ph), "review-reply-field", minHeight = 48.dp, focus = focus, onSend = send)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Said(if (me.isBlank()) tr(R.string.my_name_ask) else tr(R.string.rv_as_me, me), Modifier.weight(1f), maxLines = 1, style = PicoTheme.typography.bodySmall, color = PicoTheme.colorScheme.labelSecondary)
-            ToolButton(tr(R.string.rv_post), "review/reply-post", icon = R.drawable.ic_send, primary = true, enabled = v.isNotBlank() && me.isNotBlank(), onClick = send)
+            ToolButton(tr(R.string.rv_post), "review/reply-post", icon = R.drawable.ic_send, primary = true, name = "post-reply", enabled = v.isNotBlank() && me.isNotBlank(), onClick = send)
         }
     }
 }
@@ -386,7 +411,7 @@ private fun ResolvedCard(graph: Graph, s: Session, c: ReviewComment) {
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         WhoRow(c.author, "", height = 48.dp) {
-            if (!s.readOnly) ToolButton(tr(R.string.rv_reopen), "review/reopen", onClick = { if (s.resolveComment(c.id, false)) s.pickComment(c.id) })
+            if (!s.readOnly) ToolButton(tr(R.string.rv_reopen), "review/reopen", name = "card-reopen", onClick = { if (s.resolveComment(c.id, false)) s.pickComment(c.id) })
         }
         Said(c.text, maxLines = 2)
     }
@@ -395,18 +420,12 @@ private fun ResolvedCard(graph: Graph, s: Session, c: ReviewComment) {
 /** Bottom of the comment list: the text box and Post; the first time, the one question about the name. */
 @Composable
 private fun Composer(graph: Graph, s: Session, me: String) {
-    var text by remember(s.tag) { mutableStateOf("") }
+    val text = s.draft
     var name by remember(s.tag) { mutableStateOf("") }
     val focus = remember { FocusRequester() }
     // Ctrl+Alt+M / Insert › Comment put the caret here
     LaunchedEffect(s.composeTick) { if (s.composeTick > 0) runCatching { focus.requestFocus() } }
-    val send = {
-        if (text.isNotBlank() && me.isNotBlank()) {
-            val id = s.addComment(me, text.trim())
-            if (id != null) { text = ""; s.pickComment(id) }
-            else graph.say(s, graph.str(s.reviewHint ?: R.string.rv_cant_here))
-        }
-    }
+    val send: () -> Unit = { postDraft(graph, s) }
     Column(Modifier.fillMaxWidth().semantics { contentDescription = "review-composer" }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (me.isBlank()) {
             Txt(tr(R.string.my_name_ask), "review/ask-name", style = PicoTheme.typography.labelLarge, weight = FontWeight.SemiBold, maxLines = 2)
@@ -421,11 +440,38 @@ private fun Composer(graph: Graph, s: Session, me: String) {
             s.editor == FileKind.SLIDES -> tr(if (s.commentOnSelection) R.string.rv_compose_obj else R.string.rv_compose_slide)
             else -> tr(if (s.commentOnSelection) R.string.rv_compose_sel else R.string.rv_compose_para)
         }
-        PaneField(text, { text = it }, hint, "review-field", focus = focus, onSend = send)
+        PaneField(text, { s.draft = it }, hint, "review-field", focus = focus, onSend = send)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Said(tr(R.string.rv_as_me, me.ifBlank { "—" }), Modifier.weight(1f), maxLines = 1, style = PicoTheme.typography.bodySmall, color = PicoTheme.colorScheme.labelSecondary)
-            ToolButton(tr(R.string.rv_post), "review/post", icon = R.drawable.ic_send, primary = true, enabled = text.isNotBlank() && me.isNotBlank(), onClick = send)
+            ToolButton(tr(R.string.rv_post), "review/post", icon = R.drawable.ic_send, primary = true, name = "post-comment", enabled = text.isNotBlank() && me.isNotBlank(), onClick = send)
         }
+    }
+}
+
+/** [Post] / Ctrl+Enter: the draft becomes a comment at the current place (needs a name and some text). */
+fun postDraft(graph: Graph, s: Session): Boolean {
+    val me = graph.settings.value.myName
+    if (s.draft.isBlank() || me.isBlank()) return false
+    val id = s.addComment(me, s.draft.trim())
+    if (id == null) { graph.say(s, graph.str(s.reviewHint ?: R.string.rv_cant_here)); return false }
+    s.draft = ""; s.composing = false; s.pickComment(id)
+    return true
+}
+
+/**
+ * Keys that arrive at an editor's toolbar while a comment is being written ([Session.composing]): characters go to the
+ * draft, Backspace removes one, Ctrl+Enter posts, Esc stops (the draft stays). True when the key was used.
+ */
+fun composeKeys(graph: Graph, s: Session, e: androidx.compose.ui.input.key.KeyEvent): Boolean {
+    if (!s.composing || !s.reviewOpen || e.type != KeyEventType.KeyDown) return false
+    val enter = e.key == Key.Enter || e.key == Key.NumPadEnter
+    if (e.isCtrlPressed) return if (enter) { postDraft(graph, s); true } else false
+    if (e.nativeKeyEvent.isAltPressed) return false
+    return when {
+        e.key == Key.Escape -> { s.composing = false; true }
+        e.key == Key.Backspace -> { if (s.draft.isNotEmpty()) s.draft = s.draft.substring(0, s.draft.offsetByCodePoints(s.draft.length, -1)); true }
+        enter -> { s.draft += "\n"; true }
+        else -> { val cp = e.nativeKeyEvent.unicodeChar; if (cp >= 32) { s.draft += String(Character.toChars(cp)); true } else false }
     }
 }
 
@@ -487,19 +533,19 @@ private fun androidx.compose.foundation.layout.ColumnScope.RevisionList(graph: G
                     else -> Text(revisionText(r, r.author == me && me.isNotBlank()), maxLines = if (on) 8 else 2, overflow = TextOverflow.Ellipsis, style = PicoTheme.typography.bodyMedium, color = PicoTheme.colorScheme.labelPrimary)
                 }
                 if (on && r.canResolve && !s.readOnly) Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    ToolButton(tr(R.string.rv_accept), "review/accept", icon = R.drawable.ic_check, primary = true, onClick = { if (s.acceptRevision(r.id)) sel = null })
-                    ToolButton(tr(R.string.rv_reject), "review/reject", icon = R.drawable.ic_undo, onClick = { if (s.rejectRevision(r.id)) sel = null })
+                    ToolButton(tr(R.string.rv_accept), "review/accept", icon = R.drawable.ic_check, primary = true, name = "change-accept", onClick = { if (s.acceptRevision(r.id)) sel = null })
+                    ToolButton(tr(R.string.rv_reject), "review/reject", icon = R.drawable.ic_undo, name = "change-reject", onClick = { if (s.rejectRevision(r.id)) sel = null })
                 }
             }
         }
     }
     if (!s.readOnly) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         val any = all.any { it.canResolve }
-        ToolButton(tr(R.string.rv_accept_all), "review/accept-all", icon = R.drawable.ic_check, enabled = any, width = 144.dp, onClick = {
+        ToolButton(tr(R.string.rv_accept_all), "review/accept-all", icon = R.drawable.ic_check, enabled = any, width = 144.dp, name = "all-accept", onClick = {
             val n = s.acceptAllRevisions()
             if (n > 0) graph.say(s, graph.str(R.string.rv_accepted_n, n), graph.str(R.string.undo_short)) { s.undo() }
         })
-        ToolButton(tr(R.string.rv_reject_all), "review/reject-all", icon = R.drawable.ic_undo, enabled = any, width = 144.dp, onClick = {
+        ToolButton(tr(R.string.rv_reject_all), "review/reject-all", icon = R.drawable.ic_undo, enabled = any, width = 144.dp, name = "all-reject", onClick = {
             val n = s.rejectAllRevisions()
             if (n > 0) graph.say(s, graph.str(R.string.rv_rejected_n, n), graph.str(R.string.undo_short)) { s.undo() }
         })

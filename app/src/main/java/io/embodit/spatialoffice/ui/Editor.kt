@@ -211,7 +211,7 @@ fun EditorWindow(win: Win, tag: String?, content: @Composable (Graph, Session) -
                     awaitPointerEventScope {
                         while (true) {
                             val e = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                            if (e.type == androidx.compose.ui.input.pointer.PointerEventType.Press) graph.activate(s)
+                            if (e.type == androidx.compose.ui.input.pointer.PointerEventType.Press) { graph.activate(s); s.composing = false }
                         }
                     }
                 }
