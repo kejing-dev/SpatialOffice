@@ -9,7 +9,7 @@ import kotlin.math.abs
 
 /** Motion of the Stage's panels: the same path at any frame rate, arrival times, the small give of the focused piece. */
 class MotionTest {
-    private fun pose(x: Float = 0f, y: Float = 0f, z: Float = 0f, yaw: Float = 0f, scale: Float = 1f, tilt: Float = 0f) = floatArrayOf(x, y, z, yaw, scale, tilt)
+    private fun pose(x: Float = 0f, y: Float = 0f, z: Float = 0f, yaw: Float = 0f, scale: Float = 1f, tilt: Float = 0f, alpha: Float = 1f) = floatArrayOf(x, y, z, yaw, scale, tilt, alpha)
 
     private fun run(from: FloatArray, to: FloatArray, seconds: Float, fps: Int, feel: Motion.Feel, delay: Float = 0f): Motion.Body {
         val b = Motion.Body(from.copyOf(), delay = delay)
@@ -112,6 +112,7 @@ class MotionTest {
         }
         assertEquals(0.32f, stack[Motion.SCALE], 1e-6f)
         assertEquals(1.15f, stack[Motion.Y], 1e-6f); assertEquals(-1.32f, stack[Motion.Z], 1e-6f)
+        assertEquals("the stack is faint", 0.35f, stack[Motion.ALPHA], 1e-6f)
     }
 
     @Test

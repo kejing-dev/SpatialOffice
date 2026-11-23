@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.compose.runtime.mutableStateMapOf
 import com.pico.spatial.core.container.SpatialViewContent
 import com.pico.spatial.core.ecs.Entity
+import com.pico.spatial.core.ecs.OpacityControllerComponent
 import com.pico.spatial.core.ecs.SceneUpdateContext
 import com.pico.spatial.core.ecs.System
 import com.pico.spatial.core.ecs.TransformComponent
@@ -275,7 +276,7 @@ class StageScene(private val graph: Graph) {
                 for (id in wanted.keys) {
                     val w = wanted.getValue(id)
                     if (id == StagePanels.BAR) {
-                        starts[id] = w.copyOf().also { it[Motion.Y] -= 0.16f; it[Motion.SCALE] *= 0.6f }
+                        starts[id] = w.copyOf().also { it[Motion.Y] -= 0.16f; it[Motion.SCALE] *= 0.6f; it[Motion.ALPHA] = 0f }
                         delays[id] = 0.22f
                     } else {
                         starts[id] = if (id == focusId && from != null) from.copyOf() else stack
@@ -308,13 +309,13 @@ class StageScene(private val graph: Graph) {
                     val w = wanted[id] ?: continue
                     // from further out on the same side, small
                     starts[id] = w.copyOf().also {
-                        it[Motion.X] = st.x + (w[Motion.X] - st.x) * 1.5f; it[Motion.Z] = st.z + (w[Motion.Z] - st.z) * 1.5f; it[Motion.SCALE] *= 0.5f
+                        it[Motion.X] = st.x + (w[Motion.X] - st.x) * 1.5f; it[Motion.Z] = st.z + (w[Motion.Z] - st.z) * 1.5f; it[Motion.SCALE] *= 0.5f; it[Motion.ALPHA] = 0f
                     }
                     delays[id] = 0.18f
                     bodies.remove(id)
                 }
                 wanted[StagePanels.BAR]?.let { w ->
-                    starts[StagePanels.BAR] = w.copyOf().also { it[Motion.Y] -= 0.16f; it[Motion.SCALE] *= 0.6f }
+                    starts[StagePanels.BAR] = w.copyOf().also { it[Motion.Y] -= 0.16f; it[Motion.SCALE] *= 0.6f; it[Motion.ALPHA] = 0f }
                     delays[StagePanels.BAR] = 0.28f
                     bodies.remove(StagePanels.BAR)
                 }
@@ -342,12 +343,12 @@ class StageScene(private val graph: Graph) {
             for (id in shownNow) {
                 val body = bodies[id] ?: continue
                 val to = when {
-                    id.startsWith("piece-") && focusPose != null -> stackAt(st, focusPose)
+                    id.startsWith("piece-") && focusPose != null -> stackAt(st, focusPose).also { q -> q[Motion.ALPHA] = 0f }
                     id == StagePanels.SCREEN -> body.pos.copyOf().also { q ->
                         q[Motion.X] = st.x + (q[Motion.X] - st.x) * 0.35f; q[Motion.Z] = st.z + (q[Motion.Z] - st.z) * 0.35f
-                        q[Motion.Y] -= 0.45f; q[Motion.SCALE] *= 0.1f
+                        q[Motion.Y] -= 0.45f; q[Motion.SCALE] *= 0.1f; q[Motion.ALPHA] = 0f
                     }
-                    else -> body.pos.copyOf().also { q -> q[Motion.Y] -= 0.14f; q[Motion.SCALE] *= 0.4f }
+                    else -> body.pos.copyOf().also { q -> q[Motion.Y] -= 0.14f; q[Motion.SCALE] *= 0.4f; q[Motion.ALPHA] = 0f }
                 }
                 exits[id] = to
                 body.delay = if (id.startsWith("piece-")) Motion.gatherDelay(pieces.indexOf(id), focusAt, pieces.size) else 0f
@@ -376,7 +377,8 @@ class StageScene(private val graph: Graph) {
     /** Seat-local pose → Stage-space target (x, y, z, yaw, scale, tilt). */
     private fun target(seat: Seat, p: PanelPose, scale: Float, tiltDeg: Float = 0f): FloatArray {
         val (x, y, z) = seat.toStage(p.x, p.y, p.z)
-        return floatArrayOf(x, y, z, seat.yawRad + (p.yawDeg * PI / 180.0).toFloat(), scale, (tiltDeg * PI / 180.0).toFloat())
+        // alpha 1: a panel in its place is opaque (PanelPose.alpha is not used: translucent pages over a real room read badly)
+        return floatArrayOf(x, y, z, seat.yawRad + (p.yawDeg * PI / 180.0).toFloat(), scale, (tiltDeg * PI / 180.0).toFloat(), 1f)
     }
 
     private fun apply(e: Entity, v: FloatArray) {
@@ -387,7 +389,23 @@ class StageScene(private val graph: Graph) {
         val cy = cos(hy); val sy = sin(hy); val cx = cos(hx); val sx = sin(hx)
         t.setQuaternion(Quat(cy * sx, sy * cx, -sy * sx, cy * cx))
         t.setScaleVector(Vector3(v[4], v[4], v[4]))
+        fade(e, v[Motion.ALPHA])
     }
+
+    /**
+     * Alpha of a holder (and the panel under it): only while a panel comes or goes. At rest the component is taken off
+     * again: an entity that carries it is drawn blended even at 1.0 (factory lesson, 2026-10-29).
+     */
+    private fun fade(e: Entity, alpha: Float) {
+        val a = alpha.coerceIn(0f, 1f)
+        runCatching {
+            val c = e.components[OpacityControllerComponent::class.java]
+            if (a >= 0.99f) { if (c != null) e.components.remove(OpacityControllerComponent::class.java) }
+            else if (c == null) e.components.set(OpacityControllerComponent(a)) else c.opacity = a
+        }.onFailure { if (!fadeFailed) { fadeFailed = true; Log.w(TAG, "MOTION opacity not applied: $it") } }
+    }
+
+    private var fadeFailed = false
 
     private fun park(h: Entity) {
         val t = h.components[TransformComponent::class.java] ?: return

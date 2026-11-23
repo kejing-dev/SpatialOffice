@@ -14,11 +14,13 @@ import kotlin.math.sqrt
  * path is the same at 10 frames a second and at 90 (the system lowers a container's frame rate when it likes), and a
  * target that changes in mid-flight is picked up with the speed the panel already has: no jump, no restart.
  *
- * A pose is six numbers: x, y, z (metres, Stage space), yaw (radians), scale, tilt (radians).
+ * A pose is seven numbers: x, y, z (metres, Stage space), yaw (radians), scale, tilt (radians), alpha (0–1).
+ * Alpha is for the way in and the way out only: a panel at rest is fully opaque (it reads best, and an opaque panel is
+ * drawn without blending).
  */
 object Motion {
-    const val X = 0; const val Y = 1; const val Z = 2; const val YAW = 3; const val SCALE = 4; const val TILT = 5
-    const val SIZE = 6
+    const val X = 0; const val Y = 1; const val Z = 2; const val YAW = 3; const val SCALE = 4; const val TILT = 5; const val ALPHA = 6
+    const val SIZE = 7
 
     /**
      * How a panel moves. [omega] = natural frequency (1/s): the higher, the quicker. [zeta] = damping ratio:
@@ -76,7 +78,7 @@ object Motion {
         if (b.delay > 0f) return false
         for (i in 0 until SIZE) {
             val d = if (i == YAW) shortest(target[i] - b.pos[i]) else target[i] - b.pos[i]
-            val eps = when (i) { YAW, TILT -> 0.0018f; SCALE -> 0.002f; else -> 0.001f }
+            val eps = when (i) { YAW, TILT -> 0.0018f; SCALE -> 0.002f; ALPHA -> 0.01f; else -> 0.001f }
             if (abs(d) > eps || abs(b.vel[i]) > eps * 8f) return false
         }
         return true
@@ -133,7 +135,7 @@ object Motion {
      */
     fun stack(focusTarget: FloatArray, towardSeatX: Float, towardSeatZ: Float): FloatArray = floatArrayOf(
         focusTarget[X] + towardSeatX * STACK_NEARER, focusTarget[Y] - STACK_LOWER, focusTarget[Z] + towardSeatZ * STACK_NEARER,
-        focusTarget[YAW], focusTarget[SCALE] * STACK_SCALE, focusTarget[TILT],
+        focusTarget[YAW], focusTarget[SCALE] * STACK_SCALE, focusTarget[TILT], STACK_ALPHA,
     )
 
     /** Longest step solved at once (seconds): after a stall the panels go on from where they were, they do not finish the whole way unseen. */
@@ -142,6 +144,8 @@ object Motion {
     const val STACK_NEARER = 0.18f
     const val STACK_LOWER = 0.10f
     const val STACK_SCALE = 0.32f
+    /** The stack is faint: the pages brighten as they are dealt out and dim as they are gathered. */
+    const val STACK_ALPHA = 0.35f
     private const val E = 2.7182817f
     /** How far the rehearsal screen gives when the slide changes: 1 % of its size. */
     const val SLIDE_PRESS = 0.01f
