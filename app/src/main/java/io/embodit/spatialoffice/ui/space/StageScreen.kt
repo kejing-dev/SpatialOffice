@@ -1,5 +1,7 @@
 package io.embodit.spatialoffice.ui.space
 
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import io.embodit.spatialoffice.ui.noKeyFocus
 import androidx.compose.foundation.border
@@ -297,9 +299,59 @@ private fun RehearsalScreen(graph: Graph) {
     // The screen panel is always 960 × 540 dp (the scene scales that to the screen's place); a page of another
     // proportion is drawn whole in its middle, so the panel keeps one size from slide to slide and file to file.
     Box(Modifier.size(960.dp, 540.dp), contentAlignment = Alignment.Center) {
-        // p28: black screen (the speaker's notes and next slide stay)
-        if (graph.rehearsalBlack) Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black).semantics { contentDescription = "rehearsal/blackout" })
-        else SlideCanvas(d, d.current, SlideFit.fit(960f, 540f, d.deck.widthEmu, d.deck.heightEmu).w.dp, editable = false)
+        // p28: black screen (the speaker's notes and next slide stay). −1 = black.
+        val showing = if (graph.rehearsalBlack) -1 else d.current
+        LaunchedEffect(showing) { android.util.Log.i(io.embodit.spatialoffice.platform.TAG, "REHEARSAL screen shows ${if (showing < 0) "black" else "slide ${showing + 1}"}") }
+        // Motion: the next / previous slide comes in along the reading direction (an eighth of the screen's width, with a
+        // fade: on a 3.2 m screen a full push would be 3 m of travel in front of the eyes); a jump or the black screen fades.
+        // an opaque sheet the size of the page stays behind the two slides while one fades into the other: the room never shows through
+        val fit = SlideFit.fit(960f, 540f, d.deck.widthEmu, d.deck.heightEmu)
+        Box(Modifier.size(fit.w.dp, fit.h.dp).background(io.embodit.spatialoffice.ui.Ink.Paper), contentAlignment = Alignment.Center) {
+            androidx.compose.animation.AnimatedContent(
+                targetState = showing,
+                transitionSpec = { StageMotion.slideChange(initialState, targetState) },
+                modifier = Modifier.fillMaxSize().clipToBounds(), contentAlignment = Alignment.Center, label = "rehearsal-slide",
+            ) { i ->
+                if (i < 0) Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black).semantics { contentDescription = "rehearsal/blackout" })
+                else SlideCanvas(d, i, fit.w.dp, editable = false)
+            }
+        }
+    }
+}
+
+/** How the content of the rehearsal's panels changes (Compose side; where the panels are is StageScene's business). */
+internal object StageMotion {
+    /** Fast out of the way, slow into place. */
+    val Ease = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)
+    const val AXIS_MS = 380
+    const val FADE_MS = 240
+
+    /** "axis" = one slide on (or back): slides along the reading direction; "fade" = to / from black; "jump" = any other slide. */
+    fun kind(from: Int, to: Int): String = when {
+        from < 0 || to < 0 -> "fade"
+        kotlin.math.abs(to - from) == 1 -> "axis"
+        else -> "jump"
+    }
+
+    fun slideChange(from: Int, to: Int): androidx.compose.animation.ContentTransform {
+        val t = androidx.compose.animation.core.tween<Float>(AXIS_MS, easing = Ease)
+        return when (kind(from, to)) {
+            "fade" -> androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(FADE_MS)) togetherWith androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(FADE_MS))
+            "axis" -> {
+                val dir = if (to > from) 1 else -1
+                val move = androidx.compose.animation.core.tween<androidx.compose.ui.unit.IntOffset>(AXIS_MS, easing = Ease)
+                (androidx.compose.animation.slideInHorizontally(move) { w -> dir * w / 8 } + androidx.compose.animation.fadeIn(t)) togetherWith
+                    (androidx.compose.animation.slideOutHorizontally(move) { w -> -dir * w / 8 } + androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(AXIS_MS / 2)))
+            }
+            else -> (androidx.compose.animation.fadeIn(t) + androidx.compose.animation.scaleIn(t, initialScale = 0.94f)) togetherWith androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(AXIS_MS / 2))
+        }
+    }
+
+    /** Notes and the next-slide preview: a short fade, the new text rising a little. */
+    fun textChange(): androidx.compose.animation.ContentTransform {
+        val move = androidx.compose.animation.core.tween<androidx.compose.ui.unit.IntOffset>(FADE_MS, easing = Ease)
+        return (androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(FADE_MS)) + androidx.compose.animation.slideInVertically(move) { h -> h / 24 }) togetherWith
+            androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(FADE_MS / 2))
     }
 }
 
@@ -312,7 +364,9 @@ private fun RehearsalNotes(graph: Graph) {
         Column(Modifier.fillMaxSize().padding(28.dp).verticalScroll(rememberScrollState())) {
             Txt(tr(R.string.notes), "rehearsal/notes-label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary, maxLines = 2)
             Box(Modifier.height(12.dp))
-            Txt(notes.ifBlank { tr(R.string.rh_notes_empty) }, "rehearsal/notes", style = PicoTheme.typography.headlineSmall, maxLines = 40)
+            androidx.compose.animation.AnimatedContent(targetState = d.current to notes, transitionSpec = { StageMotion.textChange() }, label = "rehearsal-notes") { (_, text) ->
+                Txt(text.ifBlank { tr(R.string.rh_notes_empty) }, "rehearsal/notes", style = PicoTheme.typography.headlineSmall, maxLines = 40)
+            }
         }
     }
 }
@@ -327,7 +381,10 @@ private fun RehearsalNext(graph: Graph) {
             Txt(elapsedLabel(graph.rehearsalStart), "rehearsal/clock", style = PicoTheme.typography.displaySmall, weight = FontWeight.Bold)
             Txt(tr(if (last) R.string.rh_last else R.string.rh_next_label), "rehearsal/next-label", style = PicoTheme.typography.labelLarge, color = PicoTheme.colorScheme.labelSecondary)
             if (!last) BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
-                SlideCanvas(d, d.current + 1, SlideFit.fit(maxWidth.value, maxHeight.value, d.deck.widthEmu, d.deck.heightEmu).w.dp, editable = false)
+                val w = SlideFit.fit(maxWidth.value, maxHeight.value, d.deck.widthEmu, d.deck.heightEmu).w.dp
+                androidx.compose.animation.AnimatedContent(targetState = d.current + 1, transitionSpec = { StageMotion.textChange() }, label = "rehearsal-next") { i ->
+                    SlideCanvas(d, i, w, editable = false)
+                }
             }
         }
     }

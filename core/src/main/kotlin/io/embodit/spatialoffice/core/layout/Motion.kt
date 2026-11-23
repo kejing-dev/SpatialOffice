@@ -62,6 +62,15 @@ object Motion {
         }
     }
 
+    /**
+     * A small push on one axis: the body leaves its place and the spring brings it back (the big screen "takes" a slide
+     * change). With a critically damped [feel] the furthest it gets is [speed] / (ω·e).
+     */
+    fun nudge(b: Body, axis: Int, speed: Float) { b.vel[axis] += speed }
+
+    /** Speed for [nudge] that takes a critically damped body [depth] away from its place at the most. */
+    fun nudgeSpeed(depth: Float, feel: Feel): Float = depth * feel.omega * E
+
     /** True when [b] is at [target] for the eye: under a millimetre, a tenth of a degree and 0.2 % of scale, and nearly still. */
     fun arrived(b: Body, target: FloatArray): Boolean {
         if (b.delay > 0f) return false
@@ -133,4 +142,7 @@ object Motion {
     const val STACK_NEARER = 0.18f
     const val STACK_LOWER = 0.10f
     const val STACK_SCALE = 0.32f
+    private const val E = 2.7182817f
+    /** How far the rehearsal screen gives when the slide changes: 1 % of its size. */
+    const val SLIDE_PRESS = 0.01f
 }

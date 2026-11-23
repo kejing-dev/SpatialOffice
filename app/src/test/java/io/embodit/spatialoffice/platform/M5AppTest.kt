@@ -24,6 +24,18 @@ class M5AppTest {
     }
 }
 
+/** Motion: which transition the rehearsal screen plays for a slide change. */
+class StageMotionTest {
+    @Test
+    fun theNeighbourSlidesTheOthersJumpBlackFades() {
+        val k = io.embodit.spatialoffice.ui.space.StageMotion::kind
+        assertEquals("axis", k(2, 3)); assertEquals("axis", k(3, 2))
+        assertEquals("jump", k(0, 5)); assertEquals("jump", k(5, 0))
+        assertEquals("fade", k(3, -1)); assertEquals("fade", k(-1, 3))
+        org.junit.Assert.assertTrue(io.embodit.spatialoffice.ui.space.StageMotion.AXIS_MS in 300..450)
+    }
+}
+
 /** v0.7.0: a reply box closes, the formula bar takes the keyboard back and the input method empties it: the cell keeps its value. */
 class M5CellEditTest {
     @Test

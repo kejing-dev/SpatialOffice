@@ -113,4 +113,16 @@ class MotionTest {
         assertEquals(0.32f, stack[Motion.SCALE], 1e-6f)
         assertEquals(1.15f, stack[Motion.Y], 1e-6f); assertEquals(-1.32f, stack[Motion.Z], 1e-6f)
     }
+
+    @Test
+    fun theScreenGivesOnePercentWhenTheSlideChangesAndComesBack() {
+        val at = pose(scale = 4.17f)
+        val b = Motion.Body(at.copyOf())
+        Motion.nudge(b, Motion.SCALE, -Motion.nudgeSpeed(4.17f * Motion.SLIDE_PRESS, Motion.GRAND))
+        var min = 4.17f
+        repeat(90) { Motion.step(b, at, 1f / 90, Motion.GRAND); min = minOf(min, b.pos[Motion.SCALE]) }
+        assertEquals("deepest point is 1 % of the size", 4.17f * 0.99f, min, 0.004f)
+        assertTrue("back within a second", Motion.arrived(b, at))
+        assertEquals(0f, b.pos[Motion.X], 0f) // nothing else moved
+    }
 }

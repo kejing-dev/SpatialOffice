@@ -95,6 +95,7 @@ class StageScene(private val graph: Graph) {
     private var moveAt = 0L
     private var moveFrame = 0L
     private var seenRecenterForMotion = -1
+    private var prevSlide = -1
     /** An opening move is waiting for calm frames ([onFrame]). */
     private var holding = false
     private var holdSince = 0L
@@ -322,6 +323,16 @@ class StageScene(private val graph: Graph) {
             }
             feels[StagePanels.SCREEN] = Motion.GRAND
             for (id in listOf(StagePanels.NOTES, StagePanels.NEXT, StagePanels.BAR)) feels[id] = Motion.GLIDE
+            // the slide changed: the screen gives 1 % and comes back (its content slides at the same moment, StageMotion.slideChange)
+            val slide = (graph.stageSession as? io.embodit.spatialoffice.platform.DeckSession)?.current ?: -1
+            if (prevMode == StageMode.REHEARSAL && prevSlide >= 0 && slide != prevSlide) {
+                val screen = bodies[StagePanels.SCREEN]; val to = wanted[StagePanels.SCREEN]
+                if (screen != null && to != null && screen.delay <= 0f) {
+                    Motion.nudge(screen, Motion.SCALE, -Motion.nudgeSpeed(to[Motion.SCALE] * Motion.SLIDE_PRESS, Motion.GRAND))
+                    began("slide ${prevSlide + 1} -> ${slide + 1} (${io.embodit.spatialoffice.ui.space.StageMotion.kind(prevSlide, slide)})", now)
+                }
+            }
+            prevSlide = slide
         } else if (mode == null && prevMode != null && st != null) {
             // [Collapse] / the rehearsal ending: gather, then the Stage closes (WindowCtl.leaveStage waits 350 ms)
             val focusPose = lastFocusPose
