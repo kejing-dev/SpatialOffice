@@ -22,6 +22,8 @@ data class Settings(
     val keepBackup: Boolean = true,
     val radius: Int = 1,
     val hintSeen: Boolean = false,
+    /** M5: the name written on my comments and tracked changes ("" = not asked yet). */
+    val myName: String = "",
 ) {
     val zh: Boolean get() = lang == Lang.ZH
 }
@@ -40,6 +42,7 @@ class SettingsStore(context: Context) {
             keepBackup = prefs.getBoolean("keep", d.keepBackup),
             radius = prefs.getInt("radius", d.radius).coerceIn(0, 2),
             hintSeen = prefs.getBoolean("hint", false),
+            myName = prefs.getString("name", "") ?: "",
         )
     }
 
@@ -47,7 +50,7 @@ class SettingsStore(context: Context) {
         val s = f(value)
         value = s
         prefs.edit().putString("lang", s.lang.name).putString("open", s.openMode.name).putString("store", s.layoutStore.name)
-            .putBoolean("keep", s.keepBackup).putInt("radius", s.radius).putBoolean("hint", s.hintSeen).apply()
+            .putBoolean("keep", s.keepBackup).putInt("radius", s.radius).putBoolean("hint", s.hintSeen).putString("name", s.myName).apply()
     }
 }
 
@@ -121,4 +124,21 @@ class LayoutStore(context: Context, private val storage: Storage) {
     /** Path of the backup made before the first save of this file, if any. */
     fun backupOf(key: String): String? = backups.getString(key, null)
     fun markBackedUp(key: String, backupPath: String) = backups.edit().putString(key, backupPath).apply()
+}
+
+/**
+ * M5: per file, whether its review pane is open and whether "Track my edits" is on. App data only: neither is
+ * written into the file (the pane is a view; the switch is mine, not the document's).
+ */
+class ReviewStore(context: Context) {
+    private val prefs = context.getSharedPreferences("review", Context.MODE_PRIVATE)
+    fun open(key: String): Boolean = prefs.getBoolean("open:$key", false)
+    fun setOpen(key: String, on: Boolean) { if (on) prefs.edit().putBoolean("open:$key", true).apply() else prefs.edit().remove("open:$key").apply() }
+    fun tracking(key: String): Boolean = prefs.getBoolean("track:$key", false)
+    fun setTracking(key: String, on: Boolean) { if (on) prefs.edit().putBoolean("track:$key", true).apply() else prefs.edit().remove("track:$key").apply() }
+    fun move(oldKey: String, newKey: String) {
+        val o = open(oldKey); val t = tracking(oldKey)
+        setOpen(oldKey, false); setTracking(oldKey, false)
+        setOpen(newKey, o); setTracking(newKey, t)
+    }
 }

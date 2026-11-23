@@ -1,5 +1,30 @@
 # Changelog · 更新记录
 
+## v0.7.0 · 2026-11-22
+
+- 审阅栏：三类编辑窗口的标题栏多了 [审阅 n]，点一下窗口里右边出来一条栏，看批注、回复、解决；栏在窗口里面，窗口不变宽、不挪位置。文件里有批注或修订时，文件名下面那行会提示，不自己弹开
+- 文档批注：选一段字（或把光标放在一段里），在栏底写一句点 [发送]；也可以用 [插入] › 批注 或 Ctrl+Alt+M。回复、解决、重新打开、改字、删除都在卡片上。存回 .docx 后电脑上打开看得见
+- 文档修订：栏里 [修订] 一页逐条 [接受] [拒绝]，底部 [全部接受] [全部拒绝]（Ctrl+Z 一下退回）。纸上加的字是下划线，删的字是红色删除线
+- 记下我的修改：栏里的开关、[更多] › 记下我的修改、Ctrl+Shift+E。开着时你加的字、删的字都存成带你名字和时间的修订
+- 表格批注：有批注的格子右上角有个小三角（蓝 = 批注，灰 = 老式备注）；[编辑] › 批注 或 Ctrl+Alt+M 给当前格写批注。老式备注能改字、能删
+- 演示批注：页面上是一个带作者首字的小气泡，点它栏里那条就选中；栏里先列这一页的，再列别的页的。预演时不显示
+- 我的名字：主页 [设置] 里多一行「我的名字」，批注和修订上署这个名字；没填时第一次写批注会在栏里问一次
+- 格式刷：[文字] › 格式刷 或 Ctrl+Shift+C 拿起，点一下要刷的那段（或拖选几个字）就刷好；Esc 放下
+- 页眉和页脚：文档 [插入] › 页眉和页脚…，纸面最上、最下显示成灰字，点灰字也能改
+- 页码和页脚：演示 [页面] › 页码和页脚…，可以只用在这页，也可以全部页面，标题页可以不显示
+- 主页窗口高了 60 dp（放得下「我的名字」那一行）
+- Review pane: the title bar of every editor has Review n; it opens a pane inside the window, at its right edge, with the comments to read, reply to and resolve. The window keeps its size and place. A file that has comments or tracked changes says so under its name; the pane never opens by itself
+- Document comments: select some text (or just put the cursor in a paragraph), type at the bottom of the pane and Post; also Insert › Comment and Ctrl+Alt+M. Reply, resolve, reopen, edit and delete are on the card. They are stored in the .docx the standard way
+- Tracked changes: the Changes list has Accept / Reject on each one and Accept all / Reject all at the bottom (one Ctrl+Z undoes all of them). On the paper added text is underlined, deleted text is red and struck through
+- Track my edits: the switch in the pane, More › Track my edits, Ctrl+Shift+E. While on, what you add or delete is stored as a tracked change with your name and the time
+- Sheet comments: a commented cell has a small triangle in its corner (blue = comment, grey = old-style note); Edit › Comment or Ctrl+Alt+M comments on the current cell. Old-style notes can be edited and deleted
+- Slide comments: a small bubble with the author's initial on the slide; tapping it picks its card. The pane lists this slide's comments first. Not shown while rehearsing
+- My name: Settings has a new row, the name shown on your comments and changes; the pane asks once if it is empty
+- Format painter: Text › Format painter or Ctrl+Shift+C picks the format up, a tap on a paragraph (or a drag over some text) puts it on; Esc drops it
+- Header & footer: Insert › Header & footer… in documents; shown as grey lines at the top and bottom of the paper, which can be tapped too
+- Slide numbers & footer: Slide › Slide numbers & footer…, for this slide or all slides, optionally not on the title slide
+- The home window is 60 dp higher (room for the My name row)
+
 ## v0.6.0 · 2026-11-22
 
 - 文档：可以从一段中间拖到另一段中间，一次选中好几段；Ctrl+C / Ctrl+X 复制剪切，粘到别处时加粗、颜色、列表都还在（[更多 ▾] 里也有复制 / 剪切 / 粘贴）

@@ -118,7 +118,7 @@ private fun fileTag(bundle: android.os.Bundle?, win: io.embodit.spatialoffice.pl
 }
 
 /**
- * Containers (design 2.1). Shared Space: the home window (default container, 1120 × 660 dp from the manifest), one
+ * Containers (design 2.1). Shared Space: the home window (default container, 1120 × 720 dp from the manifest), one
  * window per open file (same container id, the file's tag; [editorPlacement]), and the chart volume over its sheet; nothing is placed from
  * the head pose. Full Space: one Mixed Stage for the spread layout and rehearsal.
  */

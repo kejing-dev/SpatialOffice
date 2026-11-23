@@ -18,7 +18,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.background
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import io.embodit.spatialoffice.platform.typingTarget
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -136,6 +143,8 @@ internal fun SettingsPage(graph: Graph) {
         SettingRow(tr(R.string.set_language), null, "settings/lang") {
             Segments(listOf(Lang.ZH to tr(R.string.lang_zh), Lang.EN to tr(R.string.lang_en)), s.lang, "settings/lang") { v -> graph.settings.update { it.copy(lang = v) } }
         }
+        // M5: the name on my comments and tracked changes; saved as it is typed
+        SettingRow(tr(R.string.my_name), tr(R.string.my_name_sub), "settings/name") { NameField(graph) }
         SettingRow(tr(R.string.set_open), tr(R.string.set_open_sub), "settings/open") {
             Segments(listOf(OpenMode.WINDOW to tr(R.string.open_window), OpenMode.SPREAD to tr(R.string.open_spread)), s.openMode, "settings/open") { v -> graph.settings.update { it.copy(openMode = v) } }
         }
@@ -161,6 +170,27 @@ internal fun SettingsPage(graph: Graph) {
             SecondaryButton(tr(R.string.exit_app), "settings/exit", icon = R.drawable.ic_power, onClick = { graph.requestExit() })
         }
         Txt(tr(if (cloud) R.string.set_legal else R.string.set_legal_local), "settings/legal", style = PicoTheme.typography.bodySmall, color = PicoTheme.colorScheme.labelSecondary, maxLines = 3)
+    }
+}
+
+/** Settings › My name: 252 dp wide like the two-option controls of the rows around it, 52 dp high. */
+@Composable
+private fun NameField(graph: Graph) {
+    val saved = graph.settings.value.myName
+    var text by remember { mutableStateOf(saved) }
+    // the pane's one-time question may have set it meanwhile
+    androidx.compose.runtime.LaunchedEffect(saved) { if (saved != text.trim()) text = saved }
+    Box(
+        Modifier.width(252.dp).height(52.dp).clip(RoundedCornerShape(16.dp)).background(PicoTheme.colorScheme.fillSecondary).padding(horizontal = 16.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        if (text.isEmpty()) Txt(tr(R.string.my_name_ph), "settings/name-hint", style = PicoTheme.typography.bodyLarge, color = PicoTheme.colorScheme.labelSecondary)
+        androidx.compose.foundation.text.BasicTextField(
+            value = text, onValueChange = { v -> text = v.take(40); graph.setMyName(text) }, singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(fontSize = androidx.compose.ui.unit.TextUnit(17f, androidx.compose.ui.unit.TextUnitType.Sp), color = PicoTheme.colorScheme.labelPrimary),
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(PicoTheme.colorScheme.interaction),
+            modifier = Modifier.typingTarget().fillMaxWidth().semantics { contentDescription = "settings-name-field" },
+        )
     }
 }
 
@@ -204,6 +234,8 @@ private fun HowToSheet(graph: Graph) {
         // v0.2.5: move / resize what was inserted; several files side by side
         listOf(R.drawable.ic_move, R.string.how_to_object, R.string.how_to_object_keys, R.string.how_to_object_hand, R.string.how_to_object_ctrl),
         listOf(R.drawable.ic_stack, R.string.how_to_multi, R.string.how_to_multi_keys, R.string.how_to_multi_hand, R.string.how_to_multi_ctrl),
+        // M5: review (comments, tracked changes, format painter)
+        listOf(R.drawable.ic_review, R.string.how_to_review, R.string.how_to_review_keys, R.string.how_to_review_hand, R.string.how_to_review_ctrl),
         listOf(R.drawable.ic_cloud, R.string.how_to_cloud, R.string.how_to_cloud_keys, R.string.how_to_cloud_hand, R.string.how_to_cloud_ctrl),
         listOf(R.drawable.ic_expand, R.string.how_to_move, R.string.how_to_move_keys, R.string.how_to_move_hand, R.string.how_to_move_ctrl),
     ).filter { it[1] != R.string.how_to_cloud || graph.accounts.shown.isNotEmpty() } // cloud drives only where this build offers one

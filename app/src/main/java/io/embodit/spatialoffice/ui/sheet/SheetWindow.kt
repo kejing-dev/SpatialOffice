@@ -205,7 +205,10 @@ fun SheetWindow(tag: String? = null) {
         val edit = remember(s) { CellEdit() }
         Column(Modifier.fillMaxSize().onPreviewKeyEvent { e -> commonKeys(graph, s, e) || sheetKeys(graph, s, edit, e) }) {
             EditorTitleBar(graph, Win.SHEET, s)
-            Column(Modifier.fillMaxWidth().weight(1f).padding(start = 32.dp, end = 32.dp, bottom = 52.dp)) {
+            // M5: the review pane inside the window, right of the grid (the grid area goes from 1216 to 880 dp while it is open)
+            val pane = s.reviewOpen && s.canReview
+            Row(Modifier.fillMaxWidth().weight(1f).padding(start = if (pane) 24.dp else 32.dp, end = if (pane) 24.dp else 32.dp, bottom = 52.dp)) {
+            Column(Modifier.weight(1f).fillMaxHeight()) {
                 FormulaBar(s, edit, Modifier.fillMaxWidth())
                 Box(Modifier.height(10.dp))
                 // v0.5.0 (s41): the grid at the window's zoom (frozen rows, headers and hit-testing scale with it)
@@ -216,6 +219,11 @@ fun SheetWindow(tag: String? = null) {
                 }
                 Box(Modifier.height(10.dp))
                 SheetPicker(graph, s, edit)
+            }
+            if (pane) {
+                Box(Modifier.width(16.dp))
+                io.embodit.spatialoffice.ui.ReviewPane(graph, s)
+            }
             }
         }
         SheetToolbar(graph, s, edit)
@@ -489,6 +497,8 @@ private fun GridRow(s: SheetSession, edit: CellEdit?, r: Int, fixedCols: List<In
 /** The cells of row [r] in [cols] (one stretch: the frozen columns, or the ones that scroll). */
 @Composable
 private fun CellsRow(s: SheetSession, edit: CellEdit?, r: Int, cols: List<Int>, range: IntArray?, h: Dp) {
+    // M5 s35: cells with a comment (blue corner) or an old-style note (grey corner); the workbook keeps the map between changes
+    val commented = remember(s.version, s.sheet) { s.commentCells() }
     val book = s.book
     val sel = s.selection
     run {
@@ -540,7 +550,10 @@ private fun CellsRow(s: SheetSession, edit: CellEdit?, r: Int, cols: List<Int>, 
                             if (m != null) { s.select(m[0], m[1]); s.extendTo(m[2], m[3]) } else s.select(r, c)
                             edit?.load(s)
                             runCatching { edit?.focus?.requestFocus() }
+                            // M5: with the review pane open, a tap on a commented cell picks its card (and lets go of the pick elsewhere)
+                            if (s.reviewOpen) s.pickComment(s.commentHere()?.id)
                         }
+                        .commentCorner(commented[A1.name(r, c)])
                         .semantics { contentDescription = "cell-" + A1.name(r, c) }
                         .padding(horizontal = 8.dp),
                     contentAlignment = when { cell.hAlign == "center" -> Alignment.Center; alignEnd -> Alignment.CenterEnd; else -> Alignment.CenterStart },
@@ -781,6 +794,8 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
                     MenuEntry(tr(R.string.edit_cut), "sheet/cut") { edit.commit(s); copyCells(graph, s, cut = true) },
                     MenuEntry(tr(R.string.edit_paste), "sheet/paste") { run { pasteCells(graph, s) } },
                     MenuEntry(tr(R.string.edit_find), "sheet/find") { edit.commit(s); graph.show(s, Overlay.Find(Win.SHEET)) },
+                    // M5 s35: a comment on the current cell (Ctrl+Alt+M)
+                    MenuEntry(tr(R.string.ins_comment), "sheet/comment") { edit.commit(s); graph.startComment(s) },
                     // v0.5.0 (s24): Ctrl+D / Ctrl+R and series fill
                     io.embodit.spatialoffice.ui.subMenu(tr(R.string.menu_fill), "sheet/fill", listOf(
                         MenuEntry(tr(R.string.fill_down), "sheet/fill-down") { run { fillCells(graph, s, true) } },
@@ -898,4 +913,12 @@ private fun typeIntoCell(s: SheetSession, edit: CellEdit, e: KeyEvent): Boolean 
     edit.editing = true
     edit.value = TextFieldValue(base + ch, TextRange(base.length + ch.length))
     return true
+}
+
+/** M5 s35: the small triangle in a cell's top-right corner: blue = a comment (thread), grey = an old-style note. */
+private fun Modifier.commentCorner(kind: io.embodit.spatialoffice.core.review.CommentKind?): Modifier = if (kind == null) this else this.drawWithContent {
+    drawContent()
+    val k = 9.dp.toPx()
+    val path = androidx.compose.ui.graphics.Path().apply { moveTo(size.width - k, 0f); lineTo(size.width, 0f); lineTo(size.width, k); close() }
+    drawPath(path, if (kind == io.embodit.spatialoffice.core.review.CommentKind.THREAD) io.embodit.spatialoffice.ui.ReviewLook.CellThread else io.embodit.spatialoffice.ui.ReviewLook.CellNote)
 }

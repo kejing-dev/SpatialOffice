@@ -124,6 +124,8 @@ class DocFocus {
     /** v0.6.0 (d23): a drag inside one paragraph selects in it: (paragraph, from, to); [dragTick] bumps on every change. */
     var dragSel: Triple<Int, Int, Int>? = null
     var dragTick by mutableIntStateOf(0)
+    /** M5: the caret as last seen by the comment-marker check, so the same position does not pick a card twice. */
+    var lastCaret: TextRange = TextRange.Zero
 }
 
 /**
@@ -316,8 +318,20 @@ fun underlined(text: String, start: Int, len: Int, ink: androidx.compose.ui.grap
 }
 
 /** [spans] styled: bold / italic / underline / strikethrough, and (M2) colour, highlight and size relative to [baseHp] at [baseSp]. */
-fun annotated(spans: List<Span>, baseHp: Int = 22, baseSp: Float = 17f): AnnotatedString = buildAnnotatedString {
+fun annotated(spans: List<Span>, baseHp: Int = 22, baseSp: Float = 17f, me: String = ""): AnnotatedString = buildAnnotatedString {
     for (s in spans) {
+        // M5 d30 / d36: tracked changes on the paper: added = underlined (purple; blue when it is mine), deleted = red, struck through
+        val rev = s.rev
+        if (rev != null) {
+            val del = rev.kind == io.embodit.spatialoffice.core.review.RevisionKind.DELETE
+            val ink = if (del) io.embodit.spatialoffice.ui.ReviewLook.Del else if (me.isNotBlank() && rev.author == me) io.embodit.spatialoffice.ui.ReviewLook.Mine else io.embodit.spatialoffice.ui.ReviewLook.Ins
+            withStyle(SpanStyle(
+                color = ink, fontWeight = if (s.bold) FontWeight.Bold else null, fontStyle = if (s.italic) FontStyle.Italic else null,
+                fontSize = s.size?.let { (baseSp * it / baseHp.coerceAtLeast(1)).sp } ?: androidx.compose.ui.unit.TextUnit.Unspecified,
+                textDecoration = if (del) TextDecoration.LineThrough else TextDecoration.Underline,
+            )) { append(s.text) }
+            continue
+        }
         // M3 d20: a link from a file whose colour comes from its character style still looks like a link
         val color = s.color ?: s.link?.let { RichText.LINK_RGB }
         val underline = s.underline || s.link != null
@@ -357,19 +371,30 @@ fun DocWindow(tag: String? = null) {
         Column(Modifier.fillMaxSize().onPreviewKeyEvent { e -> docKeys(graph, s, focus, e) }) {
             EditorTitleBar(graph, Win.DOC, s)
             // v0.5.0 (d43): the paper at the window's zoom (100 % = fits the window's width); wider than the window scrolls sideways
-            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f).padding(start = 32.dp, end = 32.dp, bottom = 56.dp)) {
-                val paperW = 760.dp * (s.zoom / 100f)
-                val wide = paperW > maxWidth
-                Box(
-                    Modifier.fillMaxSize().then(if (wide) Modifier.horizontalScroll(rememberScrollState()) else Modifier),
-                    contentAlignment = Alignment.TopCenter,
-                ) {
-                    io.embodit.spatialoffice.ui.Zoomed(s) {
-                        Paper(s, focus, Modifier.width(760.dp).fillMaxHeight(), graph = graph) { graph.windows.focus(graph.refOf(s)) }
+            // M5: the review pane stands inside the window, right of the paper (24 + paper 760 + 16 + pane 336 + 24 = the window's 1160 dp);
+            // the window itself keeps its size and place
+            val pane = s.reviewOpen && s.canReview
+            Row(Modifier.fillMaxWidth().weight(1f).padding(start = if (pane) 24.dp else 32.dp, end = if (pane) 24.dp else 32.dp, bottom = 56.dp)) {
+                BoxWithConstraints(Modifier.weight(1f).fillMaxHeight()) {
+                    val paperW = 760.dp * (s.zoom / 100f)
+                    val wide = paperW > maxWidth
+                    Box(
+                        Modifier.fillMaxSize().then(if (wide) Modifier.horizontalScroll(rememberScrollState()) else Modifier),
+                        contentAlignment = Alignment.TopCenter,
+                    ) {
+                        io.embodit.spatialoffice.ui.Zoomed(s) {
+                            Paper(s, focus, Modifier.width(760.dp).fillMaxHeight(), graph = graph) { graph.windows.focus(graph.refOf(s)) }
+                        }
                     }
+                }
+                if (pane) {
+                    Box(Modifier.width(16.dp))
+                    io.embodit.spatialoffice.ui.ReviewPane(graph, s)
                 }
             }
         }
+        // M5 d24: while the format painter is in hand, a strip above the toolbar says what a tap does
+        if (s.painter != null) Box(Modifier.fillMaxSize().padding(bottom = 64.dp), contentAlignment = Alignment.BottomCenter) { PainterChip() }
         DocToolbar(graph, s, focus)
     }
 }
@@ -378,6 +403,13 @@ private fun docKeys(graph: Graph, s: DocSession, focus: DocFocus, e: androidx.co
     if (commonKeys(graph, s, e)) return true
     if (e.type != KeyEventType.KeyDown) return false
     // d23: a selection across paragraphs answers Delete / Backspace (and Esc lets go of it)
+    // M5: Esc puts the format painter down; Ctrl+Shift+C picks it up, Ctrl+Shift+E turns "Track my edits" on / off
+    if (e.key == Key.Escape && s.painter != null) { s.dropPainter(); return true }
+    if (e.isCtrlPressed && e.isShiftPressed && !e.nativeKeyEvent.isAltPressed) when (e.key) {
+        Key.C -> { docPickPainter(graph, s, focus); return true }
+        Key.E -> { docToggleTracking(graph, s); return true }
+        else -> {}
+    }
     if (!e.isCtrlPressed && s.crossSel != null) when (e.key) {
         Key.Delete, Key.Backspace -> { s.deleteCross()?.let { (id, at) -> focus.want = id; focus.wantCaret = at }; return true }
         Key.Escape -> { s.crossSel = null; return true }
@@ -512,6 +544,11 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
     // d23: the selection across paragraphs (one paragraph: its own field's selection)
     val geo = remember(s) { ParaGeo() }
     val cross = remember(s.crossSel, s.version) { s.selectedParts().associate { it.first.id to (it.second to it.third) } }
+    // M5 d29: where the open comments sit, by paragraph
+    val marks = remember(s.version) { s.commentMarks() }
+    // M5 d31: header / footer text of the file (the whole paper only, not the pieces of a spread)
+    val hf = remember(s.version) { if (blocks == null) (s.headerText() ?: "") to (s.footerText() ?: "") else null }
+    val hfTap = graph != null && focus != null && !s.readOnly
     val crossOn = focus != null && !s.readOnly && blocks == null
     val crossDrag = if (!crossOn) Modifier else Modifier.pointerInput(s, focus) {
         awaitEachGesture {
@@ -525,6 +562,12 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
                 if (!ch.pressed) {
                     if (dragging) { ch.consume(); android.util.Log.i(io.embodit.spatialoffice.platform.TAG, "DOCSEL drag ${s.crossSel ?: focus!!.dragSel}") }
                     else if (s.crossSel != null) s.crossSel = null // a click lets go of it
+                    // M5 d24: with the format painter in hand, the text just tapped (its paragraph) or dragged over takes the format
+                    if (s.painter != null) {
+                        val done = if (!dragging) s.paint(start.first, 0, 0)
+                        else s.crossSel?.let { s.paintParts() } ?: focus!!.dragSel?.let { d -> s.paint(d.first, d.second, d.third) } ?: false
+                        if (done) graph?.say(s, graph.str(R.string.painter_done), graph.str(R.string.undo_short)) { s.undo() }
+                    }
                     break
                 }
                 if (!dragging && (ch.position - down.position).getDistance() > slop) dragging = true
@@ -571,12 +614,14 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).noKeyFocus().clickable { focus.want = s.insertAfter(-1, emptyList(), ParaStyle.BODY) },
             )
         }
+        // M5 d31: the header at the top of the paper (the footer closes the list); grey, a tap opens the sheet
+        if (hf != null && hf.first.isNotEmpty()) item("m5-header") { HeaderFooterLine(hf.first, "doc-header", if (hfTap) ({ graph!!.show(s, Overlay.HeaderFooter()) }) else null) }
         items(all, key = { it.id }) { b ->
             when (b) {
                 is UiBlock.Para -> when {
                     b.pageBreak -> PageBreakView(s, b, focus != null && b.editable && !s.readOnly)
-                    focus != null && b.editable && !s.readOnly -> ParaEditor(s, b, focus, all, numbers, graph, cross[b.id])
-                    else -> ParaView(b, numbers, s.findHit, graph)
+                    focus != null && b.editable && !s.readOnly -> ParaEditor(s, b, focus, all, numbers, graph, cross[b.id], marks[b.id])
+                    else -> ParaView(b, numbers, s.findHit, graph, marks[b.id], s)
                 }
                 is UiBlock.Table -> TableView(b, if (focus != null && s.richText && !s.readOnly) s else null, s) { onWindowFocus() }
                 is UiBlock.Image -> PictureView(s, b, focus != null && s.richText && !s.readOnly)
@@ -584,18 +629,19 @@ fun Paper(s: DocSession, focus: DocFocus?, modifier: Modifier = Modifier, blocks
                 is UiBlock.Opaque -> OpaqueView(b)
             }
         }
+        if (hf != null && hf.second.isNotEmpty()) item("m5-footer") { HeaderFooterLine(hf.second, "doc-footer", if (hfTap) ({ graph!!.show(s, Overlay.HeaderFooter()) }) else null) }
     }
     }
 }
 
 @Composable
-private fun ParaView(b: UiBlock.Para, numbers: Map<Int, Int> = emptyMap(), hit: io.embodit.spatialoffice.platform.FindHit? = null, graph: Graph? = null) {
+private fun ParaView(b: UiBlock.Para, numbers: Map<Int, Int> = emptyMap(), hit: io.embodit.spatialoffice.platform.FindHit? = null, graph: Graph? = null, marks: List<io.embodit.spatialoffice.platform.CommentMark>? = null, s: DocSession? = null) {
     var layout by remember(b.id) { mutableStateOf<TextLayoutResult?>(null) }
     val links = graph != null && b.spans.any { it.link != null }
-    Row(Modifier.fillMaxWidth().ruleLine(b.rule).padding(paraPadding(b))) {
+    Row(Modifier.fillMaxWidth().ruleLine(b.rule).revBar(b.spans.any { it.rev != null } || b.why == "tracked-changes").padding(paraPadding(b))) {
         Marker(b, numbers)
         Text(
-            marked(annotatedOf(b), hit, b.id), style = paraTextStyle(b), onTextLayout = { layout = it },
+            commentMarked(marked(annotatedOf(b, s?.trackAuthor ?: ""), hit, b.id), marks, s?.selComment), style = paraTextStyle(b), onTextLayout = { layout = it },
             // M3 d20: a click on a link opens it (read-only paragraphs; an editable one shows the link's [Open] under it)
             modifier = Modifier.weight(1f).then(if (links) Modifier.pointerInput(b.spans) {
                 detectTapGestures { pos -> layout?.let { l -> RichText.linkAt(b.spans, l.getOffsetForPosition(pos))?.let { graph?.openLink(it.first) } } }
@@ -633,15 +679,37 @@ private fun LinkChip(graph: Graph, s: DocSession, focus: DocFocus, link: Triple<
     }
 }
 
-fun annotatedOf(b: UiBlock.Para): AnnotatedString = annotated(b.spans, b.baseSizeHp, paraStyle(b.style).fontSize.value)
+fun annotatedOf(b: UiBlock.Para, me: String = ""): AnnotatedString = annotated(b.spans, b.baseSizeHp, paraStyle(b.style).fontSize.value, me)
+
+/** M5 d29: the commented stretches of a paragraph get a yellow marker; the picked comment's a deeper one. */
+fun commentMarked(text: AnnotatedString, marks: List<io.embodit.spatialoffice.platform.CommentMark>?, picked: String?): AnnotatedString {
+    if (marks.isNullOrEmpty() || text.isEmpty()) return text
+    return AnnotatedString.Builder(text).apply {
+        // the picked one last, so it shows where two comments overlap
+        for (m in marks.sortedBy { it.id == picked }) {
+            // an empty range = the commented words were deleted and the comment kept: nothing to mark
+            val a = m.start.coerceIn(0, text.length)
+            val b = m.end.coerceIn(0, text.length)
+            if (b > a) addStyle(SpanStyle(background = if (m.id == picked) io.embodit.spatialoffice.ui.ReviewLook.MarkFillOn else io.embodit.spatialoffice.ui.ReviewLook.MarkFill), a, b)
+        }
+    }.toAnnotatedString()
+}
+
+/** M5: a 3 dp line left of a paragraph that holds tracked changes. */
+fun Modifier.revBar(on: Boolean): Modifier = if (!on) this else this.drawBehind {
+    drawRect(io.embodit.spatialoffice.ui.ReviewLook.Ins, topLeft = androidx.compose.ui.geometry.Offset(-14.dp.toPx(), 2.dp.toPx()), size = androidx.compose.ui.geometry.Size(3.dp.toPx(), (size.height - 4.dp.toPx()).coerceAtLeast(0f)))
+}
 
 @Composable
-private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: List<UiBlock>, numbers: Map<Int, Int>, graph: Graph? = null, cross: Pair<Int, Int>? = null) {
+private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: List<UiBlock>, numbers: Map<Int, Int>, graph: Graph? = null, cross: Pair<Int, Int>? = null, marks: List<io.embodit.spatialoffice.platform.CommentMark>? = null) {
     val requester = remember(b.id) { FocusRequester() }
-    var value by remember(b.id) { mutableStateOf(TextFieldValue(annotatedOf(b))) }
+    val me = s.trackAuthor
+    var value by remember(b.id) { mutableStateOf(TextFieldValue(annotatedOf(b, me))) }
+    // M5 d29: the session knows where the caret / selection is, so a comment written in the pane lands there
+    if (focus.id == b.id) androidx.compose.runtime.SideEffect { s.noteCaret(b.id, focus.selection.min, focus.selection.max) }
     // model changed underneath (format toggle, undo, style): rebuild the styled text, keep the caret
     val text = RichText.text(b.spans)
-    val styled = crossMarked(marked(annotatedOf(b), s.findHit, b.id), cross)
+    val styled = crossMarked(commentMarked(marked(annotatedOf(b, me), s.findHit, b.id), marks, s.selComment), cross)
     val geo = LocalParaGeo.current
     androidx.compose.runtime.DisposableEffect(b.id, geo) { onDispose { geo?.paras?.remove(b.id) } }
     // d23: a drag inside this paragraph (the paper takes drags so they can cross paragraphs) selects in it
@@ -666,12 +734,22 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
     }
     val link = if (graph != null && focus.id == b.id) caretLink(b, focus.selection) else null
     Column(Modifier.fillMaxWidth()) {
-    Row(Modifier.fillMaxWidth().ruleLine(b.rule).padding(paraPadding(b))) {
+    Row(Modifier.fillMaxWidth().ruleLine(b.rule).revBar(b.spans.any { it.rev != null }).padding(paraPadding(b))) {
         Marker(b, numbers)
         BasicTextField(
             value = value,
             onValueChange = { nv ->
-                if (nv.text == value.text) { value = nv; if (focus.id == b.id) focus.selection = nv.selection; return@BasicTextField }
+                if (nv.text == value.text) {
+                    value = nv; if (focus.id == b.id) focus.selection = nv.selection
+                    // M5 d29: with the pane open, the caret going into a commented stretch picks that comment's card
+                    if (s.reviewOpen && nv.selection.collapsed && nv.selection != focus.lastCaret) {
+                        val at = nv.selection.start
+                        val hit = marks?.firstOrNull { m -> m.end > m.start && at in m.start..m.end }
+                        if (hit != null && hit.id != s.selComment) s.pickComment(hit.id)
+                    }
+                    focus.lastCaret = nv.selection
+                    return@BasicTextField
+                }
                 val nl = nv.text.indexOf('\n')
                 if (nl >= 0) {
                     // Enter: this paragraph keeps what is before the break, a new one takes the rest
@@ -683,12 +761,23 @@ private fun ParaEditor(s: DocSession, b: UiBlock.Para, focus: DocFocus, all: Lis
                     val id = s.insertAfter(b.id, right, next)
                     focus.want = id; focus.wantCaret = 0
                 } else {
-                    val spans = RichText.applyEdit(b.spans, nv.text)
+                    val plain = RichText.applyEdit(b.spans, nv.text)
+                    // M5 d36: while "Track my edits" is on, what I delete stays on the paper struck through and what I type is marked as mine
+                    val tracked = if (s.tracking) s.trackedEdit(b.spans, plain, value.selection.start, nv.selection.start) else null
+                    val spans = tracked?.first ?: plain
                     s.setParagraph(b.id, spans, b.style)
-                    // keep what the input method handed over (caret, composing range); only the styling is ours
-                    value = nv.copy(annotatedString = annotated(spans, b.baseSizeHp, paraStyle(b.style).fontSize.value))
+                    val styledNow = annotated(spans, b.baseSizeHp, paraStyle(b.style).fontSize.value, me)
+                    if (tracked != null && RichText.text(spans) != nv.text) {
+                        // the paragraph kept text the field no longer has (a tracked deletion): the field takes the paragraph's text, the caret goes past the change
+                        val c = tracked.second.coerceIn(0, styledNow.length)
+                        value = TextFieldValue(styledNow, TextRange(c))
+                        focus.selection = value.selection
+                    } else {
+                        // keep what the input method handed over (caret, composing range); only the styling is ours
+                        value = nv.copy(annotatedString = styledNow)
+                        focus.selection = nv.selection
+                    }
                     if (s.findHit?.a == b.id) s.findHit = null
-                    focus.selection = nv.selection
                 }
             },
             textStyle = paraTextStyle(b),
@@ -949,7 +1038,7 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                 // M2 d15 / d16 / d18: [Text ▾] sizes, strikethrough (moved from More), clear formatting; [Colour ▾] colours and highlights
                 // one [Text ▾] (the document toolbar has no room for a second button: [Save] stays in view in English):
                 // larger / smaller, then pages for the fixed sizes, colours and highlights
-                ToolMenu(tr(R.string.menu_text), "doc/text", enabled = canEdit && s.richText, entries = sizeEntries("doc/text", null, { docStepSize(s, focus, it) }, {}).take(2) + listOf(
+                ToolMenu(tr(R.string.menu_text), "doc/text", enabled = canEdit && s.richText, icon = if (s.painter != null) R.drawable.ic_format_paint else null, entries = sizeEntries("doc/text", null, { docStepSize(s, focus, it) }, {}).take(2) + listOf(
                     subMenu(tr(R.string.size_menu), "doc/size", sizeEntries("doc/text", docCommon(s, focus) { it.size ?: para?.baseSizeHp }, { docStepSize(s, focus, it) }, { docSetSize(s, focus, it) }).drop(2)),
                     subMenu(tr(R.string.menu_color), "doc/color", colorEntries("doc/color", docCommon(s, focus) { it.color }, { docSetColor(s, focus, it) })),
                     subMenu(tr(R.string.hl_menu), "doc/highlight", io.embodit.spatialoffice.ui.TextPalette.HIGHLIGHT.map { (name, v) ->
@@ -960,6 +1049,8 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                     MenuEntry(tr(R.string.fmt_sup), "doc/sup", checked = docCommon(s, focus) { it.vertAlign } == "superscript") { docVertAlign(s, focus, "superscript") },
                     MenuEntry(tr(R.string.fmt_sub), "doc/sub", checked = docCommon(s, focus) { it.vertAlign } == "subscript") { docVertAlign(s, focus, "subscript") },
                     MenuEntry(tr(R.string.clear_format), "doc/clear-format") { docClearFormat(s, focus) },
+                    // M5 d24: picks up the format at the caret; the next tap / drag over text puts it on (Ctrl+Shift+C)
+                    MenuEntry(tr(R.string.painter_menu), "doc/painter", checked = s.painter != null) { docPickPainter(graph, s, focus) },
                 ))
                 ToolMenu(tr(R.string.menu_paragraph), "doc/paragraph", enabled = canEdit && s.styled, entries = listOfNotNull(
                     MenuEntry(tr(R.string.bullets), "doc/bullets", checked = para?.style == ParaStyle.BULLET) { restyle(if (para?.style == ParaStyle.BULLET) ParaStyle.BODY else ParaStyle.BULLET) },
@@ -1001,6 +1092,9 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                     MenuEntry(tr(R.string.ins_table), "doc/table") { graph.show(s, Overlay.InsertTable(Win.DOC)) },
                     MenuEntry(tr(R.string.ins_rule), "doc/rule") { docInsertRule(s, focus) },
                     MenuEntry(tr(R.string.ins_pagebreak), "doc/pagebreak") { docInsertPageBreak(s, focus) },
+                    // M5 d31 header & footer; d29 a comment on the picked text / the caret's paragraph (Ctrl+Alt+M)
+                    if (s.canReview && !s.readOnly) MenuEntry(tr(R.string.hf_menu), "doc/header-footer") { graph.show(s, Overlay.HeaderFooter()) } else null,
+                    if (s.canReview && !s.readOnly) MenuEntry(tr(R.string.ins_comment), "doc/comment") { graph.startComment(s) } else null,
                 ))
                 ToolMenu(tr(R.string.more), "doc/more", entries = listOfNotNull(
                     // v0.6.0 (d25) the outline; (d23) copy / cut / paste with formats, the menu entries of Ctrl+C / X / V
@@ -1010,6 +1104,8 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                     MenuEntry(tr(R.string.edit_paste), "doc/paste") { docPaste(graph, s, focus, fromKey = false) },
                     MenuEntry(tr(R.string.find_replace), "doc/find") { graph.show(s, Overlay.Find(Win.DOC)) },
                     MenuEntry(tr(R.string.word_count), "doc/wordcount") { graph.show(s, Overlay.WordCount(Win.DOC)) },
+                    // M5 d36: text I add or delete is kept as a tracked change under my name (Ctrl+Shift+E)
+                    if (s.hasRevisions && !s.readOnly) MenuEntry(tr(R.string.track_menu), "doc/track", checked = s.tracking) { docToggleTracking(graph, s) } else null,
                     // d28 version history
                     MenuEntry(tr(R.string.menu_history), "doc/history") { graph.show(s, Overlay.History(Win.DOC)) },
                 ))
@@ -1073,3 +1169,40 @@ private fun styleShort(st: ParaStyle): String = tr(
         ParaStyle.BODY -> R.string.style_body
     },
 )
+
+/** M5 d24: [Text ▾ ▸ Format painter] / Ctrl+Shift+C: picks up the character format at the caret (a second pick puts it down). */
+fun docPickPainter(graph: Graph, s: DocSession, focus: DocFocus): Boolean {
+    if (s.painter != null) { s.dropPainter(); graph.say(s, graph.str(R.string.painter_dropped)); return true }
+    val p = focused(s, focus)?.takeIf { it.editable && !it.pageBreak }
+    if (p == null || !s.richText || s.readOnly) { graph.say(s, graph.str(R.string.painter_none)); return false }
+    return s.pickPainter(p.id, focus.selection.min.coerceIn(0, RichText.text(p.spans).length))
+}
+
+/** M5 d36: [More ▸ Track my edits] / Ctrl+Shift+E / the switch in the review pane. */
+fun docToggleTracking(graph: Graph, s: DocSession) {
+    val on = !s.tracking
+    if (graph.setTracking(s, on)) graph.say(s, graph.str(if (on) R.string.rv_track_on else R.string.rv_track_off))
+}
+
+/** M5 d24: the dark strip at the bottom of the content area while the format painter is in hand. */
+@Composable
+fun PainterChip(modifier: Modifier = Modifier) {
+    Row(
+        modifier.clip(RoundedCornerShape(24.dp)).background(androidx.compose.ui.graphics.Color(0xE6282828)).heightIn(min = 44.dp).padding(horizontal = 16.dp, vertical = 10.dp)
+            .semantics { contentDescription = "painter-chip" },
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+    ) {
+        com.pico.spatial.ui.design.Icon(painter = androidx.compose.ui.res.painterResource(R.drawable.ic_format_paint), contentDescription = null, modifier = Modifier.size(20.dp), tint = androidx.compose.ui.graphics.Color(0xFFFFD28A))
+        io.embodit.spatialoffice.ui.Txt(tr(R.string.painter_chip), "doc/painter-chip", style = PicoTheme.typography.labelLarge, color = androidx.compose.ui.graphics.Color.White, maxLines = 2)
+    }
+}
+
+/** M5 d31: the header (top of the paper) / footer (bottom) as a grey line; a tap opens [Header & footer]. */
+@Composable
+private fun HeaderFooterLine(text: String, tag: String, onClick: (() -> Unit)?) {
+    Text(
+        text, style = paraStyle(ParaStyle.BODY).copy(color = Ink.Hint, fontSize = 13.sp), maxLines = 2,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).then(if (onClick != null) Modifier.noKeyFocus().clickable { onClick() } else Modifier)
+            .padding(vertical = 12.dp).semantics { contentDescription = tag },
+    )
+}

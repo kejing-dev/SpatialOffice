@@ -73,6 +73,10 @@ sealed class Overlay {
      * in at [a]); [existing] when the caret was in a link already ([Remove link] is offered).
      */
     data class Link(override val win: Win = Win.DOC, val para: Int, val a: Int, val b: Int, val url: String, val text: String, val existing: Boolean) : Overlay()
+    /** M5 d31: [Insert ▸ Header & footer…]: the two texts shown at the top and bottom of every page. */
+    data class HeaderFooter(override val win: Win = Win.DOC) : Overlay()
+    /** M5 p32: [Slide ▸ Slide numbers & footer…]. */
+    data class SlideFooter(override val win: Win = Win.SLIDES) : Overlay()
     /** Flat preview of the sheet's charts (bar / line / pie). */
     data class ChartView(override val win: Win = Win.SHEET, val index: Int = -1) : Overlay()
     /** Pick a picture for the document or the current slide. */
@@ -103,6 +107,8 @@ class Graph(val app: Application) {
     val storage = Storage(app)
     val recents = RecentStore(app)
     val layouts = LayoutStore(app, storage)
+    /** M5: per file, review pane open / "Track my edits" on (app data, never in the file). */
+    val review = ReviewStore(app)
     val windows = WindowCtl(this)
     val accounts = Accounts(app, this).also { storage.accounts = it }
     val drafts = Drafts(app)
@@ -131,7 +137,12 @@ class Graph(val app: Application) {
     val deck: DeckSession? get() = activeOf(FileKind.SLIDES) as? DeckSession
 
     /** [s]'s window was used (pointer, key, toolbar): it is the active one of its kind from now on. */
+    /** M5: the file whose window was used last (any kind): what BACK / controller B acts on (painter, review pane). */
+    var lastUsed: Session? = null
+        private set
+
     fun activate(s: Session) {
+        if (byTag[s.tag] === s) lastUsed = s
         if (byTag[s.tag] !== s || files.active(s.editor.name)?.tag == s.tag) return
         if (files.activate(s.tag)) { openVersion++; Log.i(TAG, "ACTIVE ${s.editor} ${s.tag} ${s.ref.name}") }
     }
@@ -318,6 +329,9 @@ class Graph(val app: Application) {
         chartFollows(s)
         s.isNew = isNew
         s.tag = entry.tag
+        // M5: the pane and the "Track my edits" switch come back the way this file had them
+        if (s.canReview && !isNew) { s.reviewOpen = review.open(s.ref.key); s.tracking = s.hasRevisions && review.tracking(s.ref.key) }
+        s.trackAuthor = settings.value.myName
         byTag[s.tag] = s
         files.activate(s.tag)
         openVersion++
@@ -489,7 +503,7 @@ class Graph(val app: Application) {
                     val renamed = f != old.file
                     if (renamed) {
                         val ref = FileRef.Path(f)
-                        layouts.move(old.key, ref.key); recents.rename(old.key, ref, storage.display(ref)); moved(s, ref)
+                        layouts.move(old.key, ref.key); review.move(old.key, ref.key); recents.rename(old.key, ref, storage.display(ref)); moved(s, ref)
                     }
                     layouts.markBackedUp(s.ref.key, "")   // a file made here has no original to back up
                     if (renamed) history.move(old.key, s.ref.key)
@@ -817,13 +831,56 @@ class Graph(val app: Application) {
         return ok
     }
 
+    // ---------------------------------------------------------------- M5 review
+
+    /** Title bar [Review n]: opens / closes the pane inside [s]'s window. The window is not moved or resized. */
+    fun setReview(s: Session, open: Boolean) {
+        if (!s.canReview || s.reviewOpen == open) return
+        s.reviewOpen = open
+        if (!open) s.selComment = null
+        review.setOpen(s.ref.key, open)
+        Log.i(TAG, "REVIEW pane ${if (open) "open" else "closed"} ${s.kind} ${s.tag} ${s.ref.name} count=${s.reviewCount()}")
+    }
+
+    fun toggleReview(s: Session) = setReview(s, !s.reviewOpen)
+
+    /** Ctrl+Alt+M, Insert › Comment (documents, slides), Edit › Comment (sheets): the pane opens on its comment list, the text box takes the caret. */
+    fun startComment(s: Session) {
+        if (!s.canReview || s.readOnly) return
+        setReview(s, true)
+        s.reviewTab = 0; s.selComment = null; s.composeTick++
+        Log.i(TAG, "REVIEW compose ${s.kind} ${s.tag} onSelection=${s.commentOnSelection}")
+    }
+
+    /** "Track my edits" (documents): needs a name; without one the pane asks for it first. */
+    fun setTracking(s: Session, on: Boolean): Boolean {
+        if (!s.hasRevisions || s.readOnly) return false
+        if (on && settings.value.myName.isBlank()) { setReview(s, true); s.reviewTab = 1; return false }
+        s.trackAuthor = settings.value.myName
+        s.tracking = on
+        review.setTracking(s.ref.key, on)
+        Log.i(TAG, "REVIEW tracking=${s.tracking} author=${s.trackAuthor} ${s.ref.name}")
+        return true
+    }
+
+    /** Settings › My name, and the pane's one-time question: the name on my comments and tracked changes. */
+    fun setMyName(name: String) {
+        val n = name.trim().take(40)
+        settings.update { it.copy(myName = n) }
+        sessions.forEach { it.trackAuthor = n }
+        Log.i(TAG, "REVIEW myName set len=${n.length}")
+    }
+
     // ---------------------------------------------------------------- BACK / controller B (profile D60)
 
     fun onBack(where: String) {
-        val act = BackPolicy.decide(overlay != null, stageMode != null, windows.isOpen(Win.HOME), OpenMenus.any)
+        val used = lastUsed?.takeIf { byTag[it.tag] === it }
+        val act = BackPolicy.decide(overlay != null, stageMode != null, windows.isOpen(Win.HOME), OpenMenus.any, (used as? DocSession)?.painter != null, used?.reviewOpen == true)
         Log.i(TAG, "BACK $where -> $act")
         when (act) {
             BackAct.CLOSE_MENU -> OpenMenus.closeNewest()
+            BackAct.DROP_PAINTER -> (used as? DocSession)?.dropPainter()
+            BackAct.CLOSE_REVIEW -> used?.let { setReview(it, false) }
             BackAct.CLOSE_OVERLAY -> when (overlay) {
                 is Overlay.Unsaved -> answerUnsaved("cancel")
                 else -> overlay = null
@@ -833,7 +890,15 @@ class Graph(val app: Application) {
         }
     }
 
-    fun dump(): String =
+    /** M5: the review state of every open file, for the DUMP line. */
+    private fun reviewDump(): String = " review=[" + sessions.joinToString(",") { s ->
+        val c = runCatching { s.comments() }.getOrDefault(emptyList())
+        "${s.tag}:${if (s.reviewOpen) "open" else "closed"}:tab${s.reviewTab}:comments=${c.size}(open ${c.count { !it.resolved }}, replies ${c.sumOf { it.replies.size }}):revisions=${runCatching { s.revisions().size }.getOrDefault(0)}:sel=${s.selComment}:track=${s.tracking}"
+    } + "] myNameLen=${settings.value.myName.length} painter=${(doc as? DocSession)?.painter != null}"
+
+    fun dump(): String = dumpBase() + reviewDump()
+
+    private fun dumpBase(): String =
         "DUMP page=$homePage lang=${settings.value.lang} doc=${doc?.ref?.name}:${doc?.dirty} sheet=${sheet?.ref?.name}:${sheet?.dirty}@${sheet?.row},${sheet?.col} " +
             "deck=${deck?.ref?.name}:${deck?.dirty}#${deck?.current} overlay=${overlay?.javaClass?.simpleName} stage=$stageMode/$stageKind/$arrangement/$focus " +
             "windows=${windows.dump()} allFiles=${storage.hasAllFiles} blocks=${doc?.blockCount} slides=${deck?.slideCount} sel=${deck?.selected} " +

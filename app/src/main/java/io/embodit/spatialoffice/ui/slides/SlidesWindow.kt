@@ -151,7 +151,9 @@ fun SlidesWindow(tag: String? = null) {
             EditorTitleBar(graph, Win.SLIDES, s) {
                 ToolButton(tr(R.string.rehearse), "slides/rehearse", icon = R.drawable.ic_play, onClick = { graph.rehearse(s) })
             }
-            Row(Modifier.fillMaxWidth().weight(1f).padding(start = 32.dp, end = 32.dp, bottom = 52.dp)) {
+            // M5: the review pane inside the window, right of the canvas (the canvas goes from 960 to about 730 dp wide while it is open)
+            val pane = s.reviewOpen && s.canReview
+            Row(Modifier.fillMaxWidth().weight(1f).padding(start = if (pane) 24.dp else 32.dp, end = if (pane) 24.dp else 32.dp, bottom = 52.dp)) {
                 Thumbnails(s, Modifier.width(208.dp).fillMaxHeight())
                 Box(Modifier.width(20.dp))
                 // q6-1 (v0.2.6): the canvas takes what the notes area leaves, never the other way round
@@ -168,7 +170,11 @@ fun SlidesWindow(tag: String? = null) {
                                 .then(if (s.zoom > 100) Modifier.clip(RoundedCornerShape(8.dp)).horizontalScroll(rememberScrollState()).verticalScroll(rememberScrollState()) else Modifier),
                             contentAlignment = Alignment.Center,
                         ) {
-                            SlideCanvas(s, s.current, zw.dp, editable = true, modifier = Modifier.onGloballyPositioned { report.canvas = it.boundsInWindow() })
+                            Box {
+                                SlideCanvas(s, s.current, zw.dp, editable = true, modifier = Modifier.onGloballyPositioned { report.canvas = it.boundsInWindow() })
+                                // M5 p33: the slide's open comments as small bubbles (not in the rehearsal, not on thumbnails)
+                                CommentBubbles(graph, s, zw.dp)
+                            }
                         }
                         Box(Modifier.height(SlideFit.GAP_CANVAS.dp))
                         Row(
@@ -205,6 +211,10 @@ fun SlidesWindow(tag: String? = null) {
                             placeholder = { Txt(tr(R.string.notes_ph), "slides/notes-ph", color = PicoTheme.colorScheme.labelTertiary) },
                         )
                     }
+                }
+                if (pane) {
+                    Box(Modifier.width(16.dp))
+                    io.embodit.spatialoffice.ui.ReviewPane(graph, s)
                 }
             }
         }
@@ -356,8 +366,10 @@ fun SlideCanvas(s: DeckSession, index: Int, width: Dp, editable: Boolean, modifi
                 sh.lineRgb?.let { rgb -> val lw = ((sh.lineWidthEmu ?: 12700L) * perEmu).coerceAtLeast(0.5f).dp; box = box.border(lw, TextPalette.rgb(rgb), geomShape(sh.geom, w)) }
                 sh.fillRgb?.takeIf { sh.kind != ShapeKind.PICTURE }?.let { rgb -> box = box.background(Color(0xFF000000 or rgb.toLong()), geomShape(sh.geom, w)) }
                 // press and drag anywhere on the object moves it; a click picks it
-                val move = if (canDrag) Modifier.objectDrag(s, sh.id, pxPerEmu, null) else Modifier
-                val pick = if (editable) Modifier.noKeyFocus().clickable(interactionSource = remember(sh.id) { MutableInteractionSource() }, indication = null) { s.selected = sh.id; focusManager.clearFocus() } else Modifier
+                // M5 p32: the slide number and footer are placed by the layout: drawn, not picked or dragged ([Slide ▸ Slide numbers & footer] changes them)
+                val fixed = sh.footerKind != null
+                val move = if (canDrag && !fixed) Modifier.objectDrag(s, sh.id, pxPerEmu, null) else Modifier
+                val pick = if (editable && !fixed) Modifier.noKeyFocus().clickable(interactionSource = remember(sh.id) { MutableInteractionSource() }, indication = null) { s.selected = sh.id; focusManager.clearFocus() } else Modifier
                 when {
                     // v0.6.0 (p29): a group draws its objects inside its box (they move and scale with it) and is picked / dragged as one
                     sh.children != null -> Box(box.then(move).then(pick).semantics { contentDescription = "slide-group-${sh.id}" }) {
@@ -372,7 +384,7 @@ fun SlideCanvas(s: DeckSession, index: Int, width: Dp, editable: Boolean, modifi
                         )
                     }
                     sh.table != null -> SlideTable(s, index, sh, box.then(move).then(pick), perPt, editable && sh.cellsEditable && !s.readOnly)
-                    sh.kind == ShapeKind.TITLE || sh.kind == ShapeKind.BODY || sh.kind == ShapeKind.TEXT -> ShapeText(s, index, sh, box, move, perPt, editable, editable && sh.editable && !s.readOnly)
+                    sh.kind == ShapeKind.TITLE || sh.kind == ShapeKind.BODY || sh.kind == ShapeKind.TEXT -> ShapeText(s, index, sh, box, move, perPt, editable && !fixed, editable && sh.editable && !s.readOnly && !fixed)
                     else -> Box(
                         box.then(move).then(pick).border((width.value / 600f).coerceAtLeast(0.5f).dp, Ink.Line, RoundedCornerShape(4.dp)).semantics { contentDescription = "slide-object-${sh.id}" },
                         contentAlignment = Alignment.Center,
@@ -629,8 +641,10 @@ class BulletMarks(private val paras: List<TextPara>) : VisualTransformation {
 @Composable
 private fun ShapeText(s: DeckSession, slide: Int, sh: Shape, box: Modifier, move: Modifier, perPt: Float, canPick: Boolean, editable: Boolean) {
     val spans = remember(s.version, sh) { s.spansOf(sh) }
-    val biggest = spans.maxOfOrNull { it.size ?: 0 }?.takeIf { it > 0 }?.let { it / 2f } ?: (sh.fontPt ?: if (sh.kind == ShapeKind.TITLE) 40f else 20f)
-    val size = ((sh.fontPt ?: if (sh.kind == ShapeKind.TITLE) 40f else 20f) * perPt)
+    // M5 p32: a slide number / footer without a size of its own is small print (12 pt), like the layouts give it
+    val basePt = sh.fontPt ?: when { sh.footerKind != null -> 12f; sh.kind == ShapeKind.TITLE -> 40f; else -> 20f }
+    val biggest = spans.maxOfOrNull { it.size ?: 0 }?.takeIf { it > 0 }?.let { it / 2f } ?: basePt
+    val size = (basePt * perPt)
     val style = TextStyle(
         fontSize = size.sp, lineHeight = (biggest * perPt * 1.25f).sp,
         color = sh.colorRgb?.let { Color(0xFF000000 or it.toLong()) } ?: Ink.Text,
@@ -874,6 +888,8 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
                     MenuEntry(tr(R.string.dup_slide), "slides/dup") { s.duplicateSlide() },
                     // v0.6.0 (p28): the title bar's [Rehearse] starts at the current slide; this one at the first
                     MenuEntry(tr(R.string.rehearse_first), "slides/rehearse-first") { graph.rehearse(s, fromStart = true) },
+                    // M5 p32: slide number and footer placeholders
+                    if (!s.readOnly) MenuEntry(tr(R.string.snf_menu), "slides/number-footer") { graph.show(s, io.embodit.spatialoffice.platform.Overlay.SlideFooter()) } else null,
                     // M3 p26 page background (this slide / all slides)
                     if (!s.readOnly) backgroundEntries(graph, s) else null,
                     // d28 version history (the slides toolbar has no More)
@@ -883,6 +899,8 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
                     MenuEntry(tr(R.string.delete_slide), "slides/delete") { if (!s.deleteSlide()) graph.say(s, graph.str(R.string.last_slide)) },
                 ) + THEMES.map { (name, colors) -> MenuEntry(tr(R.string.theme_item, tr(name)), "slides/theme-item") { s.setColors(colors) } })
                 ToolMenu(tr(R.string.menu_insert), "slides/insert", entries = listOf(
+                    // M5 p33: a comment on this slide (or on the picked object); Ctrl+Alt+M
+                    MenuEntry(tr(R.string.ins_comment), "slides/comment") { graph.startComment(s) },
                     MenuEntry(tr(R.string.text_box), "slides/textbox") { s.addTextBox("") },
                     MenuEntry(tr(R.string.slide_table), "slides/table") { s.addTable() },
                     MenuEntry(tr(R.string.ins_picture), "slides/picture") { graph.pickImage(s) { b, e, w, h -> s.addPicture(b, e, w, h) } },
@@ -933,4 +951,38 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
             }
         },
     )
+}
+
+/**
+ * M5 p33: one 32 dp bubble (the author's initial) per open comment of the slide on screen, at the comment's place; a
+ * tap picks its card and opens the review pane. Comments at the same spot fan out to the right. The tap area is 48 dp.
+ */
+@Composable
+private fun androidx.compose.foundation.layout.BoxScope.CommentBubbles(graph: io.embodit.spatialoffice.platform.Graph, s: DeckSession, width: Dp) {
+    val list = remember(s.version, s.current) { runCatching { s.comments().filter { it.slide == s.current && !it.resolved } }.getOrDefault(emptyList()) }
+    if (list.isEmpty()) return
+    val height = width * (s.deck.heightEmu.toFloat() / s.deck.widthEmu)
+    val seen = HashMap<Pair<Int, Int>, Int>()
+    for (c in list) {
+        val x = width * c.x.coerceIn(0f, 1f); val y = height * c.y.coerceIn(0f, 1f)
+        val spot = (x.value / 24f).toInt() to (y.value / 24f).toInt()
+        val k = seen.getOrDefault(spot, 0); seen[spot] = k + 1
+        val on = s.selComment == c.id
+        val left = (x + 36.dp * k - 8.dp).coerceIn((-8).dp, (width - 40.dp).coerceAtLeast(0.dp))
+        val top = (y - 8.dp).coerceIn((-8).dp, (height - 40.dp).coerceAtLeast(0.dp))
+        Box(
+            Modifier.offset(left, top).size(48.dp)
+                .noKeyFocus().clickable(interactionSource = remember(c.id) { MutableInteractionSource() }, indication = null) { graph.setReview(s, true); s.pickComment(c.id) }
+                .semantics { contentDescription = "slide-comment" },
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier.size(32.dp).clip(androidx.compose.foundation.shape.CircleShape).background(io.embodit.spatialoffice.ui.ReviewLook.avatar(c.author))
+                    .then(if (on) Modifier.border(3.dp, Ink.Select, androidx.compose.foundation.shape.CircleShape) else Modifier.border(2.dp, Color.White, androidx.compose.foundation.shape.CircleShape)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(io.embodit.spatialoffice.core.review.ReviewText.initial(c.author), style = PicoTheme.typography.labelMedium, color = Color.White, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1)
+            }
+        }
+    }
 }

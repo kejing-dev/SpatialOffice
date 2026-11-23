@@ -737,4 +737,99 @@
     <string name="tpl_pitch" formatted="false">Product pitch</string>
     <string name="tpl_dark" formatted="false">Minimal dark</string>
     <string name="hide_menu" formatted="false">Hide</string>
+    <string name="review" formatted="false">Review</string>
+    <string name="review_n">Review %1$d</string>
+    <string name="review_close" formatted="false">Close the review pane</string>
+    <string name="rv_comments" formatted="false">Comments</string>
+    <string name="rv_comments_n">Comments %1$d</string>
+    <string name="rv_changes" formatted="false">Changes</string>
+    <string name="rv_changes_n">Changes %1$d</string>
+    <string name="rv_reply" formatted="false">Reply</string>
+    <string name="rv_resolve" formatted="false">Resolve</string>
+    <string name="rv_reopen" formatted="false">Reopen</string>
+    <string name="rv_resolved_n">%1$d resolved</string>
+    <string name="rv_post" formatted="false">Post</string>
+    <string name="rv_compose_sel" formatted="false">Write a comment on the selected text</string>
+    <string name="rv_compose_para" formatted="false">Write a comment on the paragraph you\'re in</string>
+    <string name="rv_compose_cell">Write a comment on cell %1$s</string>
+    <string name="rv_compose_obj" formatted="false">Write a comment on the selected object</string>
+    <string name="rv_compose_slide" formatted="false">Write a comment on this slide</string>
+    <string name="rv_as_me">Signed %1$s</string>
+    <string name="rv_reply_ph" formatted="false">Reply…</string>
+    <string name="rv_empty_doc" formatted="false">No comments yet. Select some text and type below.</string>
+    <string name="rv_empty_sheet" formatted="false">No comments yet. Pick a cell and type below.</string>
+    <string name="rv_empty_slides" formatted="false">No comments yet. Type below to comment on this slide.</string>
+    <string name="rv_empty_changes" formatted="false">No tracked changes. Turn the switch on to track your edits.</string>
+    <string name="rv_track" formatted="false">Track my edits</string>
+    <string name="rv_track_sub">While on, your edits are marked and signed %1$s</string>
+    <string name="rv_track_sub_noname" formatted="false">While on, your edits are marked. Add your name first.</string>
+    <string name="rv_track_on" formatted="false">Tracking your edits</string>
+    <string name="rv_track_off" formatted="false">Tracking is off. Edits go straight into the text.</string>
+    <string name="rv_accept" formatted="false">Accept</string>
+    <string name="rv_reject" formatted="false">Reject</string>
+    <string name="rv_accept_all" formatted="false">Accept all</string>
+    <string name="rv_reject_all" formatted="false">Reject all</string>
+    <string name="rv_added" formatted="false">Added</string>
+    <string name="rv_removed" formatted="false">Removed</string>
+    <string name="rv_accepted_n">Accepted %1$d. Ctrl+Z undoes all of them.</string>
+    <string name="rv_rejected_n">Rejected %1$d. Ctrl+Z undoes all of them.</string>
+    <string name="rv_resolved_snack" formatted="false">Resolved. You can reopen it under Resolved.</string>
+    <string name="rv_deleted_snack" formatted="false">Deleted. Ctrl+Z brings it back.</string>
+    <string name="rv_sub_both">%1$d comments, %2$d changes · tap Review</string>
+    <string name="rv_sub_comments">%1$d comments · tap Review</string>
+    <string name="rv_sub_changes">%1$d changes · tap Review</string>
+    <string name="rv_note" formatted="false">Note</string>
+    <string name="rv_note_sub" formatted="false">Old-style note: edit only, no replies</string>
+    <string name="rv_legacy" formatted="false">Old-style comment</string>
+    <string name="rv_legacy_sub" formatted="false">Old-style comment: edit only, no replies</string>
+    <string name="rv_write_new" formatted="false">Write a new one</string>
+    <string name="rv_edit" formatted="false">Edit</string>
+    <string name="rv_delete" formatted="false">Delete</string>
+    <string name="rv_save_edit" formatted="false">Save</string>
+    <string name="rv_slide_n">Slide %1$d</string>
+    <string name="rv_other_slides" formatted="false">Other slides</string>
+    <string name="rv_fmt_changed" formatted="false">Formatting changed (view only for now)</string>
+    <string name="rv_moved" formatted="false">Moved text (view only for now)</string>
+    <string name="rv_more" formatted="false">More</string>
+    <string name="rv_cant_here" formatted="false">Can\'t comment here. Try another paragraph.</string>
+    <string name="rv_note_here" formatted="false">This cell has an old-style note. Tap Edit on its card.</string>
+    <string name="rv_just_now" formatted="false">Just now</string>
+    <string name="my_name" formatted="false">My name</string>
+    <string name="my_name_sub" formatted="false">Shown on your comments and changes</string>
+    <string name="my_name_ask" formatted="false">Comments need a name. What should we call you?</string>
+    <string name="my_name_ph" formatted="false">e.g. Sam</string>
+    <string name="my_name_use" formatted="false">Use this</string>
+    <string name="my_name_ask_sub" formatted="false">Change it later in Settings › My name</string>
+    <string name="painter" formatted="false">Format painter</string>
+    <string name="painter_menu" formatted="false">Format painter Ctrl+Shift+C</string>
+    <string name="painter_chip" formatted="false">Painter\'s loaded: tap the text to paint · Esc to drop it</string>
+    <string name="painter_done" formatted="false">Painted. Ctrl+Z to undo.</string>
+    <string name="painter_dropped" formatted="false">Painter dropped</string>
+    <string name="painter_none" formatted="false">Put the cursor in some text first</string>
+    <string name="hf_title" formatted="false">Header &amp; footer</string>
+    <string name="hf_menu" formatted="false">Header &amp; footer…</string>
+    <string name="hf_header" formatted="false">Header</string>
+    <string name="hf_footer" formatted="false">Footer</string>
+    <string name="hf_hint" formatted="false">Same on every page. Page numbers come with page view later.</string>
+    <string name="hf_tap_header" formatted="false">Tap to edit the header</string>
+    <string name="hf_tap_footer" formatted="false">Tap to edit the footer</string>
+    <string name="hf_saved" formatted="false">Header and footer updated</string>
+    <string name="hf_readonly" formatted="false">This header / footer has pictures or fields. View only for now.</string>
+    <string name="snf_title" formatted="false">Slide numbers &amp; footer</string>
+    <string name="snf_menu" formatted="false">Slide numbers &amp; footer…</string>
+    <string name="snf_number" formatted="false">Slide number</string>
+    <string name="snf_footer" formatted="false">Footer</string>
+    <string name="snf_not_title" formatted="false">Not on the title slide</string>
+    <string name="snf_this" formatted="false">This slide</string>
+    <string name="snf_all" formatted="false">All slides</string>
+    <string name="snf_done">%1$d slides updated. Ctrl+Z to undo.</string>
+    <string name="ins_comment" formatted="false">Comment Ctrl+Alt+M</string>
+    <string name="track_menu" formatted="false">Track my edits Ctrl+Shift+E</string>
+    <string name="how_to_review" formatted="false">Review: comments and changes</string>
+    <string name="how_to_review_keys" formatted="false">Ctrl+Alt+M comment; Ctrl+Shift+E track my edits; Ctrl+Shift+C format painter</string>
+    <string name="how_to_review_hand" formatted="false">Look at Review in the title bar and pinch; pinch Reply, Resolve or Accept on a card</string>
+    <string name="how_to_review_ctrl" formatted="false">Point at Review and pull the trigger; B closes the pane</string>
+    <string name="key_comment" formatted="false">Add a comment</string>
+    <string name="key_track" formatted="false">Track my edits · format painter (documents)</string>
+    <string name="ok_good" formatted="false">OK</string>
 </resources>

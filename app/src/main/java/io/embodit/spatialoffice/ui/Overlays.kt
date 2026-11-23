@@ -78,6 +78,8 @@ fun SharedOverlays(graph: Graph, win: Win, tag: String? = null) {
         is Overlay.InsertTable -> (s as? DocSession)?.let { InsertTableDialog(graph, it) }
         is Overlay.Link -> (s as? DocSession)?.let { LinkSheet(graph, it, o) }
         is Overlay.ImagePick -> ImagePickSheet(graph, win)
+        is Overlay.HeaderFooter -> (s as? DocSession)?.let { HeaderFooterSheet(graph, it) }
+        is Overlay.SlideFooter -> (s as? io.embodit.spatialoffice.platform.DeckSession)?.let { SlideFooterSheet(graph, it) }
         is Overlay.SignOut -> SignOutDialog(graph, o.provider)
         is Overlay.ChartView -> (s as? SheetSession)?.let { ChartSheet(graph, it, o.index) }
         else -> {}
@@ -222,6 +224,9 @@ private fun ShortcutsSheet(graph: Graph) {
         R.string.key_move to "← ↑ → ↓ · Tab",
         R.string.key_edit to "F2 · Enter · Esc",
         R.string.key_sum to "Alt+=",
+        // M5: comment (all three kinds); track my edits and the format painter (documents)
+        R.string.key_comment to "Ctrl+Alt+M",
+        R.string.key_track to "Ctrl+Shift+E · Ctrl+Shift+C",
         R.string.key_slide to "PageUp / PageDown",
         R.string.key_focus to "Ctrl+Alt+← / →",
         R.string.key_arr to "Ctrl+Alt+1 / 2 / 3",

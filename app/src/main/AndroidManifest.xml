@@ -84,10 +84,10 @@
                 <data android:mimeType="text/html" />
             </intent-filter>
 
-            <!-- Default container: the home window (Planar, 1120 x 660 dp, design W0; v0.2.1 shorter so short pages are not half empty) -->
+            <!-- Default container: the home window (Planar, 1120 x 720 dp, design W0; v0.7.0: 60 dp higher for the Settings row "My name") -->
             <meta-data android:name="pico.spatial.windowcontainer.id" android:value="SpatialOfficeHome" />
             <meta-data android:name="pico.spatial.windowcontainer.style" android:value="1" />
-            <meta-data android:name="pico.spatial.windowcontainer.defaultsize" android:value="1120x660" />
+            <meta-data android:name="pico.spatial.windowcontainer.defaultsize" android:value="1120x720" />
             <meta-data android:name="pico.spatial.windowcontainer.defaultsize.unit" android:value="dp" />
             <meta-data android:name="pico.spatial.windowcontainer.resizetype" android:value="1" />
             <meta-data android:name="pico.spatial.windowcontainer.resizerestriction" android:value="0" />

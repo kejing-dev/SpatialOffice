@@ -19,6 +19,8 @@ import io.embodit.spatialoffice.core.docx.ParaStyle
 import io.embodit.spatialoffice.core.docx.Paragraph
 import io.embodit.spatialoffice.core.docx.Run
 import io.embodit.spatialoffice.core.docx.TableBlock
+import io.embodit.spatialoffice.core.docx.toRun
+import io.embodit.spatialoffice.core.docx.toSpan
 import io.embodit.spatialoffice.core.files.FileKind
 import io.embodit.spatialoffice.core.pptx.PptxDeck
 import io.embodit.spatialoffice.core.pptx.SlideLayoutKind
@@ -74,6 +76,9 @@ sealed class UiBlock {
  * [a] = sheet, [b] = row, [c] = column (of the cell's input). Presentation: [a] = slide, [b] = shape id or −1 for the
  * speaker notes. [start] / [len]: the characters matched in that text.
  */
+/** M5: one comment's stretch inside a paragraph ([start] == [end]: its words were deleted, nothing is marked). */
+data class CommentMark(val id: String, val start: Int, val end: Int)
+
 data class FindHit(val a: Int, val b: Int = 0, val c: Int = 0, val start: Int, val len: Int)
 
 /** v0.6.0 (d25): one line of a document's outline: paragraph id, level (0 title, 1–3 headings), text. */
@@ -190,6 +195,76 @@ abstract class Session(ref: FileRef, val kind: FileKind) {
 
     fun saved() { dirty = false; isNew = false; version++ }
 
+    // ---- M5 (v0.7.0) review: comments for all three kinds, tracked changes for documents ----
+
+    /** The file kind has comments (docx / xlsx / pptx): the title bar shows [Review]. */
+    open val canReview: Boolean get() = false
+    /** The review pane has a second list, tracked changes (documents). */
+    open val hasRevisions: Boolean get() = false
+    /** The review pane of this file's window is open. Kept per file in app data ([ReviewStore]), never in the file. */
+    var reviewOpen by mutableStateOf(false)
+    /** 0 = comments, 1 = tracked changes. */
+    var reviewTab by mutableIntStateOf(0)
+    /** The comment whose card is picked in the pane (and whose place is marked in the content). */
+    var selComment by mutableStateOf<String?>(null)
+    /** "Track my edits" (d36): while on, text I add or delete in a document is stored as a tracked change under my name. */
+    var tracking by mutableStateOf(false)
+    /** Name written on the tracked changes made while [tracking]; set by the window from Settings › My name. */
+    var trackAuthor: String = ""
+
+    open fun comments(): List<io.embodit.spatialoffice.core.review.ReviewComment> = emptyList()
+    open fun revisions(): List<io.embodit.spatialoffice.core.review.Revision> = emptyList()
+    /** True when a new comment would hang on picked text / a picked object; false = on the caret's paragraph, the current cell or the slide. */
+    open val commentOnSelection: Boolean get() = false
+    /** Adds a comment at the current place; returns its id, or null when it could not be added there. */
+    open fun addComment(author: String, text: String): String? = null
+    open fun replyComment(id: String, author: String, text: String): Boolean = false
+    open fun resolveComment(id: String, resolved: Boolean): Boolean = false
+    open fun editComment(id: String, text: String): Boolean = false
+    open fun deleteComment(id: String): Boolean = false
+    /** Brings the comment's place into view and marks it (paragraph, cell, slide). */
+    open fun showComment(c: io.embodit.spatialoffice.core.review.ReviewComment) {}
+    open fun acceptRevision(id: String): Boolean = false
+    open fun rejectRevision(id: String): Boolean = false
+    open fun acceptAllRevisions(): Int = 0
+    open fun rejectAllRevisions(): Int = 0
+    open fun showRevision(r: io.embodit.spatialoffice.core.review.Revision) {}
+
+    /** Bumped by Ctrl+Alt+M / Insert › Comment: the pane's text box takes the caret. */
+    var composeTick by mutableIntStateOf(0)
+    /** Why the last [addComment] could not be done here (a string resource), shown instead of the general message. */
+    var reviewHint: Int? = null
+    /** The card's quote line for a sheet comment ("C2", or "Sheet2 · C2" on another sheet). */
+    open fun commentPlace(c: io.embodit.spatialoffice.core.review.ReviewComment): String = c.quote
+    /** What a new comment would hang on, by name (the current cell). */
+    open fun commentTargetName(): String = ""
+    /** The revision picked in the pane: its paragraph is brought into view. */
+    var selRevision by mutableStateOf<String?>(null)
+
+    /** Number on the [Review n] button: open comment threads plus tracked changes that can still be accepted or rejected. */
+    fun reviewCount(): Int = runCatching { comments().count { !it.resolved } + revisions().count { it.canResolve } }.getOrDefault(0)
+
+    /** Picks the card of [id] (opening the pane's comment list); null clears the pick. */
+    fun pickComment(id: String?) {
+        selComment = id
+        if (id != null) reviewTab = 0
+    }
+
+    /** ISO-8601 time written on new comments and tracked changes. */
+    fun nowIso(): String = java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString()
+
+    /** One review change as one undo step; false (and nothing recorded) when [f] changed nothing or failed. */
+    protected fun reviewEdit(what: String, f: () -> Boolean): Boolean {
+        if (readOnly) return false
+        val before = runCatching { serialize() }.getOrNull() ?: return false
+        // a change that threw half-way is rolled back, so the file in memory never holds half an edit
+        val ok = runCatching { f() }.onFailure { android.util.Log.w(TAG, "REVIEW $what failed: $it"); runCatching { restore(before) } }.getOrDefault(false)
+        if (!ok) return false
+        pushUndo(before); changed()
+        android.util.Log.i(TAG, "REVIEW $what ok comments=${runCatching { comments().size }.getOrDefault(-1)} revisions=${runCatching { revisions().size }.getOrDefault(-1)}")
+        return true
+    }
+
     // ---- find (v0.3.0: one find sheet for all three kinds)
 
     /** The hit the find sheet points at: the window scrolls to it and highlights it ([findTick] bumps on every jump). */
@@ -252,12 +327,108 @@ class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File)
     val styled: Boolean get() = docx != null || plain?.markdown == true
     val richText: Boolean get() = docx != null
 
+    // ---- M5 review (documents): comments d29, tracked changes d30 / d36, header & footer d31, format painter d24 ----
+    override val canReview: Boolean get() = docx != null
+    override val hasRevisions: Boolean get() = docx != null
+    override fun comments(): List<io.embodit.spatialoffice.core.review.ReviewComment> = docx?.comments() ?: emptyList()
+    override fun revisions(): List<io.embodit.spatialoffice.core.review.Revision> = docx?.revisions() ?: emptyList()
+
+    /** Paragraph with the caret and the characters picked in it, as the paragraph editor last reported them. */
+    var caretRange by mutableStateOf(0 to 0)
+        private set
+    fun noteCaret(id: Int, a: Int, b: Int) { caretBlock = id; if (caretRange != (a to b)) caretRange = a to b }
+    override val commentOnSelection: Boolean get() = caretRange.second > caretRange.first && para(caretBlock) != null
+
+    /** Open comments by the paragraph they start in: the yellow markers on the paper. */
+    fun commentMarks(): Map<Int, List<CommentMark>> =
+        comments().filter { !it.resolved && it.block >= 0 }.groupBy({ it.block }, { CommentMark(it.id, it.start, it.end) })
+
+    /** On the picked characters; with only a caret, on its whole paragraph; with no caret yet, on the first paragraph. */
+    override fun addComment(author: String, text: String): String? {
+        val d = docx ?: return null
+        val target = para(caretBlock) ?: d.blocks.firstOrNull { it is Paragraph && it.text.isNotBlank() } as? Paragraph ?: d.blocks.firstOrNull { it is Paragraph } as? Paragraph
+        if (target == null) { reviewHint = null; return null }
+        val len = target.text.length
+        val (a, b) = if (target.id == caretBlock) caretRange.first.coerceIn(0, len) to caretRange.second.coerceIn(0, len) else 0 to 0
+        var id: String? = null
+        reviewHint = null
+        reviewEdit("add para=${target.id} $a..$b") { id = d.addComment(target.id, if (b > a) a else 0, if (b > a) b else 0, author, text, nowIso()); true }
+        return id
+    }
+    override fun replyComment(id: String, author: String, text: String): Boolean = reviewEdit("reply") { docx!!.replyComment(id, author, text, nowIso()); true }
+    override fun resolveComment(id: String, resolved: Boolean): Boolean = reviewEdit("resolve=$resolved") { docx!!.setCommentResolved(id, resolved); true }
+    override fun editComment(id: String, text: String): Boolean = reviewEdit("edit") { docx!!.editComment(id, text); true }
+    override fun deleteComment(id: String): Boolean = reviewEdit("delete") { docx!!.deleteComment(id); true }
+    override fun showComment(c: io.embodit.spatialoffice.core.review.ReviewComment) { if (c.block >= 0) { scrollTarget = c.block; scrollTick++ } }
+
+    override fun acceptRevision(id: String): Boolean = reviewEdit("accept") { docx!!.acceptRevision(id) }
+    override fun rejectRevision(id: String): Boolean = reviewEdit("reject") { docx!!.rejectRevision(id) }
+    override fun acceptAllRevisions(): Int { var n = 0; reviewEdit("accept all") { n = docx!!.acceptAll(); n > 0 }; return n }
+    override fun rejectAllRevisions(): Int { var n = 0; reviewEdit("reject all") { n = docx!!.rejectAll(); n > 0 }; return n }
+    override fun showRevision(r: io.embodit.spatialoffice.core.review.Revision) { selRevision = r.id; if (r.block >= 0) { scrollTarget = r.block; scrollTick++ } }
+
+    /**
+     * d36: [plain] is what the editor made of [old] without tracking. Returns the spans to store (what I removed kept as a
+     * tracked deletion, what I typed as my tracked insertion) and where the caret goes in their text; null when not tracking.
+     * [caretBefore] / [caretAfter]: the field's caret before and after the edit (the same = forward Delete: the caret steps past the struck text).
+     */
+    fun trackedEdit(old: List<Span>, plain: List<Span>, caretBefore: Int, caretAfter: Int): Pair<List<Span>, Int>? {
+        if (docx == null || !tracking || trackAuthor.isBlank()) return null
+        val r = io.embodit.spatialoffice.core.docx.Tracking.mergeAt(old.map { it.toRun() }, plain.map { it.toRun() }, trackAuthor, nowIso())
+        val caret = if (r.caret < r.deletedEnd && caretBefore == caretAfter) r.deletedEnd else r.caret
+        return r.runs.map { it.toSpan() } to caret
+    }
+
+    fun headerText(): String? = docx?.headerText()
+    fun footerText(): String? = docx?.footerText()
+    val headerEditable: Boolean get() = docx?.headerEditable == true
+    val footerEditable: Boolean get() = docx?.footerEditable == true
+    /** null = leave as it is. True when something changed. */
+    fun setHeaderFooter(header: String?, footer: String?): Boolean {
+        val d = docx ?: return false
+        val h = header?.takeIf { headerEditable && it != (d.headerText() ?: "") }
+        val f = footer?.takeIf { footerEditable && it != (d.footerText() ?: "") }
+        if (h == null && f == null) return false
+        return reviewEdit("header/footer") { d.setHeaderFooter(h, f); true }.also { android.util.Log.i(TAG, "HEADERFOOTER header='${d.headerText()}' footer='${d.footerText()}' ok=$it") }
+    }
+
+    /** The character format in hand (d24): an opaque token of the document, put on the next text that is tapped or dragged over; null = none. */
+    var painter by mutableStateOf<DocxDocument.RunFormat?>(null)
+        private set
+    fun pickPainter(id: Int, offset: Int): Boolean {
+        val d = docx ?: return false
+        painter = runCatching { d.runFormatAt(id, offset) }.onFailure { android.util.Log.w(TAG, "PAINTER pick failed: $it") }.getOrNull()
+        android.util.Log.i(TAG, "PAINTER picked para=$id offset=$offset ok=${painter != null}")
+        return painter != null
+    }
+    fun dropPainter() { if (painter != null) { painter = null; android.util.Log.i(TAG, "PAINTER dropped") } }
+    /** Puts the format in hand on characters [a, b) of paragraph [id] (a == b: the whole paragraph), then lets go of it. */
+    fun paint(id: Int, a: Int, b: Int): Boolean {
+        val d = docx ?: return false
+        val token = painter ?: return false
+        val p = para(id)?.takeIf { it.editable } ?: return false
+        val ok = reviewEdit("paint para=$id $a..$b") { d.paintFormat(token, p.id, a, b); true }
+        painter = null
+        android.util.Log.i(TAG, "PAINTER applied para=$id range=$a..$b ok=$ok")
+        return ok
+    }
+    /** The same over a selection that crosses paragraphs: every part takes the format, as one undo step. */
+    fun paintParts(): Boolean {
+        val d = docx ?: return false
+        val token = painter ?: return false
+        val parts = selectedParts().filter { it.first.editable && it.third > it.second }
+        if (parts.isEmpty()) return false
+        val ok = reviewEdit("paint parts=${parts.size}") { parts.forEach { (p, a, b) -> d.paintFormat(token, p.id, a, b) }; true }
+        painter = null; crossSel = null
+        return ok
+    }
+
     fun blocks(): List<UiBlock> {
         docx?.let { d ->
             return d.blocks.map { b ->
                 when (b) {
                     is Paragraph -> UiBlock.Para(
-                        b.id, b.style, b.runs.map { Span(it.text, it.bold, it.italic, it.underline, it.src, it.strike, it.color, it.highlight, it.size, it.link, it.vertAlign) }, b.editable, b.readOnlyWhy, b.align,
+                        b.id, b.style, b.runs.map { it.toSpan() }, b.editable, b.readOnlyWhy, b.align,
                         b.level, b.indentTw, b.lineSpacing, b.spaceBefore, b.spaceAfter, b.baseSizeHp, b.rule,
                     )
                     is TableBlock -> UiBlock.Table(b.id, b.rows, b.widthPct, b.merges)
@@ -281,7 +452,7 @@ class DocSession(ref: FileRef, kind: FileKind, bytes: ByteArray, cacheDir: File)
 
     init { counted() }
 
-    private fun runs(spans: List<Span>) = spans.map { Run(it.text, it.bold, it.italic, it.underline, it.src, it.strike, it.color, it.highlight, it.size, it.link, it.vertAlign) }
+    private fun runs(spans: List<Span>) = spans.map { it.toRun() }
 
     private fun para(id: Int): Paragraph? = docx?.blocks?.firstOrNull { it.id == id } as? Paragraph
 
@@ -1295,6 +1466,39 @@ class SheetSession(ref: FileRef, kind: FileKind, bytes: ByteArray) : Session(ref
         return runCatching { book.addChart(sheet, range, title, type) }.onSuccess { changed() }.isSuccess
     }
 
+    // ---- M5 review (s35): comments (threads) and old-style notes on cells ----
+    override val canReview: Boolean get() = !isCsv
+    override fun comments(): List<io.embodit.spatialoffice.core.review.ReviewComment> = if (isCsv) emptyList() else book.comments()
+    /** A1 → kind of every commented cell of the sheet on screen (the corner markers of the grid). */
+    fun commentCells(): Map<String, io.embodit.spatialoffice.core.review.CommentKind> = if (isCsv) emptyMap() else runCatching { book.commentCells(sheet) }.getOrDefault(emptyMap())
+    override fun commentPlace(c: io.embodit.spatialoffice.core.review.ReviewComment): String =
+        if (c.sheet < 0 || c.sheet == sheet) c.cell else (book.sheetNames.getOrNull(c.sheet) ?: "") + " · " + c.cell
+    override fun commentTargetName(): String = io.embodit.spatialoffice.core.xlsx.A1.name(row, col)
+    override fun addComment(author: String, text: String): String? {
+        val ref = io.embodit.spatialoffice.core.xlsx.A1.name(row, col)
+        val at = runCatching { book.commentAt(sheet, ref) }.getOrNull()
+        // an old-style note cannot take replies: its card is picked and says so
+        if (at != null && at.kind == io.embodit.spatialoffice.core.review.CommentKind.NOTE) { reviewHint = io.embodit.spatialoffice.R.string.rv_note_here; pickComment(at.id); return null }
+        reviewHint = null
+        var id: String? = null
+        // a cell that has a thread already: what is written becomes a reply in it
+        reviewEdit("add $ref") { id = if (at != null) { book.replyComment(at.id, author, text, nowIso()); at.id } else book.addComment(sheet, ref, author, text, nowIso()); true }
+        return id
+    }
+    override fun replyComment(id: String, author: String, text: String): Boolean = reviewEdit("reply") { book.replyComment(id, author, text, nowIso()); true }
+    override fun resolveComment(id: String, resolved: Boolean): Boolean = reviewEdit("resolve=$resolved") { book.setCommentResolved(id, resolved); true }
+    override fun editComment(id: String, text: String): Boolean = reviewEdit("edit") { book.editComment(id, text); true }
+    override fun deleteComment(id: String): Boolean = reviewEdit("delete") { book.deleteComment(id); true }
+    override fun showComment(c: io.embodit.spatialoffice.core.review.ReviewComment) {
+        val rc = io.embodit.spatialoffice.core.xlsx.A1.parse(c.cell) ?: return
+        if (c.sheet in 0 until sheetCount && c.sheet != sheet) { sheet = c.sheet; counted() }
+        select(rc.first, rc.second); showTick++
+    }
+    /** Bumped when a comment card asks for its cell: the grid scrolls it into view. */
+    var showTick by mutableIntStateOf(0)
+    /** The comment on the selected cell, picked in the pane when the pane is open (a tap on a marked cell). */
+    fun commentHere(): io.embodit.spatialoffice.core.review.ReviewComment? = if (isCsv) null else runCatching { book.commentAt(sheet, io.embodit.spatialoffice.core.xlsx.A1.name(row, col)) }.getOrNull()
+
     override fun serialize(): ByteArray = if (isCsv) book.toCsv(0).toByteArray(Charsets.UTF_8) else book.save()
     override fun restore(bytes: ByteArray) { book = if (isCsv) fromCsv(String(bytes, Charsets.UTF_8)) else XlsxWorkbook.open(bytes) }
     override fun firstLine(): String = (0 until minOf(book.cols(0), 8)).map { book.cell(0, 0, it).display }.firstOrNull { it.isNotBlank() } ?: ""
@@ -1963,6 +2167,39 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
         }
         edits++; outsideEdits++; changed()
         return hits.size
+    }
+
+    // ---- M5 review (p33): comments on slides; (p32) slide number and footer ----
+    override val canReview: Boolean get() = true
+    override fun comments(): List<io.embodit.spatialoffice.core.review.ReviewComment> = deck.comments()
+    override val commentOnSelection: Boolean get() = pickedShape() != null
+    /** Where a new comment goes: the picked object's top-right corner, else the slide's top-left. */
+    private fun commentSpot(): Pair<Float, Float> {
+        val sh = pickedShape() ?: return 0.02f to 0.03f
+        val w = deck.widthEmu.coerceAtLeast(1L).toFloat(); val h = deck.heightEmu.coerceAtLeast(1L).toFloat()
+        return ((sh.x + sh.w) / w).coerceIn(0f, 0.97f) to (sh.y / h).coerceIn(0f, 0.95f)
+    }
+    override fun addComment(author: String, text: String): String? {
+        val (x, y) = commentSpot()
+        var id: String? = null
+        reviewEdit("add slide=$current") { id = deck.addComment(current, x, y, author, text, nowIso()); true }
+        return id
+    }
+    override fun replyComment(id: String, author: String, text: String): Boolean = reviewEdit("reply") { deck.replyComment(id, author, text, nowIso()); true }
+    override fun resolveComment(id: String, resolved: Boolean): Boolean = reviewEdit("resolve=$resolved") { deck.setCommentResolved(id, resolved); true }
+    override fun editComment(id: String, text: String): Boolean = reviewEdit("edit") { deck.editComment(id, text); true }
+    override fun deleteComment(id: String): Boolean = reviewEdit("delete") { deck.deleteComment(id); true }
+    override fun showComment(c: io.embodit.spatialoffice.core.review.ReviewComment) {
+        if (c.slide in 0 until slideCount && c.slide != current) { current = c.slide; selected = -1 }
+    }
+    fun footerInfo(slide: Int = current): io.embodit.spatialoffice.core.pptx.SlideFooter = runCatching { deck.footerInfo(slide) }.getOrDefault(io.embodit.spatialoffice.core.pptx.SlideFooter(false, false, ""))
+    /** [Slide ▾] › Slide numbers & footer: on this slide ([all] = false) or on every slide; returns how many slides changed. */
+    fun setFooter(all: Boolean, number: Boolean, footer: Boolean, text: String, hideOnTitle: Boolean): Int {
+        var n = 0
+        reviewEdit("footer all=$all number=$number footer=$footer hideOnTitle=$hideOnTitle") { n = deck.setFooter(if (all) null else listOf(current), number, footer, text, hideOnTitle); n > 0 }
+        if (n > 0) edits++
+        android.util.Log.i(TAG, "FOOTER slides=$n number=$number footer=$footer text='${text.take(24)}' hideOnTitle=$hideOnTitle")
+        return n
     }
 
     override fun serialize(): ByteArray = deck.save()

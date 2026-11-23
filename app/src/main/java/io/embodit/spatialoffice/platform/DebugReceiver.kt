@@ -372,6 +372,52 @@ object DebugReceiver {
             "obj-rot" -> g.deck?.setRotation(arg.toInt())
             "obj-rotby" -> g.deck?.rotateBy(arg.toInt())
             "rotdrag" -> g.deck?.let { d -> if (d.beginRotate(d.selected)) { d.rotateTo(io.embodit.spatialoffice.core.layout.Rotation.snap(arg.toFloat())); Log.i(TAG, "ROTATE debug ${d.selected} -> ${d.dragRot} changed=${d.endRotate()}") } }
+            // ---- M5 review: each command calls the function its control calls ----
+            "review" -> { val p = arg.split(" "); g.session(win(p[0]))?.let { s -> when (p.getOrElse(1) { "toggle" }) {
+                "open" -> g.setReview(s, true); "close" -> g.setReview(s, false)
+                "comments" -> { g.setReview(s, true); s.reviewTab = 0 }; "changes" -> { g.setReview(s, true); s.reviewTab = 1 }
+                else -> g.toggleReview(s) } } }
+            "myname" -> g.setMyName(arg)
+            "compose" -> g.session(win(arg))?.let { g.startComment(it) }
+            "comment" -> { val p = arg.split(" ", limit = 2); g.session(win(p[0]))?.let { s ->
+                val me = g.settings.value.myName
+                if (me.isBlank()) Log.w(TAG, "REVIEW comment refused: no name (as the pane: Post stays off until a name is given)")
+                else { val id = s.addComment(me, p.getOrElse(1) { "" }); if (id != null) { g.setReview(s, true); s.pickComment(id) } else Log.w(TAG, "REVIEW comment not added here hint=${s.reviewHint}") } } }
+            "comment-pick" -> { val p = arg.split(" "); g.session(win(p[0]))?.let { s ->
+                val c = s.comments().filter { !it.resolved }.getOrNull(p.getOrElse(1) { "0" }.toInt())
+                if (c != null) { g.setReview(s, true); s.pickComment(c.id); s.showComment(c) } else s.pickComment(null) } }
+            "comment-reply" -> { val p = arg.split(" ", limit = 3); g.session(win(p[0]))?.let { s ->
+                s.comments().filter { !it.resolved }.getOrNull(p[1].toInt())?.let { c -> s.replyComment(c.id, g.settings.value.myName, p.getOrElse(2) { "" }); s.pickComment(c.id) } } }
+            "comment-resolve" -> { val p = arg.split(" "); g.session(win(p[0]))?.let { s ->
+                val on = p.getOrElse(2) { "1" } != "0"
+                s.comments().filter { it.resolved != on }.getOrNull(p.getOrElse(1) { "0" }.toInt())?.let { c -> s.resolveComment(c.id, on) } } }
+            "comment-edit" -> { val p = arg.split(" ", limit = 3); g.session(win(p[0]))?.let { s ->
+                s.comments().getOrNull(p[1].toInt())?.let { c -> s.editComment(c.id, p.getOrElse(2) { "" }) } } }
+            "comment-del" -> { val p = arg.split(" "); g.session(win(p[0]))?.let { s -> s.comments().getOrNull(p.getOrElse(1) { "0" }.toInt())?.let { c -> s.deleteComment(c.id) } } }
+            "track" -> g.doc?.let { g.setTracking(it, arg != "0") }
+            "rev-accept" -> g.doc?.let { d -> d.revisions().filter { it.canResolve }.getOrNull(arg.ifEmpty { "0" }.toInt())?.let { d.acceptRevision(it.id) } }
+            "rev-reject" -> g.doc?.let { d -> d.revisions().filter { it.canResolve }.getOrNull(arg.ifEmpty { "0" }.toInt())?.let { d.rejectRevision(it.id) } }
+            "rev-accept-all" -> g.doc?.let { d -> val n = d.acceptAllRevisions(); if (n > 0) g.say(d, g.str(io.embodit.spatialoffice.R.string.rv_accepted_n, n), g.str(io.embodit.spatialoffice.R.string.undo_short)) { d.undo() } }
+            "rev-reject-all" -> g.doc?.let { d -> val n = d.rejectAllRevisions(); if (n > 0) g.say(d, g.str(io.embodit.spatialoffice.R.string.rv_rejected_n, n), g.str(io.embodit.spatialoffice.R.string.undo_short)) { d.undo() } }
+            // format painter: `pick <para index> [offset]`, `apply <para index> [a b]`, `drop` (indexes count editable paragraphs)
+            "painter" -> g.doc?.let { d ->
+                val p = arg.split(" ")
+                val paras = d.blocks().filterIsInstance<UiBlock.Para>().filter { it.editable }
+                when (p[0]) {
+                    "pick" -> paras.getOrNull(p.getOrElse(1) { "0" }.toInt())?.let { d.pickPainter(it.id, p.getOrElse(2) { "0" }.toInt()) }
+                    "apply" -> paras.getOrNull(p.getOrElse(1) { "0" }.toInt())?.let { d.paint(it.id, p.getOrElse(2) { "0" }.toInt(), p.getOrElse(3) { "0" }.toInt()) }
+                    else -> d.dropPainter()
+                }
+            }
+            // header / footer: `hf header=<text>|footer=<text>` writes them; `hf-sheet` shows the sheet
+            "hf" -> g.doc?.let { d ->
+                val m = arg.split("|").mapNotNull { it.split("=", limit = 2).takeIf { kv -> kv.size == 2 }?.let { kv -> kv[0].trim() to kv[1] } }.toMap()
+                d.setHeaderFooter(m["header"], m["footer"])
+            }
+            "hf-sheet" -> g.doc?.let { g.show(it, Overlay.HeaderFooter()) }
+            // slide number / footer: `snf <all|this> <number 0|1> <footer 0|1> <notOnTitle 0|1> <text>`; `snf-sheet` shows the sheet
+            "snf" -> g.deck?.let { d -> val p = arg.split(" ", limit = 5); d.setFooter(p[0] == "all", p.getOrElse(1) { "1" } != "0", p.getOrElse(2) { "1" } != "0", p.getOrElse(4) { "" }, p.getOrElse(3) { "1" } != "0") }
+            "snf-sheet" -> g.deck?.let { g.show(it, Overlay.SlideFooter()) }
             "dump" -> {}
             // ---- v0.6.0 (M4): every command calls the same session function as its menu entry / dialog button
             "new-tpl" -> io.embodit.spatialoffice.core.templates.DocTemplate.values().firstOrNull { it.name.equals(arg, true) }?.let { g.newFile(FileKind.DOC, it) }

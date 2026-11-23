@@ -60,6 +60,14 @@ fun statusLine(graph: Graph, s: Session): String {
         else -> tr(R.string.status_saved, path)
     }
     if (s.isNew) return head
+    // M5: a file with comments or tracked changes says so while its pane is closed (the pane never opens by itself)
+    if (s.canReview && !s.reviewOpen && !s.dirty) {
+        val c = runCatching { s.comments().count { !it.resolved } }.getOrDefault(0)
+        val r = runCatching { s.revisions().count { it.canResolve } }.getOrDefault(0)
+        if (c > 0 && r > 0) return tr(R.string.rv_sub_both, c, r)
+        if (c > 0) return tr(R.string.rv_sub_comments, c)
+        if (r > 0) return tr(R.string.rv_sub_changes, r)
+    }
     val side = graph.filesVersion.let { graph.storage.sidecar(s.ref)?.exists() == true } || graph.settings.value.layoutStore == LayoutStoreMode.FILE
     return head + " · " + tr(if (side) R.string.status_layout_file else R.string.status_layout_device)
 }
@@ -92,6 +100,7 @@ fun EditorTitleBar(graph: Graph, win: Win, s: Session, extra: (@Composable () ->
                     if (graph.overlay is Overlay.Compat) graph.overlay = null else graph.show(s, Overlay.Compat(win))
                 })
                 extra?.invoke()
+                ReviewButton(graph, s)
                 ZoomMenu(s)
                 WindowsMenu(graph, s)
                 Box {
@@ -129,6 +138,8 @@ fun FileTools(graph: Graph, win: Win, s: Session, spreadLabel: Int = R.string.sp
 
 /** Shortcuts every editor shares. Returns true when the event was used. */
 fun commonKeys(graph: Graph, s: Session, e: KeyEvent): Boolean {
+    // M5: Ctrl+Alt+M writes a comment (the pane opens and its text box takes the caret); menus have the same entry
+    if (e.type == KeyEventType.KeyDown && e.isCtrlPressed && e.isAltPressed && e.key == Key.M) { graph.startComment(s); return true }
     if (e.type != KeyEventType.KeyDown || !e.isCtrlPressed || e.isAltPressed) return false
     when (e.key) {
         Key.S -> graph.save(s)
