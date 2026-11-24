@@ -110,7 +110,7 @@ key_sum	表格：自动求和	Sheet: AutoSum
 key_slide	演示：上一页 / 下一页	Slides: previous / next
 key_focus	铺开：换面前的那一块	Spread: change the piece in front
 key_arr	铺开：并排 / 环绕 / 分层	Spread: row / arc / layers
-key_collapse	铺开 / 预演：收起、结束	Spread / rehearsal: collapse, end
+key_collapse	铺开 / 排练：收起、结束	Spread / rehearsal: collapse, end
 doc_title	文档	Document
 sheet_title	表格	Spreadsheet
 slides_title	演示	Presentation
@@ -203,8 +203,8 @@ chart_turn_left	向左转	Turn left
 chart_turn_right	向右转	Turn right
 chart_close	关闭图表	Close chart
 chart_closed_file	表格已关闭	The spreadsheet was closed
-rehearse	预演	Rehearse
-notes	讲者备注（预演时浮在你左手边）	Speaker notes (float on your left during rehearsal)
+rehearse	排练	Rehearse
+notes	讲者备注（排练时浮在你左手边）	Speaker notes (float on your left during rehearsal)
 notes_ph	写下这一页要讲的话	What you will say on this slide
 add_slide	新建页	New slide
 layout_btn	版式	Layout
@@ -231,7 +231,7 @@ layout_saved	布局已记下（不改文件），下次打开原样还原	Layout
 piece_n	%1$d / %2$d	%1$d / %2$d
 rh_prev	上一页 ←	Previous ←
 rh_next	下一页 →	Next →
-end_rehearsal	结束预演	End rehearsal
+end_rehearsal	结束排练	End rehearsal
 rh_next_label	下一页	Next slide
 rh_last	最后一页	Last slide
 rh_notes_empty	这一页没有备注	No notes for this slide
@@ -704,7 +704,7 @@ doc_copied_n	已复制 %1$d 段，格式一起带走	Copied %1$d paragraphs with
 doc_cut_n	已剪切 %1$d 段，格式一起带走	Cut %1$d paragraphs with their formats
 doc_pasted_n	已粘贴 %1$d 段	Pasted %1$d paragraphs
 multi_hint	已选 %1$d 个对象 · 对齐、组合在 [所选对象] 里	%1$d objects picked · Align and Group are under [Object]
-rehearse_first	从第 1 页开始预演	Rehearse from slide 1
+rehearse_first	从第 1 页开始排练	Rehearse from slide 1
 obj_need	先选至少 %1$d 个对象	Pick at least %1$d objects first
 obj_arrange_none	已经排好了，没有要动的	Already lined up, nothing to move
 obj_multi_add	加入多选（已选 %1$d 个）	Add to selection (%1$d picked)
@@ -836,3 +836,11 @@ how_to_review_ctrl	射线指着 [审阅] 按扳机；B 键收起审阅栏	Point 
 key_comment	写批注	Add a comment
 key_track	记下我的修改 · 格式刷（文档）	Track my edits · format painter (documents)
 ok_good	好	OK
+
+# motion branch: watching apart from rehearsing; storyline by chapters
+watch	观看	Watch
+end_watch	结束观看	End
+watch_entered	观看：只有大屏。翻页用下面的箭头或键盘 ← →	Watching: just the screen. Use the arrows below or ← → to change slides
+arr_chapters	章节	Chapters
+chapter_n	第 %1$d 章	Chapter %1$d
+chapter_count	%1$d 页	%1$d slides

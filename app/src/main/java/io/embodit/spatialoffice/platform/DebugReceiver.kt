@@ -61,6 +61,7 @@ object DebugReceiver {
             "dismiss" -> g.overlay = null
             "spread" -> g.spread(kind(arg))
             "rehearse" -> g.rehearse()
+            "watch" -> g.watch()
             "collapse" -> g.collapse()
             "arr" -> g.arrange(Arrangement.values().first { it.name.equals(arg, true) })
             "focus" -> g.focusOn(arg.toInt())

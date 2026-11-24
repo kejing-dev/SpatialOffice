@@ -7,7 +7,10 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /** The three arrangements on the layout bar. */
-enum class Arrangement { ROW, ARC, LAYERS }
+/**
+ * CHAPTERS (decks, the storyline): the chapter in front is laid out on the arc, every other chapter is one pile at its side.
+ */
+enum class Arrangement { ROW, ARC, LAYERS, CHAPTERS }
 
 /**
  * Where one panel sits, in seat coordinates: origin = head position when the layout was entered (yaw only),
@@ -57,6 +60,8 @@ object LayoutRules {
         val sheet = kind.editor == FileKind.SHEET
         val gap = if (sheet) 0f else if (kind.editor == FileKind.SLIDES) 0.04f else 0.04f
         return when (arrangement) {
+            // without chapter data the storyline is the plain arc ([chapterPoses] is the real thing)
+            Arrangement.CHAPTERS -> poses(kind, count, Arrangement.ARC, focus, radiusSetting)
             Arrangement.ROW -> List(count) { i -> PanelPose((i - f) * (size.width + gap), 0f, -r, 0f, size.width, size.height) }
             Arrangement.ARC -> {
                 val step = stepDeg(size.width, gap, r)
@@ -78,6 +83,39 @@ object LayoutRules {
                 }
             }
         }
+    }
+
+    /** Scale of a chapter's pile, and how many slides of the chapter in front are laid out at once (around the focused one). */
+    const val PILE_SCALE = 0.55f
+    const val CHAPTER_WINDOW = 7
+    const val PILES_PER_SIDE = 2
+
+    /**
+     * The storyline by chapters. [chapters] = (first slide, slide count) of each chapter in order; [focus] = the slide in
+     * front. Returns the pose of every piece that is shown, by slide index:
+     * - the slides of the focused slide's chapter on the arc, the focused one straight ahead (at most [CHAPTER_WINDOW] of them);
+     * - for each of the nearest [PILES_PER_SIDE] chapters before and after: its first slide as a pile, smaller, further round
+     *   the same circle on its side (earlier chapters to the left, later ones to the right), a little lower.
+     */
+    fun chapterPoses(kind: FileKind, chapters: List<Pair<Int, Int>>, focus: Int, radiusSetting: Float): Map<Int, PanelPose> {
+        val out = LinkedHashMap<Int, PanelPose>()
+        if (chapters.isEmpty()) return out
+        val size = panelSize(kind)
+        val r = radius(kind, radiusSetting)
+        val step = stepDeg(size.width, 0.04f, r)
+        val cur = chapters.indexOfFirst { focus >= it.first && focus < it.first + it.second }.coerceAtLeast(0)
+        val (first, n) = chapters[cur]
+        val f = focus.coerceIn(first, first + n - 1)
+        val from = if (n <= CHAPTER_WINDOW) first else (f - CHAPTER_WINDOW / 2).coerceIn(first, first + n - CHAPTER_WINDOW)
+        val to = minOf(first + n, from + CHAPTER_WINDOW) - 1
+        for (i in from..to) out[i] = onRing((i - f) * step, r, 0f, size, 1f, 1f, true)
+        val pileStep = stepDeg(size.width * PILE_SCALE, 0.07f, r)
+        val gapDeg = step / 2f + pileStep / 2f + 2f
+        for (k in 1..PILES_PER_SIDE) {
+            chapters.getOrNull(cur - k)?.let { c -> out[c.first] = onRing((from - f) * step - gapDeg - (k - 1) * pileStep, r, -0.06f, size, PILE_SCALE, 1f, false) }
+            chapters.getOrNull(cur + k)?.let { c -> out[c.first] = onRing((to - f) * step + gapDeg + (k - 1) * pileStep, r, -0.06f, size, PILE_SCALE, 1f, false) }
+        }
+        return out
     }
 
     /** Angle between neighbours so that panels of [width] sit edge to edge (plus [gap]) on a circle of radius [r]. */

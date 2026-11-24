@@ -1570,6 +1570,16 @@ class DeckSession(ref: FileRef, bytes: ByteArray) : Session(ref, FileKind.SLIDES
     var current by mutableIntStateOf(0)
     private var edits = 0
     private val images = HashMap<String, Bitmap?>()
+    @Volatile private var chapterCache: Pair<PptxDeck, List<io.embodit.spatialoffice.core.pptx.Chapter>>? = null
+
+    /** The storyline's chapters ([PptxDeck.chapters]); read every frame by the Stage, so kept until the deck changes. */
+    fun chapters(): List<io.embodit.spatialoffice.core.pptx.Chapter> {
+        val d = deck
+        chapterCache?.let { if (it.first === d && it.second.sumOf { c -> c.count } == d.slides.size) return it.second }
+        val list = runCatching { d.chapters() }.getOrElse { io.embodit.spatialoffice.core.pptx.Chapters.groups(d.slides.size) }
+        chapterCache = d to list
+        return list
+    }
 
     fun image(part: String): Bitmap? = images.getOrPut(part) { deck.partBytes(part)?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() } }
 

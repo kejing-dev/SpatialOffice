@@ -609,7 +609,9 @@ class Graph(val app: Application) {
         val rec = layouts.load(s.ref)
         stageTag = s.tag
         stageKind = kind.editor
-        arrangement = rec?.arrangement ?: Arrangement.ARC
+        // a deck opens as its storyline by chapters; chapters are a deck's only
+        arrangement = (rec?.arrangement ?: if (s is DeckSession) Arrangement.CHAPTERS else Arrangement.ARC)
+            .let { if (it == Arrangement.CHAPTERS && s !is DeckSession) Arrangement.ARC else it }
         focus = pieceOf(s, rec?.focus).coerceIn(0, (s.pieceCount - 1).coerceAtLeast(0))
         stageMode = StageMode.SPREAD
         Log.i(TAG, "SPREAD enter kind=$stageKind arr=$arrangement focus=$focus pieces=${s.pieceCount}")
@@ -637,17 +639,29 @@ class Graph(val app: Application) {
         return true
     }
 
-    fun rehearse(d: DeckSession? = deck, fromStart: Boolean = false) {
+    /**
+     * Watching (true) or rehearsing (false) on the big screen. Watching is for a deck someone sent: only the screen and a
+     * small bar. Rehearsing adds the speaker's panels (notes, next slide, clock) on both sides.
+     */
+    var watching by mutableStateOf(false)
+        private set
+
+    /** Title bar [Watch]: the deck on the big screen, nothing else. */
+    fun watch(d: DeckSession? = deck, fromStart: Boolean = false) { rehearse(d, fromStart, watch = true) }
+
+    fun rehearse(d: DeckSession? = deck, fromStart: Boolean = false, watch: Boolean = false) {
         d ?: return
         if (fromStart) d.current = 0
+        watching = watch
         rehearsalBlack = false; rehearsalPicking = false; rehearsalTyped = ""
         activate(d)
         stageTag = d.tag
         stageKind = FileKind.SLIDES
         stageMode = StageMode.REHEARSAL
         rehearsalStart = android.os.SystemClock.elapsedRealtime()
-        Log.i(TAG, "REHEARSAL enter slide=${d.current}")
+        Log.i(TAG, "${if (watch) "WATCH" else "REHEARSAL"} enter slide=${d.current}")
         windows.enterStage()
+        if (watch) say(Win.STAGE, str(R.string.watch_entered))
     }
 
     /**
@@ -674,7 +688,18 @@ class Graph(val app: Application) {
         windows.stageClosed(stageSession?.let { refOf(it) })
     }
 
-    fun arrange(a: Arrangement) { arrangement = a; remember(); Log.i(TAG, "SPREAD arr=$a") }
+    fun arrange(a: Arrangement) {
+        if (a == Arrangement.CHAPTERS && stageSession !is DeckSession) return
+        arrangement = a; remember(); Log.i(TAG, "SPREAD arr=$a")
+    }
+
+    /** Storyline by chapters: the chapter before / after the one in front comes to the front (its first slide). */
+    fun chapterBy(delta: Int) {
+        val d = stageSession as? DeckSession ?: return
+        val ch = d.chapters()
+        val to = ch.getOrNull(io.embodit.spatialoffice.core.pptx.Chapters.indexOf(ch, focus) + delta) ?: return
+        focusOn(to.first)
+    }
 
     fun focusBy(delta: Int) = focusOn(focus + delta)
 

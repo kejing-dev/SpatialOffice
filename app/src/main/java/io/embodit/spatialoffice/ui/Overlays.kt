@@ -229,7 +229,7 @@ private fun ShortcutsSheet(graph: Graph) {
         R.string.key_track to "Ctrl+Shift+E · Ctrl+Shift+C",
         R.string.key_slide to "PageUp / PageDown",
         R.string.key_focus to "Ctrl+Alt+← / →",
-        R.string.key_arr to "Ctrl+Alt+1 / 2 / 3",
+        R.string.key_arr to "Ctrl+Alt+1 / 2 / 3 / 4",
         R.string.key_collapse to "Esc",
     )
     Sheet(

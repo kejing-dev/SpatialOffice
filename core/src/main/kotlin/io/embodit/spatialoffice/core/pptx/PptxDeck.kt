@@ -95,6 +95,40 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
     }
 
     /**
+     * The deck's chapters for the storyline. Nothing is written to the file.
+     * 1. the file's own sections (`sectionLst` in the presentation part), when they cover the slides in order;
+     * 2. else a slide on a title or section-header layout starts a chapter (its title is the chapter's name), when that
+     *    gives at least two chapters and not one per slide;
+     * 3. else groups of [Chapters.GROUP] slides.
+     */
+    fun chapters(): List<Chapter> {
+        val parts = slideParts()
+        val n = parts.size
+        if (n == 0) return emptyList()
+        val px = pkg.text(presPart) ?: return Chapters.groups(n)
+        fun titleOf(i: Int): String = slides.getOrNull(i)?.shapes?.firstOrNull { it.kind == ShapeKind.TITLE }
+            ?.paras?.joinToString(" ") { it.text.replace('\n', ' ') }?.trim().orEmpty()
+        // 1. sections: <p14:section name="…"><p14:sldIdLst><p14:sldId id="256"/>…
+        val idToIndex = HashMap<String, Int>()
+        slideEntries(px).forEachIndexed { i, (e, _) -> Xml.attr(px, e, "id")?.let { idToIndex[it] = i } }
+        val secs = SECTION.findAll(px).mapNotNull { m ->
+            val idx = SECTION_SLIDE.findAll(m.groupValues[2]).mapNotNull { idToIndex[it.groupValues[1]] }.toList()
+            if (idx.isEmpty()) null else Xml.unescape(m.groupValues[1]) to idx
+        }.toList()
+        if (secs.size >= 2) {
+            val flat = secs.flatMap { it.second }
+            if (flat == (0 until n).toList()) return secs.map { (name, idx) -> Chapter(name, idx.first(), idx.size, "sections") }
+        }
+        // 2. title / section-header layouts
+        val starts = (0 until n).filter { i ->
+            relTarget(parts[i], "/slideLayout")?.let { doc(it) }?.let { d -> d.root?.let { Xml.attr(d.xml, it, "type") } }.let { it == "title" || it == "secHead" }
+        }
+        val byTitles = Chapters.ofStarts(n, starts, starts.associateWith { titleOf(it) }, "titles")
+        if (byTitles.size >= 2 && byTitles.size < n) return byTitles
+        return Chapters.groups(n)
+    }
+
+    /**
      * Replaces the paragraphs of an editable shape. `a:bodyPr`, `a:lstStyle`, each paragraph's `a:pPr` and its first
      * run's `a:rPr` are kept; a paragraph whose text, level and bullet are unchanged is kept exactly as it was.
      * @throws IllegalStateException when the shape is not editable.
@@ -1889,6 +1923,8 @@ class PptxDeck private constructor(private val pkg: OoxmlPackage, private var so
     }
 
     companion object {
+        private val SECTION = Regex("<(?:\\w+:)?section\\b[^>]*\\bname=\"([^\"]*)\"[^>]*>(.*?)</(?:\\w+:)?section>", RegexOption.DOT_MATCHES_ALL)
+        private val SECTION_SLIDE = Regex("<(?:\\w+:)?sldId\\b[^>]*\\bid=\"(\\d+)\"")
         /** Opens an existing deck. Nothing is modified until an edit method is called. */
         fun open(bytes: ByteArray): PptxDeck = PptxDeck(OoxmlPackage.read(bytes), bytes.copyOf())
 

@@ -80,6 +80,33 @@ data class Slide(val index: Int, val shapes: List<Shape>, val notes: String, val
 
 enum class SlideLayoutKind { TITLE, TITLE_BODY, TWO_COLUMN, BLANK }
 
+/**
+ * One chapter of a deck for the storyline: slides [first] until [first] + [count]. [name] is "" when the file gives
+ * none (the app then writes "Slides 6–10"). [source]: "sections" (the file's own sections), "titles" (a title or
+ * section-header slide starts a chapter) or "groups" (five slides each).
+ */
+data class Chapter(val name: String, val first: Int, val count: Int, val source: String) {
+    val last: Int get() = first + count - 1
+    operator fun contains(slide: Int): Boolean = slide in first..last
+}
+
+/** Chapters from the slides that start one, or in even groups. Pure; `ChaptersTest`. */
+object Chapters {
+    const val GROUP = 5
+
+    /** [starts] = slide indexes that begin a chapter (slide 0 always does); [names] by start index. */
+    fun ofStarts(count: Int, starts: Collection<Int>, names: Map<Int, String>, source: String): List<Chapter> {
+        if (count <= 0) return emptyList()
+        val s = (starts.filter { it in 0 until count } + 0).distinct().sorted()
+        return s.mapIndexed { i, a -> Chapter(names[a].orEmpty(), a, (s.getOrNull(i + 1) ?: count) - a, source) }
+    }
+
+    fun groups(count: Int, size: Int = GROUP): List<Chapter> = ofStarts(count, (0 until count step size).toList(), emptyMap(), "groups")
+
+    /** Index of the chapter that holds [slide] (0 when none does). */
+    fun indexOf(chapters: List<Chapter>, slide: Int): Int = chapters.indexOfFirst { slide in it }.coerceAtLeast(0)
+}
+
 /** Drawing-order moves of [PptxDeck.reorderShape]. FRONT / BACK: to the top / bottom; FORWARD / BACKWARD: one step. */
 enum class ZOrder { FRONT, BACK, FORWARD, BACKWARD }
 

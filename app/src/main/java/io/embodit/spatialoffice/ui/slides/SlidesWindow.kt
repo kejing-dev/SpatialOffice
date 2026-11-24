@@ -150,7 +150,9 @@ fun SlidesWindow(tag: String? = null) {
         val s = session as? DeckSession ?: return@EditorWindow
         Column(Modifier.fillMaxSize().onPreviewKeyEvent { e -> commonKeys(graph, s, e) || slideKeys(graph, s, e) }) {
             EditorTitleBar(graph, Win.SLIDES, s) {
-                ToolButton(tr(R.string.rehearse), "slides/rehearse", icon = R.drawable.ic_play, onClick = { graph.rehearse(s) })
+                // watching (just the big screen) is the main way to look at a deck; rehearsing adds the speaker's panels
+                ToolButton(tr(R.string.watch), "slides/watch", icon = R.drawable.ic_play, onClick = { graph.watch(s) })
+                ToolButton(tr(R.string.rehearse), "slides/rehearse", onClick = { graph.rehearse(s) })
             }
             // M5: the review pane inside the window, right of the canvas (the canvas goes from 960 to about 730 dp wide while it is open)
             val pane = s.reviewOpen && s.canReview

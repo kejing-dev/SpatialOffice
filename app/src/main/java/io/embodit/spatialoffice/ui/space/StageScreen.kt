@@ -83,6 +83,9 @@ import io.embodit.spatialoffice.ui.sheet.SheetGrid
 import io.embodit.spatialoffice.ui.sheet.sheetKeys
 import io.embodit.spatialoffice.ui.slides.SlideCanvas
 import io.embodit.spatialoffice.core.layout.SlideFit
+import io.embodit.spatialoffice.core.pptx.Chapter
+import io.embodit.spatialoffice.core.pptx.Chapters
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.BoxWithConstraints
 import kotlinx.coroutines.delay
 
@@ -169,6 +172,9 @@ fun stageKeys(graph: Graph, e: KeyEvent): Boolean {
         Key.One -> graph.arrange(Arr.ROW)
         Key.Two -> graph.arrange(Arr.ARC)
         Key.Three -> graph.arrange(Arr.LAYERS)
+        Key.Four -> graph.arrange(Arr.CHAPTERS)
+        Key.PageUp -> graph.chapterBy(-1)
+        Key.PageDown -> graph.chapterBy(1)
         else -> return false
     }
     return true
@@ -189,6 +195,11 @@ private fun PiecePanel(graph: Graph, index: Int?) {
     val focused = index == graph.focus
     val (w, h) = StagePanels.pieceDp(graph.stageKind)
     val far = graph.arrangement == Arr.LAYERS && kotlin.math.abs(index - graph.focus) > 1
+    // storyline by chapters: a slide of another chapter stands for that whole chapter (its pile)
+    val chapters = if (graph.arrangement == Arr.CHAPTERS && s is DeckSession) s.chapters() else emptyList()
+    val home = if (chapters.isEmpty()) -1 else Chapters.indexOf(chapters, index)
+    val pile = home >= 0 && home != Chapters.indexOf(chapters, graph.focus)
+    if (pile) { PilePanel(graph, s as DeckSession, chapters[home], home, w, h); return }
     Box(
         Modifier.size(w.dp, h.dp).alpha(if (far) 0.72f else 1f).clip(RoundedCornerShape(20.dp)).background(Ink.Paper)
             .border(if (focused) 4.dp else 1.dp, if (focused) Ink.Select else Ink.Line, RoundedCornerShape(20.dp))
@@ -218,6 +229,33 @@ private fun PiecePanel(graph: Graph, index: Int?) {
     }
 }
 
+/**
+ * A chapter that is not in front: its first slide with two sheets showing behind it, and a caption (name, slide count)
+ * big enough to read at the pile's small size. Click it and the chapter comes to the front.
+ */
+@Composable
+private fun PilePanel(graph: Graph, s: DeckSession, chapter: Chapter, number: Int, w: Int, h: Int) {
+    val name = chapter.name.ifBlank { tr(R.string.chapter_n, number + 1) }
+    val shape = RoundedCornerShape(20.dp)
+    Box(Modifier.size(w.dp, h.dp)) {
+        if (chapter.count > 2) Box(Modifier.align(Alignment.TopCenter).padding(horizontal = 44.dp).fillMaxWidth().height(60.dp).clip(shape).background(Ink.Header).border(1.dp, Ink.Line, shape))
+        if (chapter.count > 1) Box(Modifier.align(Alignment.TopCenter).padding(top = 14.dp, start = 22.dp, end = 22.dp).fillMaxWidth().height(60.dp).clip(shape).background(Ink.Opaque).border(1.dp, Ink.Line, shape))
+        Box(Modifier.padding(top = 28.dp).fillMaxSize().clip(shape).background(Ink.Paper).border(1.dp, Ink.Line, shape), contentAlignment = Alignment.Center) {
+            SlideCanvas(s, chapter.first, SlideFit.fit(w.toFloat(), (h - 28).toFloat(), s.deck.widthEmu, s.deck.heightEmu).w.dp, editable = false)
+            Row(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(96.dp).background(Ink.Text.copy(alpha = 0.86f)).padding(horizontal = 28.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                val big = PicoTheme.typography.headlineLarge.copy(fontSize = 40.sp, fontWeight = FontWeight.SemiBold)
+                // the name is the file's own text: as much of it as fits; the slide count always shows
+                com.pico.spatial.ui.design.Text(text = name, modifier = Modifier.weight(1f), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = big, color = Ink.Paper)
+                Txt(tr(R.string.chapter_count, chapter.count), "stage/chapter-${number + 1}", style = big, color = Ink.Paper.copy(alpha = 0.82f))
+            }
+        }
+        Box(Modifier.fillMaxSize().noKeyFocus().clickable { graph.focusOn(chapter.first) }.semantics { contentDescription = "chapter-${number + 1}" })
+    }
+}
+
 @Composable
 private fun Glass(width: Int, height: Int, content: @Composable () -> Unit) {
     Box(Modifier.size(width.dp, height.dp).clip(RoundedCornerShape(36.dp)).backgroundMaterial(enable = true, style = Material.Regular), contentAlignment = Alignment.Center) { content() }
@@ -227,10 +265,12 @@ private fun Glass(width: Int, height: Int, content: @Composable () -> Unit) {
 @Composable
 private fun LayoutBar(graph: Graph) {
     val count = graph.stageSession?.pieceCount ?: 0
+    // a deck has its storyline by chapters where the other kinds have the row (Ctrl+Alt+1 still lays a deck out in a row)
+    val deck = graph.stageSession is DeckSession
     Glass(1000, 112) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Segments(
-                listOf(Arr.ROW to tr(R.string.arr_row), Arr.ARC to tr(R.string.arr_arc), Arr.LAYERS to tr(R.string.arr_layers)),
+                listOf(if (deck) Arr.CHAPTERS to tr(R.string.arr_chapters) else Arr.ROW to tr(R.string.arr_row), Arr.ARC to tr(R.string.arr_arc), Arr.LAYERS to tr(R.string.arr_layers)),
                 graph.arrangement, "stage/arr", itemWidth = 92.dp,
             ) { graph.arrange(it) }
             ToolIcon(R.drawable.ic_arrow_left, tr(R.string.focus_prev), onClick = { graph.focusBy(-1) }, enabled = graph.focus > 0)
@@ -280,13 +320,14 @@ private fun RehearsalBar(graph: Graph) {
             ToolIcon(R.drawable.ic_arrow_left, tr(R.string.rh_prev), onClick = { rehearsalStep(graph, -1) }, enabled = d.current > 0)
             Txt(if (graph.rehearsalTyped.isNotEmpty()) tr(R.string.rh_typed, graph.rehearsalTyped) else tr(R.string.piece_n, d.current + 1, n), "rehearsal/page", Modifier.width(96.dp), style = PicoTheme.typography.titleLarge, weight = FontWeight.Bold, align = androidx.compose.ui.text.style.TextAlign.Center)
             ToolIcon(R.drawable.ic_arrow_right, tr(R.string.rh_next), onClick = { rehearsalStep(graph, 1) }, enabled = d.current < n - 1)
-            Txt(elapsedLabel(graph.rehearsalStart), "rehearsal/timer", Modifier.width(88.dp), style = PicoTheme.typography.titleLarge, align = androidx.compose.ui.text.style.TextAlign.Center)
+            // the clock and the black screen are a speaker's tools: not shown while watching
+            if (!graph.watching) Txt(elapsedLabel(graph.rehearsalStart), "rehearsal/timer", Modifier.width(88.dp), style = PicoTheme.typography.titleLarge, align = androidx.compose.ui.text.style.TextAlign.Center)
             Box(Modifier.weight(1f))
             // p28: jump to a slide, black screen
             SecondaryButton(tr(R.string.rh_goto), "rehearsal/goto", onClick = { graph.rehearsalPicking = true })
-            SecondaryButton(tr(if (graph.rehearsalBlack) R.string.rh_unblack else R.string.rh_black), "rehearsal/black", onClick = { graph.toggleBlack() })
+            if (!graph.watching) SecondaryButton(tr(if (graph.rehearsalBlack) R.string.rh_unblack else R.string.rh_black), "rehearsal/black", onClick = { graph.toggleBlack() })
             SecondaryButton(tr(R.string.recenter), "rehearsal/recenter", icon = R.drawable.ic_rotate, onClick = { graph.recenter() })
-            PrimaryButton(tr(R.string.end_rehearsal), "rehearsal/end", onClick = { graph.collapse() })
+            PrimaryButton(tr(if (graph.watching) R.string.end_watch else R.string.end_rehearsal), "rehearsal/end", onClick = { graph.collapse() })
         }
     }
     }

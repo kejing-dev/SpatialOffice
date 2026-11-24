@@ -832,4 +832,10 @@
     <string name="key_comment" formatted="false">Add a comment</string>
     <string name="key_track" formatted="false">Track my edits · format painter (documents)</string>
     <string name="ok_good" formatted="false">OK</string>
+    <string name="watch" formatted="false">Watch</string>
+    <string name="end_watch" formatted="false">End</string>
+    <string name="watch_entered" formatted="false">Watching: just the screen. Use the arrows below or ← → to change slides</string>
+    <string name="arr_chapters" formatted="false">Chapters</string>
+    <string name="chapter_n">Chapter %1$d</string>
+    <string name="chapter_count">%1$d slides</string>
 </resources>

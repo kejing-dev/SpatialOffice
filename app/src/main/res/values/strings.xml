@@ -113,7 +113,7 @@
     <string name="key_slide" formatted="false">演示：上一页 / 下一页</string>
     <string name="key_focus" formatted="false">铺开：换面前的那一块</string>
     <string name="key_arr" formatted="false">铺开：并排 / 环绕 / 分层</string>
-    <string name="key_collapse" formatted="false">铺开 / 预演：收起、结束</string>
+    <string name="key_collapse" formatted="false">铺开 / 排练：收起、结束</string>
     <string name="doc_title" formatted="false">文档</string>
     <string name="sheet_title" formatted="false">表格</string>
     <string name="slides_title" formatted="false">演示</string>
@@ -206,8 +206,8 @@
     <string name="chart_turn_right" formatted="false">向右转</string>
     <string name="chart_close" formatted="false">关闭图表</string>
     <string name="chart_closed_file" formatted="false">表格已关闭</string>
-    <string name="rehearse" formatted="false">预演</string>
-    <string name="notes" formatted="false">讲者备注（预演时浮在你左手边）</string>
+    <string name="rehearse" formatted="false">排练</string>
+    <string name="notes" formatted="false">讲者备注（排练时浮在你左手边）</string>
     <string name="notes_ph" formatted="false">写下这一页要讲的话</string>
     <string name="add_slide" formatted="false">新建页</string>
     <string name="layout_btn" formatted="false">版式</string>
@@ -234,7 +234,7 @@
     <string name="piece_n">%1$d / %2$d</string>
     <string name="rh_prev" formatted="false">上一页 ←</string>
     <string name="rh_next" formatted="false">下一页 →</string>
-    <string name="end_rehearsal" formatted="false">结束预演</string>
+    <string name="end_rehearsal" formatted="false">结束排练</string>
     <string name="rh_next_label" formatted="false">下一页</string>
     <string name="rh_last" formatted="false">最后一页</string>
     <string name="rh_notes_empty" formatted="false">这一页没有备注</string>
@@ -701,7 +701,7 @@
     <string name="doc_cut_n">已剪切 %1$d 段，格式一起带走</string>
     <string name="doc_pasted_n">已粘贴 %1$d 段</string>
     <string name="multi_hint">已选 %1$d 个对象 · 对齐、组合在 [所选对象] 里</string>
-    <string name="rehearse_first" formatted="false">从第 1 页开始预演</string>
+    <string name="rehearse_first" formatted="false">从第 1 页开始排练</string>
     <string name="obj_need">先选至少 %1$d 个对象</string>
     <string name="obj_arrange_none" formatted="false">已经排好了，没有要动的</string>
     <string name="obj_multi_add">加入多选（已选 %1$d 个）</string>
@@ -832,4 +832,10 @@
     <string name="key_comment" formatted="false">写批注</string>
     <string name="key_track" formatted="false">记下我的修改 · 格式刷（文档）</string>
     <string name="ok_good" formatted="false">好</string>
+    <string name="watch" formatted="false">观看</string>
+    <string name="end_watch" formatted="false">结束观看</string>
+    <string name="watch_entered" formatted="false">观看：只有大屏。翻页用下面的箭头或键盘 ← →</string>
+    <string name="arr_chapters" formatted="false">章节</string>
+    <string name="chapter_n">第 %1$d 章</string>
+    <string name="chapter_count">%1$d 页</string>
 </resources>

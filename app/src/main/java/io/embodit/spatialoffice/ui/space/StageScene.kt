@@ -13,6 +13,8 @@ import com.pico.spatial.core.math.Quat
 import com.pico.spatial.core.math.Vector3
 import com.pico.spatial.ui.foundation.content.SpatialViewAttachments
 import io.embodit.spatialoffice.core.files.FileKind
+import io.embodit.spatialoffice.core.layout.Arrangement
+import io.embodit.spatialoffice.platform.DeckSession
 import io.embodit.spatialoffice.core.layout.LayoutRules
 import io.embodit.spatialoffice.core.layout.Motion
 import io.embodit.spatialoffice.core.layout.PanelPose
@@ -38,7 +40,10 @@ class StageFrameSystem : System() {
 
 /** Ids of the attachment panels. They are composed up front (the SDK needs them declared), then shown and hidden as a pool. */
 object StagePanels {
-    const val MAX_PIECES = 12
+    /** Panels in the pool: the pieces shown at once ([WINDOW], or a chapter and its piles) plus the ones still on their way out. */
+    const val MAX_PIECES = 18
+    /** Pieces laid out at once when the file is not laid out by chapters. */
+    const val WINDOW = 12
     fun piece(slot: Int) = "piece-$slot"
     const val BAR = "bar"
     const val SCREEN = "screen"
@@ -84,12 +89,18 @@ class StageScene(private val graph: Graph) {
     /** Where a panel that is about to appear starts from, and how long it waits (set by [choreograph], used once). */
     private val starts = HashMap<String, FloatArray>()
     private val delays = HashMap<String, Float>()
-    /** Panels on their way out (the Stage is closing): the pose they gather to. */
+    /** Panels on their way out (the Stage is closing, or their chapter closes into its pile): the pose they go to, and until when at the latest. */
     private val exits = HashMap<String, FloatArray>()
-    private var exitAt = 0L
+    private val exitUntil = HashMap<String, Long>()
+    /** This frame's pieces that are shown and no longer laid out / that just got a panel (id → piece index); [choreograph] plays them. */
+    private val leavers = LinkedHashMap<String, Int>()
+    private val newcomers = LinkedHashMap<String, Int>()
+    /** Chapter of the slide in front at the last frame (−1 = not laid out by chapters). */
+    private var prevChapter = -1
+    private var chapters: List<io.embodit.spatialoffice.core.pptx.Chapter> = emptyList()
     private var lastFrameAt = 0L
     private var prevMode: StageMode? = null
-    private var prevArrangement: io.embodit.spatialoffice.core.layout.Arrangement? = null
+    private var prevArrangement: Arrangement? = null
     private var prevFocus = -1
     private var lastFocusPose: FloatArray? = null
     private var moveName: String? = null
@@ -143,14 +154,63 @@ class StageScene(private val graph: Graph) {
         if (ActiveStage.scene === this) ActiveStage.scene = null
         for (h in holders.values) runCatching { h.removeAllChildren() }
         panels.clear(); holders.clear(); current.clear()
-        bodies.clear(); exits.clear(); starts.clear(); delays.clear(); feels.clear(); prevMode = null; lastFrameAt = 0L; moveName = null
+        bodies.clear(); exits.clear(); exitUntil.clear(); starts.clear(); delays.clear(); feels.clear(); prevMode = null; lastFrameAt = 0L; moveName = null
+        leavers.clear(); newcomers.clear(); prevChapter = -1
         root = null
         Log.i(TAG, "STAGE detached")
     }
 
-    /** First piece shown by the pool: a window of [StagePanels.MAX_PIECES] pieces around the focused one. */
+    /** First piece laid out when the file is not laid out by chapters: a window of [StagePanels.WINDOW] pieces around the focused one. */
     private fun windowStart(count: Int, focus: Int): Int =
-        if (count <= StagePanels.MAX_PIECES) 0 else (focus - StagePanels.MAX_PIECES / 2).coerceIn(0, count - StagePanels.MAX_PIECES)
+        if (count <= StagePanels.WINDOW) 0 else (focus - StagePanels.WINDOW / 2).coerceIn(0, count - StagePanels.WINDOW)
+
+    /** The storyline is laid out by chapters: a deck in the Chapters arrangement. */
+    private fun byChapters(): Boolean = graph.arrangement == Arrangement.CHAPTERS && graph.stageSession is DeckSession
+
+    /** The pieces that are laid out now, by piece index. */
+    private fun piecePoses(count: Int, focus: Int): Map<Int, PanelPose> {
+        val deck = graph.stageSession as? DeckSession
+        if (deck != null && graph.arrangement == Arrangement.CHAPTERS) {
+            chapters = deck.chapters()
+            if (chapters.isNotEmpty()) return LayoutRules.chapterPoses(graph.stageKind, chapters.map { it.first to it.count }, focus, graph.radiusSetting)
+        }
+        chapters = emptyList()
+        val poses = LayoutRules.poses(graph.stageKind, count, graph.arrangement, focus, graph.radiusSetting)
+        val start = windowStart(count, focus)
+        val out = LinkedHashMap<Int, PanelPose>()
+        for (i in start until minOf(count, start + StagePanels.WINDOW)) out[i] = poses[i]
+        return out
+    }
+
+    /**
+     * Gives every laid-out piece a panel and keeps it: a piece stays on its panel as long as it is shown, so it moves
+     * as one thing when the layout changes (no content jumping from panel to panel). Pieces that are shown and no
+     * longer laid out go to [leavers], pieces that just got a panel to [newcomers].
+     */
+    private fun assign(want: Map<Int, PanelPose>) {
+        leavers.clear(); newcomers.clear()
+        for ((slot, piece) in assigned.toMap()) {
+            val id = StagePanels.piece(slot)
+            if (piece in want) { exits.remove(id); exitUntil.remove(id); continue }
+            if (id in exits) continue
+            if (shown[id] == true && bodies[id] != null) leavers[id] = piece else assigned.remove(slot)
+        }
+        val have = assigned.values.toHashSet()
+        for (piece in want.keys) {
+            if (piece in have) continue
+            var slot = (0 until StagePanels.MAX_PIECES).firstOrNull { it !in assigned }
+            if (slot == null) {
+                // the pool is full: a panel that is on its way out gives way at once
+                slot = assigned.keys.firstOrNull { StagePanels.piece(it) in exits || StagePanels.piece(it) in leavers } ?: continue
+                val id = StagePanels.piece(slot)
+                exits.remove(id); exitUntil.remove(id); leavers.remove(id); bodies.remove(id); shown[id] = false
+            }
+            assigned[slot] = piece
+            newcomers[StagePanels.piece(slot)] = piece
+        }
+    }
+
+    private fun idOf(piece: Int): String? = assigned.entries.firstOrNull { it.value == piece }?.let { StagePanels.piece(it.key) }
 
     fun onFrame() {
         root ?: return
@@ -168,21 +228,19 @@ class StageScene(private val graph: Graph) {
             val s = graph.stageSession
             val count = s?.pieceCount ?: 0
             val focus = graph.focus.coerceIn(0, (count - 1).coerceAtLeast(0))
-            val poses = LayoutRules.poses(graph.stageKind, count, graph.arrangement, focus, graph.radiusSetting)
-            val start = windowStart(count, focus)
+            val want = piecePoses(count, focus)
+            assign(want)
             val k = StagePanels.pieceScale(graph.stageKind)
-            for (slot in 0 until StagePanels.MAX_PIECES) {
-                val i = start + slot
-                if (i >= count) { assigned.remove(slot); continue }
-                if (assigned[slot] != i) assigned[slot] = i
-                wanted[StagePanels.piece(slot)] = target(st, poses[i], k * poses[i].scale)
-            }
+            for ((slot, piece) in assigned) want[piece]?.let { wanted[StagePanels.piece(slot)] = target(st, it, k * it.scale) }
             wanted[StagePanels.BAR] = target(st, LayoutRules.barPose(graph.stageKind, graph.radiusSetting), 1f, tiltDeg = -22f)
         } else if (st != null && mode == StageMode.REHEARSAL) {
             val r = LayoutRules.rehearsal()
             wanted[StagePanels.SCREEN] = target(st, r.getValue("screen"), r.getValue("screen").width / (960 * StagePanels.DP_M))
-            wanted[StagePanels.NOTES] = target(st, r.getValue("notes"), 1.1f)
-            wanted[StagePanels.NEXT] = target(st, r.getValue("next"), 1.1f)
+            // watching: the screen and the bar only; the speaker's panels belong to rehearsing
+            if (!graph.watching) {
+                wanted[StagePanels.NOTES] = target(st, r.getValue("notes"), 1.1f)
+                wanted[StagePanels.NEXT] = target(st, r.getValue("next"), 1.1f)
+            }
             wanted[StagePanels.BAR] = target(st, r.getValue("bar"), 1f, tiltDeg = -22f)
         }
         val now = SystemClock.elapsedRealtime()
@@ -215,8 +273,10 @@ class StageScene(private val graph: Graph) {
                 apply(h, body.pos)
                 val there = Motion.arrived(body, w)
                 if (!there) moving++
-                if (leaving != null && (there || now - exitAt > EXIT_MS)) {
-                    exits.remove(id); bodies.remove(id); shown[id] = false; park(h)
+                if (leaving != null && (there || now > (exitUntil[id] ?: 0L))) {
+                    exits.remove(id); exitUntil.remove(id); bodies.remove(id); shown[id] = false; park(h)
+                    // its panel is free for another piece
+                    if (wanted[id] == null && id.startsWith("piece-")) assigned.remove(slotOf(id))
                     Log.i(TAG, "PANEL hide $id (gathered)")
                 } else if (shown[id] != true) {
                     // the first panel of an opening move: the windows behind the Stage can go now
@@ -251,22 +311,30 @@ class StageScene(private val graph: Graph) {
 
     private fun slotOf(id: String): Int = id.removePrefix("piece-").toIntOrNull() ?: 0
 
+    /** The piece a piece panel shows. */
+    private fun pieceOf(id: String): Int = assigned[slotOf(id)] ?: 0
+
+    private fun leave(id: String, to: FloatArray, now: Long, ms: Long) {
+        exits[id] = to; exitUntil[id] = now + ms; feels[id] = Motion.GATHER
+    }
+
     /**
      * Decides how this frame's change is played. Nothing here moves a panel: it only sets where new panels start,
      * how long each waits and how each moves; [Motion.step] does the rest.
      * - entering the spread: the pieces are dealt out of one stack at the focused place, the focused one first;
      * - another arrangement: the pieces leave for their new places one after the other, from the focus outwards;
      * - another piece in front: it comes with a small give, the rest glide;
+     * - another chapter in front (storyline by chapters): the slides of the old chapter close into its pile, the new
+     *   chapter's slides are dealt out of its pile, the other piles move up;
      * - rehearsal: the slide in front grows into the big screen, notes and next slide come in from the sides, the bar rises;
      * - leaving: everything gathers back into the stack within the 350 ms before the Stage closes.
      */
     private fun choreograph(st: Seat?, mode: StageMode?, wanted: HashMap<String, FloatArray>, now: Long) {
         val focus = graph.focus
         if (st != null && mode == StageMode.SPREAD) {
-            val count = graph.stageSession?.pieceCount ?: 0
-            val start = windowStart(count, focus.coerceIn(0, (count - 1).coerceAtLeast(0)))
-            val focusId = StagePanels.piece(focus - start)
-            val focusPose = wanted[focusId]
+            val focusId = idOf(focus)
+            val focusPose = focusId?.let { wanted[it] }
+            val chapter = if (chapters.isEmpty()) -1 else io.embodit.spatialoffice.core.pptx.Chapters.indexOf(chapters, focus)
             if (focusPose != null) lastFocusPose = focusPose
             val entering = prevMode != StageMode.SPREAD
             if (entering && focusPose != null) {
@@ -280,7 +348,7 @@ class StageScene(private val graph: Graph) {
                         delays[id] = 0.22f
                     } else {
                         starts[id] = if (id == focusId && from != null) from.copyOf() else stack
-                        delays[id] = Motion.fanDelay(start + slotOf(id), focus)
+                        delays[id] = Motion.fanDelay(pieceOf(id), focus)
                     }
                     bodies.remove(id)
                 }
@@ -288,14 +356,38 @@ class StageScene(private val graph: Graph) {
                 hold(now)
             } else if (!entering && prevArrangement != null && prevArrangement != graph.arrangement) {
                 for ((id, body) in bodies) {
-                    if (id.startsWith("piece-") && body.delay <= 0f) body.delay = Motion.fanDelay(start + slotOf(id), focus, stepMs = 30, maxMs = 240)
+                    if (id.startsWith("piece-") && body.delay <= 0f && id !in exits) body.delay = Motion.fanDelay(pieceOf(id), focus, stepMs = 30, maxMs = 240)
                 }
                 began("arrange $prevArrangement -> ${graph.arrangement}", now)
+            } else if (!entering && chapter >= 0 && prevChapter >= 0 && chapter != prevChapter) {
+                began("chapter ${prevChapter + 1} -> ${chapter + 1} (in=${newcomers.size} out=${leavers.size})", now)
             } else if (!entering && prevFocus != focus && prevFocus >= 0) {
                 began("focus $prevFocus -> $focus", now)
             }
+            if (!entering) {
+                // a piece that is no longer laid out: into its chapter's pile when that pile is shown, else it fades where it is
+                for ((id, piece) in leavers) {
+                    val body = bodies[id] ?: continue
+                    val home = if (chapter >= 0) io.embodit.spatialoffice.core.pptx.Chapters.indexOf(chapters, piece) else -1
+                    val pile = if (home >= 0 && home != chapter) idOf(chapters[home].first)?.let { wanted[it] } else null
+                    val to = pile?.copyOf()?.also { it[Motion.ALPHA] = 0f } ?: body.pos.copyOf().also { it[Motion.SCALE] *= 0.85f; it[Motion.ALPHA] = 0f }
+                    body.delay = 0f
+                    leave(id, to, now, if (pile != null) CHAPTER_MS else FADE_MS)
+                }
+                // a piece that just got a panel: out of its chapter's pile when it belongs to the chapter in front, else it fades in where it belongs
+                for ((id, piece) in newcomers) {
+                    val w = wanted[id] ?: continue
+                    val mine = chapter >= 0 && piece in chapters[chapter]
+                    val pile = if (mine) idOf(chapters[chapter].first)?.takeIf { it != id }?.let { bodies[it] } else null
+                    starts[id] = pile?.pos?.copyOf()?.also { it[Motion.ALPHA] = Motion.STACK_ALPHA }
+                        ?: w.copyOf().also { it[Motion.SCALE] *= 0.85f; it[Motion.ALPHA] = 0f }
+                    delays[id] = if (pile != null) Motion.fanDelay(piece, focus, stepMs = 35, maxMs = 280) else 0f
+                    bodies.remove(id)
+                }
+            }
             for (id in wanted.keys) feels[id] = if (id == focusId) Motion.FOCUS else Motion.GLIDE
             prevArrangement = graph.arrangement
+            prevChapter = chapter
         } else if (st != null && mode == StageMode.REHEARSAL) {
             if (prevMode != StageMode.REHEARSAL) {
                 val screen = wanted[StagePanels.SCREEN]
@@ -325,7 +417,7 @@ class StageScene(private val graph: Graph) {
             feels[StagePanels.SCREEN] = Motion.GRAND
             for (id in listOf(StagePanels.NOTES, StagePanels.NEXT, StagePanels.BAR)) feels[id] = Motion.GLIDE
             // the slide changed: the screen gives 1 % and comes back (its content slides at the same moment, StageMotion.slideChange)
-            val slide = (graph.stageSession as? io.embodit.spatialoffice.platform.DeckSession)?.current ?: -1
+            val slide = (graph.stageSession as? DeckSession)?.current ?: -1
             if (prevMode == StageMode.REHEARSAL && prevSlide >= 0 && slide != prevSlide) {
                 val screen = bodies[StagePanels.SCREEN]; val to = wanted[StagePanels.SCREEN]
                 if (screen != null && to != null && screen.delay <= 0f) {
@@ -338,7 +430,7 @@ class StageScene(private val graph: Graph) {
             // [Collapse] / the rehearsal ending: gather, then the Stage closes (WindowCtl.leaveStage waits 350 ms)
             val focusPose = lastFocusPose
             val shownNow = bodies.keys.filter { shown[it] == true }
-            val pieces = shownNow.filter { it.startsWith("piece-") }.sortedBy { slotOf(it) }
+            val pieces = shownNow.filter { it.startsWith("piece-") }.sortedBy { pieceOf(it) }
             val focusAt = pieces.indexOfFirst { feels[it] == Motion.FOCUS }.coerceAtLeast(0)
             for (id in shownNow) {
                 val body = bodies[id] ?: continue
@@ -353,12 +445,16 @@ class StageScene(private val graph: Graph) {
                 exits[id] = to
                 body.delay = if (id.startsWith("piece-")) Motion.gatherDelay(pieces.indexOf(id), focusAt, pieces.size) else 0f
             }
-            for (id in shownNow) feels[id] = Motion.GATHER
-            exitAt = now
+            for (id in shownNow) { feels[id] = Motion.GATHER; exitUntil[id] = now + EXIT_MS }
             holding = false
             if (shownNow.isNotEmpty()) began("gather panels=${shownNow.size} from=$prevMode", now)
         }
-        if (mode != null) exits.clear()
+        // back in a layout: nothing but pieces that left it is still on its way out (the rehearsal has no pieces at all)
+        if (mode != null) {
+            val keep = if (mode == StageMode.SPREAD) exits.keys.filter { it.startsWith("piece-") && wanted[it] == null }.toSet() else emptySet()
+            exits.keys.retainAll(keep); exitUntil.keys.retainAll(keep)
+        }
+        if (mode != StageMode.SPREAD) prevChapter = -1
         if (seat != null && seenRecenterForMotion != graph.recenterTick) {
             if (seenRecenterForMotion >= 0 && mode != null) began("recenter", now)
             seenRecenterForMotion = graph.recenterTick
@@ -418,5 +514,8 @@ class StageScene(private val graph: Graph) {
     private companion object {
         /** Longest a gathering panel is still drawn: the span WindowCtl.leaveStage gives the gathering before the home window comes back. */
         const val EXIT_MS = 300L
+        /** Longest the slides of a chapter take to close into its pile, and a piece takes to fade out of the layout. */
+        const val CHAPTER_MS = 340L
+        const val FADE_MS = 240L
     }
 }
