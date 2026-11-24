@@ -32,7 +32,39 @@ class StageMotionTest {
         assertEquals("axis", k(2, 3)); assertEquals("axis", k(3, 2))
         assertEquals("jump", k(0, 5)); assertEquals("jump", k(5, 0))
         assertEquals("fade", k(3, -1)); assertEquals("fade", k(-1, 3))
-        org.junit.Assert.assertTrue(io.embodit.spatialoffice.ui.space.StageMotion.AXIS_MS in 300..450)
+        // one slide fades over the other; nothing moves (the sideways slide read as a jolt on the headset)
+        org.junit.Assert.assertTrue(io.embodit.spatialoffice.ui.space.StageMotion.CROSS_MS in 200..350)
+    }
+}
+
+/** The layout bar's templates, and a window drawn smaller than it was designed for. */
+class TemplatesTest {
+    @Test
+    fun sevenTemplatesPerKindEachWithAPictureInsideItsFrame() {
+        for (deck in listOf(true, false)) {
+            val t = io.embodit.spatialoffice.ui.space.templates(deck)
+            assertEquals(7, t.size); assertEquals(7, t.toSet().size)
+            org.junit.Assert.assertTrue((io.embodit.spatialoffice.core.layout.Arrangement.CHAPTERS in t) == deck)
+            org.junit.Assert.assertTrue(t.containsAll(io.embodit.spatialoffice.core.layout.Arrangement.values().filter { it.front }))
+        }
+        for (a in io.embodit.spatialoffice.core.layout.Arrangement.values()) {
+            val blocks = io.embodit.spatialoffice.ui.space.templatePicture(a)
+            org.junit.Assert.assertTrue(blocks.size in 3..5)
+            for (b in blocks) org.junit.Assert.assertTrue("$a ${b.toList()}", b[0] >= 0f && b[1] >= 0f && b[0] + b[2] <= 1.001f && b[1] + b[3] <= 1.001f)
+        }
+    }
+
+    @Test
+    fun aWindowBelowItsDesignSizeIsDrawnInProportion() {
+        val z = { w: Float, h: Float, dw: Float, dh: Float -> io.embodit.spatialoffice.ui.WinFit.scale(w, h, dw, dh) }
+        assertEquals(1f, z(1360f, 860f, 1300f, 820f), 0f)
+        assertEquals(1f, z(1300f, 820f, 1300f, 820f), 0f)
+        // the tighter side decides; steps of 2.5 %
+        assertEquals(0.75f, z(980f, 820f, 1300f, 820f), 0.001f)
+        assertEquals(0.6f, z(1300f, 500f, 1300f, 820f), 0.001f)
+        assertEquals(io.embodit.spatialoffice.ui.WinFit.MIN_SCALE, z(300f, 200f, 1300f, 820f), 0f)
+        // the Toolbar goes a little further down: its row of tools is wider than the narrowest window
+        assertEquals(io.embodit.spatialoffice.ui.WinFit.TOOL_MIN_SCALE, io.embodit.spatialoffice.ui.WinFit.scale(560f, 720f, 1240f, 720f, io.embodit.spatialoffice.ui.WinFit.TOOL_MIN_SCALE), 0f)
     }
 }
 

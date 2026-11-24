@@ -7,15 +7,20 @@ import org.junit.Test
 
 /** v0.5.1: new editor windows stand beside the ones already up, alternately right / left, never in front of them. */
 class ArcRingTest {
-    @Test fun firstInFrontThenRightLeftRightAroundIt() {
+    @Test fun firstInFrontThenRightThenLeftAndTheRowEndsThere() {
         val r = ArcRing()
         assertNull(r.place("doc/f1"))
         assertEquals("doc/f1" to "right", r.place("doc/f2"))
         assertEquals("doc/f1" to "left", r.place("doc/f3"))
-        assertEquals("doc/f2" to "right", r.place("doc/f4"))
-        assertEquals("doc/f3" to "left", r.place("doc/f5"))
-        assertEquals(listOf("doc/f5", "doc/f3", "doc/f1", "doc/f2", "doc/f4"), r.order)
+        // 2026-11-24: left · centre · right is the whole row; the next windows open in front, over it, and are not part of it
+        assertNull(r.place("doc/f4"))
+        assertNull(r.place("doc/f5"))
+        assertEquals(listOf("doc/f3", "doc/f1", "doc/f2"), r.order)
         assertEquals(0, r.slot("doc/f1")); assertEquals(1, r.slot("doc/f2")); assertEquals(-1, r.slot("doc/f3"))
+        assertNull(r.slot("doc/f4"))
+        // a place at a side comes free: the next window takes it
+        r.remove("doc/f2")
+        assertEquals("doc/f1" to "right", r.place("doc/f6"))
     }
 
     @Test fun differentKindsShareTheRow() {
@@ -63,15 +68,16 @@ class ArcRingTest {
         assertEquals(home to "right", r.place("SpatialOfficeSheet/f1", hub = home, live = live)); up += "SpatialOfficeSheet/f1"
         // [Window 1] › [Home] only restores the home window in its own place; then file 2, file 3
         assertEquals(home to "left", r.place("SpatialOfficeSheet/f2", hub = home, live = live)); up += "SpatialOfficeSheet/f2"
-        assertEquals("SpatialOfficeSheet/f1" to "right", r.place("SpatialOfficeSheet/f3", hub = home, live = live)); up += "SpatialOfficeSheet/f3"
-        assertEquals(listOf("SpatialOfficeSheet/f2", home, "SpatialOfficeSheet/f1", "SpatialOfficeSheet/f3"), r.order)
-        // four windows, four places: no two share a slot, no file in front (slot 0 is the home window)
+        assertEquals(listOf("SpatialOfficeSheet/f2", home, "SpatialOfficeSheet/f1"), r.order)
+        // three windows, three places: no two share a slot, no file on the home window's spot (slot 0)
         val slots = r.order.map { r.slot(it) }
         assertEquals(slots.toSet().size, slots.size)
         assertEquals(0, r.slot(home))
         r.order.filter { it != home }.forEach { assertTrue(it, r.slot(it) != 0) }
-        // every new window stands beside one already up, never on the spot of one
         assertTrue(r.order.zipWithNext().all { (a, b) -> r.slot(b)!! - r.slot(a)!! == 1 })
+        // 2026-11-24: the row is full; file 3 opens in front, over the row (never behind the shoulders), outside the bookkeeping
+        assertNull(r.place("SpatialOfficeSheet/f3", hub = home, live = live)); up += "SpatialOfficeSheet/f3"
+        assertEquals(listOf("SpatialOfficeSheet/f2", home, "SpatialOfficeSheet/f1"), r.order)
     }
 
     @Test fun homeWindowNotUpOrFilesAlreadyUpLeavesTheOldRule() {

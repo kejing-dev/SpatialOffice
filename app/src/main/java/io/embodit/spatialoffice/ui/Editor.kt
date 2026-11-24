@@ -129,11 +129,11 @@ fun EditorTitleBar(graph: Graph, win: Win, s: Session, extra: (@Composable () ->
 /** The right-hand group of every editor toolbar: spread out, save as, save. */
 @Composable
 fun FileTools(graph: Graph, win: Win, s: Session, spreadLabel: Int = R.string.spread) {
-    ToolRow {
+    ToolbarScaled { ToolRow {
         ToolButton(tr(spreadLabel), "tools/spread", icon = R.drawable.ic_spread, onClick = { graph.spread(s) })
         ToolButton(tr(R.string.save_as), "tools/saveas", icon = R.drawable.ic_folder_arrow_right, onClick = { graph.show(s, Overlay.SaveAs(win)) })
         if (!s.readOnly) ToolButton(tr(R.string.save), "tools/save", primary = true, onClick = { graph.save(s) })
-    }
+    } }
 }
 
 /** Shortcuts every editor shares. Returns true when the event was used. */

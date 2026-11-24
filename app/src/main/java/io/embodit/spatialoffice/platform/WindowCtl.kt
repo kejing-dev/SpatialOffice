@@ -480,7 +480,9 @@ class WindowCtl(private val graph: Graph) {
         val before = ring.order
         val plan = if (Placing.mode == "arc") ring.replan(before, Containers.HOME, editors.map { Containers.key(it) }, back?.let { Containers.key(it) }) else emptyList()
         val byKey = editors.associateBy { Containers.key(it) }
-        val ordered = if (plan.isNotEmpty()) plan.mapNotNull { byKey[it.first] } + editors.filter { e -> plan.none { it.first == Containers.key(e) } } else editors.filter { it != back } + listOfNotNull(back?.takeIf { it in editors })
+        // windows without a place in the row open in front, after the row; the one just rehearsed / spread out last, on top
+        val unplaced = editors.filter { e -> plan.none { it.first == Containers.key(e) } }
+        val ordered = if (plan.isNotEmpty()) plan.mapNotNull { byKey[it.first] } + unplaced.filter { it != back } + unplaced.filter { it == back } else editors.filter { it != back } + listOfNotNull(back?.takeIf { it in editors })
         val order = ordered + if (chartWas) listOf(chart) else emptyList()
         Log.i(TAG, "STAGE closed, reopening windows closed=$closedForStage back=$back order=$order row-before=$before plan=$plan")
         // the home window says where the window just rehearsed went (it is beside it, not in front of the user)

@@ -112,7 +112,7 @@
     <string name="key_sum" formatted="false">表格：自动求和</string>
     <string name="key_slide" formatted="false">演示：上一页 / 下一页</string>
     <string name="key_focus" formatted="false">铺开：换面前的那一块</string>
-    <string name="key_arr" formatted="false">铺开：并排 / 环绕 / 分层</string>
+    <string name="key_arr" formatted="false">铺开：换排布</string>
     <string name="key_collapse" formatted="false">铺开 / 排练：收起、结束</string>
     <string name="doc_title" formatted="false">文档</string>
     <string name="sheet_title" formatted="false">表格</string>
@@ -838,4 +838,8 @@
     <string name="arr_chapters" formatted="false">章节</string>
     <string name="chapter_n">第 %1$d 章</string>
     <string name="chapter_count">%1$d 页</string>
+    <string name="arr_triple" formatted="false">三联</string>
+    <string name="arr_grid" formatted="false">四格</string>
+    <string name="arr_crown" formatted="false">顶排</string>
+    <string name="arr_main" formatted="false">主次</string>
 </resources>

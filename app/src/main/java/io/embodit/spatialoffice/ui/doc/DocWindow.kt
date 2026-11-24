@@ -1037,7 +1037,7 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
     LaunchedEffect(s.composeTick) { if (s.composing) { kotlinx.coroutines.delay(520); runCatching { keys.requestFocus() } } }
     Toolbar(
         supportingContent = { FileTools(graph, Win.DOC, s) },
-        content = {
+        content = { io.embodit.spatialoffice.ui.ToolbarScaled {
             if (!s.readOnly) Box(
                 Modifier.focusRequester(keys).onPreviewKeyEvent { e -> toolbarKeys(graph, s, e) }.typingTarget().focusable(),
             ) { ToolRow {
@@ -1129,7 +1129,7 @@ private fun DocToolbar(graph: Graph, s: DocSession, focus: DocFocus) {
                 Txt(tr(R.string.readonly_note), "doc/readonly-note", Modifier.padding(horizontal = 12.dp), style = PicoTheme.typography.bodyMedium)
                 ToolButton(tr(R.string.word_count), "doc/wordcount-ro", onClick = { graph.show(s, Overlay.WordCount(Win.DOC)) })
             }
-        },
+        } },
     )
 }
 

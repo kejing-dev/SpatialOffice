@@ -50,14 +50,17 @@ class ChaptersTest {
         val chapters = listOf(0 to 2, 2 to 2, 4 to 2, 6 to 20, 26 to 2, 28 to 2, 30 to 2)
         val p = LayoutRules.chapterPoses(FileKind.SLIDES, chapters, focus = 15, radiusSetting = 1.5f)
         val laid = p.keys.filter { it in 6..25 }
-        assertEquals(LayoutRules.CHAPTER_WINDOW, laid.size)
-        assertEquals((12..18).toList(), laid.sorted())
+        // with two piles at each side, two slides at each side of the one in front leave the piles inside the half circle
+        assertEquals((13..17).toList(), laid.sorted())
+        assertTrue(laid.size <= LayoutRules.CHAPTER_WINDOW)
         // two piles on each side at the most: chapters starting at 2 and 4, and at 26 and 28
         assertEquals(setOf(2, 4, 26, 28), p.keys - laid.toSet())
-        // first slide of its chapter in front: the window starts there
+        for (v in p.values) assertTrue(abs(az(v)) <= LayoutRules.MAX_AZ + 0.01)
+        // first slide of its chapter in front: the window starts there and goes on as far as the view does
         val q = LayoutRules.chapterPoses(FileKind.SLIDES, chapters, focus = 6, radiusSetting = 1.5f)
-        assertEquals((6..12).toList(), q.keys.filter { it in 6..25 }.sorted())
+        assertEquals((6..8).toList(), q.keys.filter { it in 6..25 }.sorted())
         assertTrue(abs(az(q.getValue(6))) < 1e-3)
+        for (v in q.values) assertTrue(abs(az(v)) <= LayoutRules.MAX_AZ + 0.01)
         assertEquals(emptyMap<Int, PanelPose>(), LayoutRules.chapterPoses(FileKind.SLIDES, emptyList(), 0, 1.5f))
     }
 }

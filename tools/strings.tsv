@@ -109,7 +109,7 @@ key_edit	表格：编辑 / 确认 / 取消	Sheet: edit / confirm / cancel
 key_sum	表格：自动求和	Sheet: AutoSum
 key_slide	演示：上一页 / 下一页	Slides: previous / next
 key_focus	铺开：换面前的那一块	Spread: change the piece in front
-key_arr	铺开：并排 / 环绕 / 分层	Spread: row / arc / layers
+key_arr	铺开：换排布	Spread: change the layout
 key_collapse	铺开 / 排练：收起、结束	Spread / rehearsal: collapse, end
 doc_title	文档	Document
 sheet_title	表格	Spreadsheet
@@ -844,3 +844,7 @@ watch_entered	观看：只有大屏。翻页用下面的箭头或键盘 ← →	
 arr_chapters	章节	Chapters
 chapter_n	第 %1$d 章	Chapter %1$d
 chapter_count	%1$d 页	%1$d slides
+arr_triple	三联	Trio
+arr_grid	四格	Grid
+arr_crown	顶排	Top row
+arr_main	主次	Main

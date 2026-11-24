@@ -881,7 +881,7 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
     LaunchedEffect(s.composeTick) { if (s.composing) { kotlinx.coroutines.delay(520); runCatching { keys.requestFocus() } } }
     Toolbar(
         supportingContent = { FileTools(graph, Win.SLIDES, s, spreadLabel = R.string.storyline) },
-        content = {
+        content = { io.embodit.spatialoffice.ui.ToolbarScaled {
             // M5: after a toolbar menu the Toolbar window has the keyboard: what is typed goes to the comment being written, and Ctrl+S / Z / Y still work
             Box(Modifier.focusRequester(keys).onPreviewKeyEvent { e -> io.embodit.spatialoffice.ui.composeKeys(graph, s, e) || commonKeys(graph, s, e) }.typingTarget().focusable()) { ToolRow {
                 ToolMenu(tr(R.string.add_slide), "slides/add", icon = R.drawable.ic_plus, entries = listOf(
@@ -955,7 +955,7 @@ private fun SlidesToolbar(graph: Graph, s: DeckSession) {
                 ToolDivider()
                 UndoRedo(s)
             } }
-        },
+        } },
     )
 }
 

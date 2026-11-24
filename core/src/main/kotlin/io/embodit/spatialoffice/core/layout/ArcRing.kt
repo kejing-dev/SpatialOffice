@@ -3,8 +3,9 @@ package io.embodit.spatialoffice.core.layout
 /**
  * v0.5.1 (user 2026-11-21, profile D "多窗口默认环绕摆开": 「直接摆在旁边环绕多窗口这样排布，发挥空间计算平台多窗口的优势」):
  * the editor windows stand side by side on the circle around the user, left to right in [order]. The first one opens
- * in front; every next one goes beside an outer window, alternately to the right and to the left so the row stays
- * centred on the first, and never in front of (over) the windows already up. No button press is needed.
+ * in front, the next at its right, the next at its left. No button press is needed.
+ * 2026-11-24: the row ends there ([PER_SIDE]); a fourth window opens in front, over the row (the system shows it on
+ * the centre's spot and takes the centre off stage until that window is moved or closed).
  *
  * Pure bookkeeping of the row; the system does the actual placement (`Placement.right / left(anchor, gap)`), which
  * keeps both windows facing the user at the same height.
@@ -37,6 +38,8 @@ class ArcRing {
         val c = row.indexOf(center).coerceAtLeast(0)
         val rightCount = row.size - 1 - c
         val leftCount = c
+        // the row is full (left · centre · right): the next window opens in front, over the row, and is not one of it
+        if (rightCount >= PER_SIDE && leftCount >= PER_SIDE) return null
         return if (rightCount <= leftCount) {
             val anchor = row.last(); row.add(key); anchor to "right"
         } else {
@@ -74,16 +77,22 @@ class ArcRing {
             // the hub was not in the row: alternate right / left in the row's order
             before.filter { it in want }.forEachIndexed { i, k -> if (i % 2 == 0) right.add(k) else left.add(k) }
         }
-        for (k in reopen) if (k !in left && k !in right) (if (right.size <= left.size) right else left).add(k)
-        if (first != null && first in want) {
+        // a window that was not in the row (it stood in front, over it) takes a free place at a side, else it opens in front again
+        for (k in reopen) if (k !in left && k !in right) {
+            if (right.size < PER_SIDE && right.size <= left.size) right.add(k) else if (left.size < PER_SIDE) left.add(k) else if (right.size < PER_SIDE) right.add(k)
+        }
+        if (first != null && (first in left || first in right)) {
             val onLeft = first in left
             left.remove(first); right.remove(first)
             if (onLeft) left.add(0, first) else right.add(0, first)
         }
+        // no more than [PER_SIDE] at each side; the others open in front again ([place] gives them no place in the row)
+        while (left.size > PER_SIDE) left.removeAt(left.size - 1)
+        while (right.size > PER_SIDE) right.removeAt(right.size - 1)
         val out = ArrayList<Pair<String, Pair<String, String>>>()
         fun take(side: List<String>, i: Int, name: String) { side.getOrNull(i)?.let { k -> out.add(k to ((if (i == 0) hub else side[i - 1]) to name)) } }
         // the first window first, then outwards, right and left in turn
-        if (first != null && first in want) { if (left.firstOrNull() == first) take(left, 0, "left") else take(right, 0, "right") }
+        if (first != null && (first in left || first in right)) { if (left.firstOrNull() == first) take(left, 0, "left") else take(right, 0, "right") }
         for (i in 0 until maxOf(left.size, right.size)) {
             if (right.getOrNull(i) != first) take(right, i, "right")
             if (left.getOrNull(i) != first) take(left, i, "left")
@@ -100,6 +109,13 @@ class ArcRing {
     }
 
     companion object {
+        /**
+         * Windows at each side of the first one. One: the row is left · centre · right, which is what a person looks
+         * at without turning round (user on the headset, 2026-11-24: "一般就是看到左中右 3 个窗口就行了…不要超过 180 度的视野").
+         * v0.5.1 went on right, left, right, … all the way round.
+         */
+        const val PER_SIDE = 1
+
         /**
          * Horizontal angle (degrees) between the centres of two neighbouring windows of widths [wDp] and [nextDp] with
          * [gapDp] between them on a circle of [radiusM], at [mPerDp] metres per dp (emulator ≈ 1.5–1.75 mm / dp).

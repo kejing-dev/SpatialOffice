@@ -167,18 +167,20 @@ class StageScene(private val graph: Graph) {
     /** The storyline is laid out by chapters: a deck in the Chapters arrangement. */
     private fun byChapters(): Boolean = graph.arrangement == Arrangement.CHAPTERS && graph.stageSession is DeckSession
 
-    /** The pieces that are laid out now, by piece index. */
+    /** The pieces that are laid out now, by piece index: never further to the side than the view goes ([LayoutRules.MAX_AZ]). */
     private fun piecePoses(count: Int, focus: Int): Map<Int, PanelPose> {
         val deck = graph.stageSession as? DeckSession
-        if (deck != null && graph.arrangement == Arrangement.CHAPTERS) {
+        val arrangement = graph.arrangement
+        chapters = emptyList()
+        if (arrangement.front) return LayoutRules.frontPoses(graph.stageKind, count, arrangement, focus, graph.radiusSetting)
+        if (deck != null && arrangement == Arrangement.CHAPTERS) {
             chapters = deck.chapters()
             if (chapters.isNotEmpty()) return LayoutRules.chapterPoses(graph.stageKind, chapters.map { it.first to it.count }, focus, graph.radiusSetting)
         }
-        chapters = emptyList()
-        val poses = LayoutRules.poses(graph.stageKind, count, graph.arrangement, focus, graph.radiusSetting)
+        val poses = LayoutRules.poses(graph.stageKind, count, arrangement, focus, graph.radiusSetting)
         val start = windowStart(count, focus)
         val out = LinkedHashMap<Int, PanelPose>()
-        for (i in start until minOf(count, start + StagePanels.WINDOW)) out[i] = poses[i]
+        for (i in start until minOf(count, start + StagePanels.WINDOW)) if (i == focus || LayoutRules.inView(poses[i])) out[i] = poses[i]
         return out
     }
 
@@ -231,8 +233,10 @@ class StageScene(private val graph: Graph) {
             val want = piecePoses(count, focus)
             assign(want)
             val k = StagePanels.pieceScale(graph.stageKind)
-            for ((slot, piece) in assigned) want[piece]?.let { wanted[StagePanels.piece(slot)] = target(st, it, k * it.scale) }
-            wanted[StagePanels.BAR] = target(st, LayoutRules.barPose(graph.stageKind, graph.radiusSetting), 1f, tiltDeg = -22f)
+            for ((slot, piece) in assigned) want[piece]?.let { wanted[StagePanels.piece(slot)] = target(st, it, k * it.scale, it.tiltDeg) }
+            // the bar sits under the pieces in front of the seat, whatever the template's sizes and rows
+            val bottom = want.values.filter { kotlin.math.abs(it.azimuthDeg) < 32f }.minOfOrNull { it.bottom }
+            wanted[StagePanels.BAR] = target(st, LayoutRules.barPose(graph.stageKind, graph.radiusSetting, bottom), 1f, tiltDeg = -22f)
         } else if (st != null && mode == StageMode.REHEARSAL) {
             val r = LayoutRules.rehearsal()
             wanted[StagePanels.SCREEN] = target(st, r.getValue("screen"), r.getValue("screen").width / (960 * StagePanels.DP_M))
@@ -326,7 +330,9 @@ class StageScene(private val graph: Graph) {
      * - another piece in front: it comes with a small give, the rest glide;
      * - another chapter in front (storyline by chapters): the slides of the old chapter close into its pile, the new
      *   chapter's slides are dealt out of its pile, the other piles move up;
-     * - rehearsal: the slide in front grows into the big screen, notes and next slide come in from the sides, the bar rises;
+     * - a front template (three across, grid, crown, main): stepping moves every piece one place on; the piece that
+ *   comes into view fades in at its place, the one that leaves fades where it is;
+ * - rehearsal: the slide in front grows into the big screen, notes and next slide come in from the sides, the bar rises;
      * - leaving: everything gathers back into the stack within the 350 ms before the Stage closes.
      */
     private fun choreograph(st: Seat?, mode: StageMode?, wanted: HashMap<String, FloatArray>, now: Long) {
@@ -416,14 +422,11 @@ class StageScene(private val graph: Graph) {
             }
             feels[StagePanels.SCREEN] = Motion.GRAND
             for (id in listOf(StagePanels.NOTES, StagePanels.NEXT, StagePanels.BAR)) feels[id] = Motion.GLIDE
-            // the slide changed: the screen gives 1 % and comes back (its content slides at the same moment, StageMotion.slideChange)
+            // the slide changed: the screen itself stays still (its content fades over, StageMotion.slideChange). A screen
+            // that gave and came back, and slides that moved sideways, read as a jolt on the headset (user, 2026-11-24).
             val slide = (graph.stageSession as? DeckSession)?.current ?: -1
             if (prevMode == StageMode.REHEARSAL && prevSlide >= 0 && slide != prevSlide) {
-                val screen = bodies[StagePanels.SCREEN]; val to = wanted[StagePanels.SCREEN]
-                if (screen != null && to != null && screen.delay <= 0f) {
-                    Motion.nudge(screen, Motion.SCALE, -Motion.nudgeSpeed(to[Motion.SCALE] * Motion.SLIDE_PRESS, Motion.GRAND))
-                    began("slide ${prevSlide + 1} -> ${slide + 1} (${io.embodit.spatialoffice.ui.space.StageMotion.kind(prevSlide, slide)})", now)
-                }
+                began("slide ${prevSlide + 1} -> ${slide + 1} (${io.embodit.spatialoffice.ui.space.StageMotion.kind(prevSlide, slide)})", now)
             }
             prevSlide = slide
         } else if (mode == null && prevMode != null && st != null) {

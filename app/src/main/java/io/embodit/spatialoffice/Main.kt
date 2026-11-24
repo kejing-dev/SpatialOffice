@@ -17,6 +17,8 @@ import io.embodit.spatialoffice.platform.Containers
 import io.embodit.spatialoffice.platform.Placing
 import io.embodit.spatialoffice.core.layout.LiveAnchor
 import io.embodit.spatialoffice.core.layout.WindowFit
+import io.embodit.spatialoffice.ui.Fitted
+import io.embodit.spatialoffice.ui.WinFit
 import io.embodit.spatialoffice.ui.chart.ChartVolume
 import io.embodit.spatialoffice.ui.doc.DocWindow
 import io.embodit.spatialoffice.ui.home.HomeWindow
@@ -122,26 +124,43 @@ private fun fileTag(bundle: android.os.Bundle?, win: io.embodit.spatialoffice.pl
  * window per open file (same container id, the file's tag; [editorPlacement]), and the chart volume over its sheet; nothing is placed from
  * the head pose. Full Space: one Mixed Stage for the spread layout and rehearsal.
  */
+/** Smallest size the user can drag a window to: [WinFit.MIN_SCALE] of what it was designed for; below the design size the content is drawn smaller ([Fitted]). */
+private fun small(designDp: Int) = (designDp * WinFit.MIN_SCALE).dp
+
+/**
+ * Debug builds only: with the file `small-windows` in the app's external files folder the editor windows open at
+ * their smallest size, so the scaled-down window can be looked at on the emulator (where no hand drags an edge).
+ */
+object WindowTrial {
+    @Volatile var small = false
+    fun read(context: android.content.Context) {
+        small = BuildConfig.DEBUG && runCatching { java.io.File(context.getExternalFilesDir(null), "small-windows").exists() }.getOrDefault(false)
+        if (small) android.util.Log.i("SpatialOffice", "WINDOW trial: editor windows open at their smallest size")
+    }
+}
+
+private fun trial(dp: Int) = if (WindowTrial.small) (dp * 0.58f).dp else dp.dp
+
 fun mainApp(scope: SpatialAppScope) =
     with(scope) {
         DefaultWindowContainer {
-            Box(Modifier.windowConstraints(minWidth = 1040.dp, minHeight = 620.dp)) { HomeWindow() }
+            Box(Modifier.windowConstraints(minWidth = small(1040), minHeight = small(620))) { Fitted(1040.dp, 620.dp) { HomeWindow() } }
         }
         WindowContainer(
             Containers.DOC, form = Form.Planar,
-            defaultSize = WindowContainerSize(width = 1160.dp, height = 860.dp),
+            defaultSize = WindowContainerSize(width = trial(1160), height = trial(860)),
             placement = { editorPlacement(containers, Containers.DOC) },
-        ) { val tag = fileTag(bundle, io.embodit.spatialoffice.platform.Win.DOC); Box(Modifier.windowConstraints(minWidth = 960.dp, minHeight = 720.dp)) { DocWindow(tag) } }
+        ) { val tag = fileTag(bundle, io.embodit.spatialoffice.platform.Win.DOC); Box(Modifier.windowConstraints(minWidth = 560.dp, minHeight = small(720))) { Fitted(960.dp, 720.dp, toolW = 1240.dp) { DocWindow(tag) } } }
         WindowContainer(
             Containers.SHEET, form = Form.Planar,
-            defaultSize = WindowContainerSize(width = 1280.dp, height = 800.dp),
+            defaultSize = WindowContainerSize(width = trial(1280), height = trial(800)),
             placement = { editorPlacement(containers, Containers.SHEET) },
-        ) { val tag = fileTag(bundle, io.embodit.spatialoffice.platform.Win.SHEET); Box(Modifier.windowConstraints(minWidth = 1100.dp, minHeight = 700.dp)) { SheetWindow(tag) } }
+        ) { val tag = fileTag(bundle, io.embodit.spatialoffice.platform.Win.SHEET); Box(Modifier.windowConstraints(minWidth = small(1100), minHeight = small(700))) { Fitted(1100.dp, 700.dp, toolW = 1300.dp) { SheetWindow(tag) } } }
         WindowContainer(
             Containers.SLIDES, form = Form.Planar,
-            defaultSize = WindowContainerSize(width = 1360.dp, height = 860.dp),
+            defaultSize = WindowContainerSize(width = trial(1360), height = trial(860)),
             placement = { editorPlacement(containers, Containers.SLIDES) },
-        ) { val tag = fileTag(bundle, io.embodit.spatialoffice.platform.Win.SLIDES); Box(Modifier.windowConstraints(minWidth = 1300.dp, minHeight = 820.dp)) { SlidesWindow(tag) } }
+        ) { val tag = fileTag(bundle, io.embodit.spatialoffice.platform.Win.SLIDES); Box(Modifier.windowConstraints(minWidth = small(1300), minHeight = small(820))) { Fitted(1300.dp, 820.dp) { SlidesWindow(tag) } } }
         WindowContainer(
             Containers.CHART, form = Form.Volumetric,
             defaultSize = WindowContainerSize(WindowFit.CHART_W.toFloat(), WindowFit.CHART_H.toFloat(), WindowFit.CHART_D.toFloat(), LengthUnit.Meters),

@@ -112,7 +112,7 @@
     <string name="key_sum" formatted="false">Sheet: AutoSum</string>
     <string name="key_slide" formatted="false">Slides: previous / next</string>
     <string name="key_focus" formatted="false">Spread: change the piece in front</string>
-    <string name="key_arr" formatted="false">Spread: row / arc / layers</string>
+    <string name="key_arr" formatted="false">Spread: change the layout</string>
     <string name="key_collapse" formatted="false">Spread / rehearsal: collapse, end</string>
     <string name="doc_title" formatted="false">Document</string>
     <string name="sheet_title" formatted="false">Spreadsheet</string>
@@ -838,4 +838,8 @@
     <string name="arr_chapters" formatted="false">Chapters</string>
     <string name="chapter_n">Chapter %1$d</string>
     <string name="chapter_count">%1$d slides</string>
+    <string name="arr_triple" formatted="false">Trio</string>
+    <string name="arr_grid" formatted="false">Grid</string>
+    <string name="arr_crown" formatted="false">Top row</string>
+    <string name="arr_main" formatted="false">Main</string>
 </resources>

@@ -2,15 +2,27 @@ package io.embodit.spatialoffice.core.layout
 
 import io.embodit.spatialoffice.core.files.FileKind
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.atan
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 
-/** The three arrangements on the layout bar. */
 /**
+ * How the pieces of a file are set out around the seat.
+ * ROW, ARC, LAYERS: every piece (as far as the view goes, [LayoutRules.MAX_AZ]).
  * CHAPTERS (decks, the storyline): the chapter in front is laid out on the arc, every other chapter is one pile at its side.
+ * The front templates show a handful of pieces, all inside what the eyes take in without turning the body; the
+ * others come in as the user steps through the file:
+ * TRIPLE = left · centre · right; GRID = four in a 2 × 2 block; CROWN = three across and two above, leaning down
+ * towards the eyes; MAIN = the piece in front large, two small ones stacked at each side.
  */
-enum class Arrangement { ROW, ARC, LAYERS, CHAPTERS }
+enum class Arrangement {
+    ROW, ARC, LAYERS, CHAPTERS, TRIPLE, GRID, CROWN, MAIN;
+
+    /** A front template: a fixed number of places, the same whatever the file's length. */
+    val front: Boolean get() = this == TRIPLE || this == GRID || this == CROWN || this == MAIN
+}
 
 /**
  * Where one panel sits, in seat coordinates: origin = head position when the layout was entered (yaw only),
@@ -20,7 +32,14 @@ enum class Arrangement { ROW, ARC, LAYERS, CHAPTERS }
 data class PanelPose(
     val x: Float, val y: Float, val z: Float, val yawDeg: Float,
     val width: Float, val height: Float, val scale: Float = 1f, val alpha: Float = 1f, val near: Boolean = true,
-)
+    /** Lean about the panel's own horizontal axis, degrees: above 0 the face turns down (a panel over the eyes), below 0 it turns up. */
+    val tiltDeg: Float = 0f,
+) {
+    /** Direction of the panel's centre seen from the seat, degrees: 0 = straight ahead, above 0 = to the right. */
+    val azimuthDeg: Float get() = (atan2(x.toDouble(), -z.toDouble()) * 180.0 / PI).toFloat()
+    /** Lowest point of the panel (metres above the eyes; the lean is small enough to leave out). */
+    val bottom: Float get() = y - height * scale / 2f
+}
 
 /** Size of one panel per file kind (metres). Documents: one section; sheets: a block of columns; slides: one slide. */
 data class PanelSize(val width: Float, val height: Float)
@@ -62,6 +81,8 @@ object LayoutRules {
         return when (arrangement) {
             // without chapter data the storyline is the plain arc ([chapterPoses] is the real thing)
             Arrangement.CHAPTERS -> poses(kind, count, Arrangement.ARC, focus, radiusSetting)
+            // every piece of a front template that is not shown stands where the arc would have it (callers use [frontPoses])
+            Arrangement.TRIPLE, Arrangement.GRID, Arrangement.CROWN, Arrangement.MAIN -> poses(kind, count, Arrangement.ARC, focus, radiusSetting)
             Arrangement.ROW -> List(count) { i -> PanelPose((i - f) * (size.width + gap), 0f, -r, 0f, size.width, size.height) }
             Arrangement.ARC -> {
                 val step = stepDeg(size.width, gap, r)
@@ -106,17 +127,117 @@ object LayoutRules {
         val cur = chapters.indexOfFirst { focus >= it.first && focus < it.first + it.second }.coerceAtLeast(0)
         val (first, n) = chapters[cur]
         val f = focus.coerceIn(first, first + n - 1)
-        val from = if (n <= CHAPTER_WINDOW) first else (f - CHAPTER_WINDOW / 2).coerceIn(first, first + n - CHAPTER_WINDOW)
-        val to = minOf(first + n, from + CHAPTER_WINDOW) - 1
-        for (i in from..to) out[i] = onRing((i - f) * step, r, 0f, size, 1f, 1f, true)
         val pileStep = stepDeg(size.width * PILE_SCALE, 0.07f, r)
         val gapDeg = step / 2f + pileStep / 2f + 2f
+        val pilesBefore = minOf(PILES_PER_SIDE, cur); val pilesAfter = minOf(PILES_PER_SIDE, chapters.size - 1 - cur)
+        // each side holds as many slides as leave its piles inside the view (never fewer than one, never more than half the window)
+        fun room(piles: Int): Int {
+            val forPiles = if (piles == 0) 0f else gapDeg + (piles - 1) * pileStep
+            return ((MAX_AZ - forPiles) / step).toInt().coerceIn(1, CHAPTER_WINDOW / 2)
+        }
+        val from = maxOf(first, f - room(pilesBefore))
+        val to = minOf(first + n - 1, f + room(pilesAfter))
+        for (i in from..to) out[i] = onRing((i - f) * step, r, 0f, size, 1f, 1f, true)
         for (k in 1..PILES_PER_SIDE) {
             chapters.getOrNull(cur - k)?.let { c -> out[c.first] = onRing((from - f) * step - gapDeg - (k - 1) * pileStep, r, -0.06f, size, PILE_SCALE, 1f, false) }
             chapters.getOrNull(cur + k)?.let { c -> out[c.first] = onRing((to - f) * step + gapDeg + (k - 1) * pileStep, r, -0.06f, size, PILE_SCALE, 1f, false) }
         }
         return out
     }
+
+    /**
+     * Furthest to the side a panel's centre may be, degrees. Nobody turns round in a chair to read what is behind:
+     * the whole layout stays inside the half circle in front (a panel at 78° still ends before 90°).
+     */
+    const val MAX_AZ = 78f
+
+    /** True when [p] is inside the view the layouts keep to ([MAX_AZ]). */
+    fun inView(p: PanelPose): Boolean = abs(p.azimuthDeg) <= MAX_AZ + 0.01f
+
+    /**
+     * Half of the view a front template may fill from side to side, degrees: what the eyes take in with the head
+     * still (profile D10: ±39°; the emulator's view ends at ±40°, where a wider row of three was cut off).
+     */
+    const val FRONT_HALF = 38f
+
+    /** Scale at which [n] panels of [width] side by side on the circle of radius [r] fill the view from −[FRONT_HALF] to +[FRONT_HALF]. */
+    private fun fitAcross(n: Int, width: Float, gap: Float, r: Float): Float {
+        val step = 2.0 * FRONT_HALF / n * PI / 180.0
+        return ((2.0 * r * kotlin.math.tan(step / 2.0) - gap) / width).toFloat()
+    }
+
+    /**
+     * Scale of the pieces of a front template: (main pieces, small pieces). Slides are small panels and gain most.
+     * The row of three is as large as the view allows at this distance, so it is the same angle wide at 1.2 m and 1.8 m.
+     */
+    fun frontScale(kind: FileKind, arrangement: Arrangement, radiusSetting: Float): Pair<Float, Float> {
+        val slides = kind.editor == FileKind.SLIDES
+        val triple = minOf(if (slides) 1.5f else 1.1f, fitAcross(3, panelSize(kind).width, 0.05f, radius(kind, radiusSetting)))
+        return when (arrangement) {
+            Arrangement.TRIPLE -> triple to triple
+            Arrangement.GRID -> (if (slides) 1.5f else 0.8f).let { it to it }
+            // upright pages are tall: with two more above them the row of three is smaller, or the top ones are overhead
+            Arrangement.CROWN -> if (slides) triple * 0.95f to triple * 0.76f else triple * 0.82f to triple * 0.62f
+            Arrangement.MAIN -> if (slides) 1.7f to 0.8f else 1.2f to 0.6f
+            else -> 1f to 1f
+        }
+    }
+
+    /**
+     * The front templates: the few pieces that are shown, by piece index, for piece [focus] of [count].
+     * - TRIPLE: focus straight ahead, the piece before it at its left, the one after it at its right, all facing the seat.
+     * - GRID: the four pieces of the focused piece's group (0–3, 4–7, …) in a 2 × 2 block: reading order, upper row leaning down, lower row up.
+     * - CROWN: TRIPLE a little lower, and above it the pieces two before (left) and two after (right), smaller, leaning down to the eyes.
+     * - MAIN: focus large straight ahead; small at its left the two pieces before it, at its right the two after it (stacked, the nearer one inside).
+     * Stepping the focus moves every piece one place on: a conveyor, never a new layout.
+     */
+    fun frontPoses(kind: FileKind, count: Int, arrangement: Arrangement, focus: Int, radiusSetting: Float): Map<Int, PanelPose> {
+        val out = LinkedHashMap<Int, PanelPose>()
+        if (count <= 0) return out
+        val f = focus.coerceIn(0, count - 1)
+        val size = panelSize(kind)
+        val r = radius(kind, radiusSetting)
+        val (s, small) = frontScale(kind, arrangement, radiusSetting)
+        fun put(i: Int, az: Float, y: Float, scale: Float) {
+            if (i !in 0 until count) return
+            // a panel above or below the eyes leans to face them
+            val lean = (atan2(y.toDouble(), r.toDouble()) * 180.0 / PI).toFloat()
+            out[i] = onRing(az, r, y, size, scale, 1f, true).copy(tiltDeg = lean)
+        }
+        when (arrangement) {
+            Arrangement.TRIPLE -> {
+                val step = stepDeg(size.width * s, 0.05f, r)
+                for (k in -1..1) put(f + k, k * step, 0f, s)
+            }
+            Arrangement.GRID -> {
+                val step = stepDeg(size.width * s, 0.04f, r)
+                val row = size.height * s / 2f + 0.02f
+                val first = f / 4 * 4
+                for (k in 0..3) put(first + k, (k % 2 - 0.5f) * step, if (k < 2) row else -row, s)
+            }
+            Arrangement.CROWN -> {
+                val step = stepDeg(size.width * s, 0.05f, r)
+                val low = if (kind.editor == FileKind.SLIDES) -CROWN_DROP else -CROWN_DROP_UPRIGHT
+                for (k in -1..1) put(f + k, k * step, low, s)
+                val high = low + size.height * s / 2f + 0.05f + size.height * small / 2f
+                put(f - 2, -step / 2f, high, small)
+                put(f + 2, step / 2f, high, small)
+            }
+            Arrangement.MAIN -> {
+                put(f, 0f, 0f, s)
+                val side = stepDeg(size.width * s, 0f, r) / 2f + stepDeg(size.width * small, 0f, r) / 2f + 2.5f
+                val row = size.height * small / 2f + 0.02f
+                put(f - 1, -side, -row, small); put(f - 2, -side, row, small)
+                put(f + 1, side, row, small); put(f + 2, side, -row, small)
+            }
+            else -> {}
+        }
+        return out
+    }
+
+    /** CROWN: how far the row of three sits below the eyes, so the two above it are not overhead. */
+    const val CROWN_DROP = 0.12f
+    const val CROWN_DROP_UPRIGHT = 0.2f
 
     /** Angle between neighbours so that panels of [width] sit edge to edge (plus [gap]) on a circle of radius [r]. */
     fun stepDeg(width: Float, gap: Float, r: Float): Float = (2.0 * atan(((width + gap) / 2.0) / r) * 180.0 / PI).toFloat()
@@ -127,10 +248,11 @@ object LayoutRules {
     }
 
     /** Layout bar: below the focused piece, tilted to the seat, never moves with the ring. */
-    fun barPose(kind: FileKind, radiusSetting: Float): PanelPose {
+    fun barPose(kind: FileKind, radiusSetting: Float, bottom: Float? = null): PanelPose {
         val size = panelSize(kind)
         val r = radius(kind, radiusSetting) - 0.25f
-        return PanelPose(0f, -(size.height / 2f) - 0.2f, -r, 0f, 0.62f, 0.09f)
+        // [bottom] = lowest edge of the pieces in front of the seat (the templates have larger pieces and second rows)
+        return PanelPose(0f, (bottom ?: -(size.height / 2f)) - 0.2f, -r, 0f, 0.62f, 0.09f)
     }
 
     /** Desk-height spot for a 3D chart: right front, out of the panels' way. */

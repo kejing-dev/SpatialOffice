@@ -789,7 +789,7 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
     fun run(f: () -> Unit) { edit.commit(s); f(); edit.load(s); runCatching { edit.focus.requestFocus() }; runCatching { keys.requestFocus() } }
     Toolbar(
         supportingContent = { FileTools(graph, Win.SHEET, s) },
-        content = {
+        content = { io.embodit.spatialoffice.ui.ToolbarScaled {
             Box(Modifier.focusRequester(keys).onPreviewKeyEvent { e -> io.embodit.spatialoffice.ui.composeKeys(graph, s, e) || commonKeys(graph, s, e) || sheetKeys(graph, s, edit, e) || typeIntoCell(s, edit, e) }.typingTarget().focusable()) {
             ToolRow {
                 // M2 s23: [Text ▾] takes the B button's place (B / I / U / strikethrough, sizes, clear formatting); the groups stay 8
@@ -898,7 +898,7 @@ private fun SheetToolbar(graph: Graph, s: SheetSession, edit: CellEdit) {
                 UndoRedo(s)
             }
             }
-        },
+        } },
     )
 }
 

@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
@@ -275,6 +276,55 @@ fun ToolToggle(icon: Int, label: String, checked: Boolean, onChange: (Boolean) -
 fun ToolRow(content: @Composable RowScope.() -> Unit) {
     // gate:allow button-gap editor toolbar inside the system Toolbar ornament: 48 dp targets, 8 dp apart (PRD §11)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp), content = content)
+}
+
+/**
+ * A window made smaller than the size it was designed for (user on the headset, 2026-11-24: "窗口缩放要能再小一点，
+ * 下面的 UI 也要等比例缩小"). Down to [designW] × [designH] the content lays itself out as always; below that the
+ * whole window is drawn smaller in one proportion (dp and sp both), so nothing is cut and nothing reflows.
+ * The window's Toolbar is a surface of its own under the window and no wider than it: it has its own proportion
+ * ([LocalToolScale], from the width its row of tools needs), so it shrinks with the window and never loses a button.
+ */
+val LocalWinScale = androidx.compose.runtime.compositionLocalOf { 1f }
+val LocalToolScale = androidx.compose.runtime.compositionLocalOf { 1f }
+/** Density of the window before it was scaled (0 = not inside [Fitted]). */
+val LocalWinDensity = androidx.compose.runtime.compositionLocalOf { 0f }
+
+object WinFit {
+    /** Smallest a window goes, as a part of its designed minimum. */
+    const val MIN_SCALE = 0.55f
+    /** The proportion for a window of [w] × [h] dp designed for at least [designW] × [designH]: in steps, so dragging the edge does not redraw at every pixel. */
+    fun scale(w: Float, h: Float, designW: Float, designH: Float, min: Float = MIN_SCALE): Float {
+        val z = minOf(w / designW, h / designH, 1f)
+        return (kotlin.math.floor(z * 40f + 0.001f) / 40f).coerceIn(min, 1f)
+    }
+    /** Smallest the Toolbar is drawn: its row of tools is wider than the narrowest window's content. */
+    const val TOOL_MIN_SCALE = 0.45f
+}
+
+@Composable
+fun Fitted(designW: Dp, designH: Dp, toolW: Dp = designW, content: @Composable () -> Unit) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        val z = WinFit.scale(maxWidth.value, maxHeight.value, designW.value, designH.value)
+        // the Toolbar: as wide as the window at the most, whatever the window's height
+        val tool = minOf(z, WinFit.scale(maxWidth.value, designH.value, toolW.value, designH.value, WinFit.TOOL_MIN_SCALE))
+        val d = androidx.compose.ui.platform.LocalDensity.current
+        LaunchedEffect(z, tool) { if (z < 1f || tool < 1f) android.util.Log.i(io.embodit.spatialoffice.platform.TAG, "WINDOW drawn at ${(z * 100).toInt()} %, toolbar at ${(tool * 100).toInt()} % (${maxWidth.value.toInt()} x ${maxHeight.value.toInt()} dp, designed for ${designW.value.toInt()} x ${designH.value.toInt()}, toolbar ${toolW.value.toInt()})") }
+        CompositionLocalProvider(
+            LocalWinScale provides z, LocalToolScale provides tool, LocalWinDensity provides d.density,
+            androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d.density * z, d.fontScale),
+        ) { content() }
+    }
+}
+
+/** Content of a window's Toolbar: drawn at the proportion the window's width leaves it ([LocalToolScale]). */
+@Composable
+fun ToolbarScaled(content: @Composable () -> Unit) {
+    val z = LocalToolScale.current
+    val base = LocalWinDensity.current
+    if (z >= 0.999f || base <= 0f) { content(); return }
+    val d = androidx.compose.ui.platform.LocalDensity.current
+    CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(base * z, d.fontScale)) { content() }
 }
 
 @Composable

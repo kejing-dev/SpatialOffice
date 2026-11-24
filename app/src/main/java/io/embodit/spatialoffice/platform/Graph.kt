@@ -610,10 +610,12 @@ class Graph(val app: Application) {
         stageTag = s.tag
         stageKind = kind.editor
         // a deck opens as its storyline by chapters; chapters are a deck's only
-        arrangement = (rec?.arrangement ?: if (s is DeckSession) Arrangement.CHAPTERS else Arrangement.ARC)
-            .let { if (it == Arrangement.CHAPTERS && s !is DeckSession) Arrangement.ARC else it }
+        // without a record: three across for documents and sheets (left, centre, right is what one looks at without turning: user, 2026-11-24)
+        arrangement = (rec?.arrangement ?: if (s is DeckSession) Arrangement.CHAPTERS else Arrangement.TRIPLE)
+            .let { if (it == Arrangement.CHAPTERS && s !is DeckSession) Arrangement.TRIPLE else it }
         focus = pieceOf(s, rec?.focus).coerceIn(0, (s.pieceCount - 1).coerceAtLeast(0))
         stageMode = StageMode.SPREAD
+        arrangePicking = false
         Log.i(TAG, "SPREAD enter kind=$stageKind arr=$arrangement focus=$focus pieces=${s.pieceCount}")
         windows.enterStage()
         say(Win.STAGE, str(R.string.full_space))
@@ -688,8 +690,13 @@ class Graph(val app: Application) {
         windows.stageClosed(stageSession?.let { refOf(it) })
     }
 
+    /** The layout bar shows the templates to choose from. */
+    var arrangePicking by mutableStateOf(false)
+
     fun arrange(a: Arrangement) {
+        arrangePicking = false
         if (a == Arrangement.CHAPTERS && stageSession !is DeckSession) return
+        if (a == arrangement) return
         arrangement = a; remember(); Log.i(TAG, "SPREAD arr=$a")
     }
 

@@ -235,26 +235,33 @@ class M4CoreTest {
 
     @Test fun afterTheStageTheRehearsedWindowIsNextToHomeAndNoWindowChangesSides() {
         val ring = io.embodit.spatialoffice.core.layout.ArcRing()
-        // QA #15: sheet right of home, document left, slides right of the sheet (~126°)
+        // QA #15 had: sheet right of home, document left, slides right of the sheet (~126°).
+        // 2026-11-24: the row is left · centre · right; the slides open in front, over the row, never behind the shoulders
         val r = io.embodit.spatialoffice.core.layout.ArcRing()
         assertEquals("Home" to "right", r.place("Sheet", hub = "Home"))
         assertEquals("Home" to "left", r.place("Doc", hub = "Home"))
-        assertEquals("Sheet" to "right", r.place("Slides", hub = "Home"))
-        assertEquals(listOf("Doc", "Home", "Sheet", "Slides"), r.order)
+        assertNull(r.place("Slides", hub = "Home"))
+        assertEquals(listOf("Doc", "Home", "Sheet"), r.order)
         val plan = r.replan(r.order, "Home", listOf("Doc", "Sheet", "Slides"), first = "Slides")
-        // the rehearsed slides open first, right beside home; the sheet stays right (outside it), the document stays left
-        assertEquals(listOf("Slides" to ("Home" to "right"), "Doc" to ("Home" to "left"), "Sheet" to ("Slides" to "right")), plan)
-        assertEquals(listOf("Doc", "Home", "Slides", "Sheet"), r.order)
+        // after the rehearsal no window changes sides: the sheet right, the document left; the slides have no place in
+        // the row and open in front again (the caller opens them last, on top)
+        assertEquals(listOf("Sheet" to ("Home" to "right"), "Doc" to ("Home" to "left")), plan)
+        assertEquals(listOf("Doc", "Home", "Sheet"), r.order)
         // the windows opening take exactly those places, whatever is up yet
-        assertEquals("Home" to "right", r.place("Slides", hub = "Home") { false })
-        assertEquals("Slides" to "right", r.place("Sheet", hub = "Home") { false })
+        assertEquals("Home" to "right", r.place("Sheet", hub = "Home") { false })
         assertEquals("Home" to "left", r.place("Doc", hub = "Home") { false })
-        // a window rehearsed from the left side comes back on the left, next to home
+        assertNull(r.place("Slides", hub = "Home"))
+        // a window rehearsed from the left side comes back on the left, next to home, first
         val l = io.embodit.spatialoffice.core.layout.ArcRing()
         l.place("A", hub = "Home"); l.place("B", hub = "Home"); l.place("C", hub = "Home"); l.place("D", hub = "Home")
-        assertEquals(listOf("D", "B", "Home", "A", "C"), l.order)
-        val p2 = l.replan(l.order, "Home", listOf("A", "B", "C", "D"), first = "D")
-        assertEquals("D" to ("Home" to "left"), p2.first())
-        assertEquals(listOf("B", "D", "Home", "A", "C"), l.order)
+        assertEquals(listOf("B", "Home", "A"), l.order)
+        val p2 = l.replan(l.order, "Home", listOf("A", "B", "C", "D"), first = "B")
+        assertEquals("B" to ("Home" to "left"), p2.first())
+        assertEquals(listOf("B", "Home", "A"), l.order)
+        // a side that came free is taken by a window that stood in front
+        val f = io.embodit.spatialoffice.core.layout.ArcRing()
+        f.place("A", hub = "Home"); f.place("B", hub = "Home"); f.place("C", hub = "Home")
+        val p3 = f.replan(f.order, "Home", listOf("B", "C"), first = "C")
+        assertEquals(listOf("C" to ("Home" to "right"), "B" to ("Home" to "left")), p3)
     }
 }

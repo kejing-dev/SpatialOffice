@@ -37,6 +37,7 @@ class SpatialApplication : Application() {
             override fun onActivitySaveInstanceState(a: Activity, b: Bundle) {}
             override fun onActivityDestroyed(a: Activity) {}
         })
+        io.embodit.spatialoffice.WindowTrial.read(this)
         launch(::mainApp)
     }
 }
