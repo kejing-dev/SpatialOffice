@@ -147,6 +147,13 @@ object Motion {
     /** The stack is faint: the pages brighten as they are dealt out and dim as they are gathered. */
     const val STACK_ALPHA = 0.35f
     private const val E = 2.7182817f
+    /**
+     * A piece pushed out of the row where a chapter's pile stands next to it has no room to go on: it goes [SQUEEZE]
+     * of its neighbour's way and shrinks to [SQUEEZE_SCALE] of its size, which keeps it clear of both the neighbour
+     * that follows it and the pile it goes towards (`MotionTest`).
+     */
+    const val SQUEEZE = 0.60f
+    const val SQUEEZE_SCALE = 0.14f
     /** How far the rehearsal screen gives when the slide changes: 1 % of its size. */
     const val SLIDE_PRESS = 0.01f
 }

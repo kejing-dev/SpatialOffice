@@ -690,6 +690,14 @@ class Graph(val app: Application) {
         windows.stageClosed(stageSession?.let { refOf(it) })
     }
 
+    /** The spread is read-only: its pieces are looked at, not edited. Kept from one time to the next. */
+    val readOnly: Boolean get() = settings.value.spreadReadOnly
+
+    fun toggleReadOnly() {
+        settings.update { it.copy(spreadReadOnly = !it.spreadReadOnly) }
+        Log.i(TAG, "SPREAD read-only=${settings.value.spreadReadOnly}")
+    }
+
     /** The layout bar shows the templates to choose from. */
     var arrangePicking by mutableStateOf(false)
 

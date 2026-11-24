@@ -75,6 +75,11 @@ class StageScene(private val graph: Graph) {
     val shown = mutableStateMapOf<String, Boolean>()
     /** Piece slot → piece index it currently shows. */
     val assigned = mutableStateMapOf<Int, Int>()
+    /**
+     * Panels that are on their way out of the layout (id → true when the panel showed a chapter's pile): they keep
+     * showing what they showed, whatever the layout says they would be now.
+     */
+    val frozen = mutableStateMapOf<String, Boolean>()
 
     private var root: Entity? = null
     private val holders = HashMap<String, Entity>()
@@ -94,6 +99,20 @@ class StageScene(private val graph: Graph) {
     private val exitUntil = HashMap<String, Long>()
     /** This frame's pieces that are shown and no longer laid out / that just got a panel (id → piece index); [choreograph] plays them. */
     private val leavers = LinkedHashMap<String, Int>()
+    /** Where every laid-out piece was to stand at the last frame (piece → pose): a step is played as one move of the whole row. */
+    private val prevWant = HashMap<Int, FloatArray>()
+    /**
+     * A panel that changes its part when another chapter comes to the front (a slide of the row becomes its chapter's
+     * pile, or the other way round): it first goes out with the row ([relays], until [relayUntil]), then comes in at its new place.
+     */
+    private val relays = HashMap<String, FloatArray>()
+    private val relayUntil = HashMap<String, Long>()
+    /** Where such a panel comes in from, and how long it waits first (default: at its place, at once). */
+    private val relayStart = HashMap<String, FloatArray>()
+    private val relayDelay = HashMap<String, Float>()
+    /** Largest overlap of two pieces seen during the move that is being played (degrees, weighted by how visible both are), for the log. */
+    private var overlapMax = 0f
+    private var overlapWho = ""
     private val newcomers = LinkedHashMap<String, Int>()
     /** Chapter of the slide in front at the last frame (−1 = not laid out by chapters). */
     private var prevChapter = -1
@@ -156,6 +175,7 @@ class StageScene(private val graph: Graph) {
         panels.clear(); holders.clear(); current.clear()
         bodies.clear(); exits.clear(); exitUntil.clear(); starts.clear(); delays.clear(); feels.clear(); prevMode = null; lastFrameAt = 0L; moveName = null
         leavers.clear(); newcomers.clear(); prevChapter = -1
+        prevWant.clear(); endRelays(); frozen.clear()
         root = null
         Log.i(TAG, "STAGE detached")
     }
@@ -264,7 +284,16 @@ class StageScene(private val graph: Graph) {
             val h = holders[id] ?: continue
             val settled = boundAt[id]?.let { now - it > 600L } == true
             val leaving = exits[id]
-            val w = wanted[id] ?: leaving
+            var relay = relays[id]
+            if (relay != null && now > (relayUntil[id] ?: 0L)) {
+                // gone with the row: now it comes in at its new place (the others have made room by then)
+                relays.remove(id); relayUntil.remove(id); relay = null
+                val from = relayStart.remove(id); val wait = relayDelay.remove(id) ?: 0.02f
+                wanted[id]?.let { to -> bodies.remove(id); starts[id] = from ?: to.copyOf().also { it[Motion.SCALE] *= 0.88f; it[Motion.ALPHA] = 0f }; delays[id] = wait }
+            }
+            val w = relay ?: wanted[id] ?: leaving
+            val out = relay != null || (leaving != null && wanted[id] == null)
+            if (!out && id in frozen) frozen.remove(id)
             if (w != null && settled) {
                 if (!h.enabled) h.enabled = true
                 var body = bodies[id]
@@ -296,11 +325,13 @@ class StageScene(private val graph: Graph) {
                 if (settled && h.enabled) h.enabled = false
             }
         }
-        // one line when a move has come to rest: what it was and how long it took (QA reads these)
+        // one line when a move has come to rest: what it was, how long it took and whether pieces lay over one another on the way (QA reads these)
         val name = moveName
+        val stepMove = name != null && (name.startsWith("focus") || name.startsWith("chapter"))
+        if (stepMove && st != null && mode == StageMode.SPREAD) measureOverlap(st)
         if (name != null && moving == 0 && now - moveAt > 80) {
             val ms = (now - moveAt).coerceAtLeast(1)
-            Log.i(TAG, "MOTION done $name in $ms ms frames=${frames - moveFrame} (${"%.0f".format((frames - moveFrame) * 1000f / ms)} fps)")
+            Log.i(TAG, "MOTION done $name in $ms ms frames=${frames - moveFrame} (${"%.0f".format((frames - moveFrame) * 1000f / ms)} fps)${if (stepMove) " overlap=${"%.1f".format(overlapMax)}°$overlapWho" else ""}")
             moveName = null
         }
         if (now - lastLog > 5000) {
@@ -309,7 +340,38 @@ class StageScene(private val graph: Graph) {
         }
     }
 
-    private fun began(name: String, now: Long) { moveName = name; moveAt = now; moveFrame = frames; Log.i(TAG, "MOTION start $name") }
+    private fun began(name: String, now: Long) { moveName = name; moveAt = now; moveFrame = frames; overlapMax = 0f; overlapWho = ""; Log.i(TAG, "MOTION start $name") }
+
+    /**
+     * How far two pieces lie over one another right now, seen from the seat: the widest such pair of this move is kept
+     * for the log. Degrees of overlap from side to side, times how visible the fainter of the two is; pieces at clearly
+     * different distances (the far ring of the layers) are one behind the other on purpose and do not count.
+     */
+    private fun measureOverlap(st: Seat) {
+        val (wDp, hDp) = StagePanels.pieceDp(graph.stageKind)
+        val ids = bodies.keys.filter { it.startsWith("piece-") && shown[it] == true }
+        for (i in ids.indices) for (j in i + 1 until ids.size) {
+            val a = bodies[ids[i]]?.pos ?: continue; val b = bodies[ids[j]]?.pos ?: continue
+            val seen = minOf(a[Motion.ALPHA], b[Motion.ALPHA]).coerceIn(0f, 1f)
+            if (seen < 0.15f) continue
+            val da = kotlin.math.hypot(a[0] - st.x, a[2] - st.z); val db = kotlin.math.hypot(b[0] - st.x, b[2] - st.z)
+            if (kotlin.math.abs(da - db) > 0.3f) continue
+            val ha = hDp * StagePanels.DP_M * a[Motion.SCALE] / 2f; val hb = hDp * StagePanels.DP_M * b[Motion.SCALE] / 2f
+            if (kotlin.math.abs(a[1] - b[1]) >= ha + hb - 0.01f) continue
+            // each panel's left and right edge as directions from the seat, measured from the direction between the two
+            val rx = (a[0] - st.x) + (b[0] - st.x); val rz = (a[2] - st.z) + (b[2] - st.z)
+            fun span(p: FloatArray): Pair<Float, Float> {
+                val hw = wDp * StagePanels.DP_M * p[Motion.SCALE] / 2f
+                val ex = cos(p[Motion.YAW]) * hw; val ez = -sin(p[Motion.YAW]) * hw
+                fun dir(x: Float, z: Float) = Math.toDegrees(kotlin.math.atan2((rx * z - rz * x).toDouble(), (rx * x + rz * z).toDouble())).toFloat()
+                val l = dir(p[0] - st.x - ex, p[2] - st.z - ez); val r = dir(p[0] - st.x + ex, p[2] - st.z + ez)
+                return minOf(l, r) to maxOf(l, r)
+            }
+            val sa = span(a); val sb = span(b)
+            val over = (minOf(sa.second, sb.second) - maxOf(sa.first, sb.first)) * seen
+            if (over > overlapMax) { overlapMax = over; overlapWho = " (pieces ${pieceOf(ids[i]) + 1} and ${pieceOf(ids[j]) + 1}, ${"%.0f".format(seen * 100)} % visible)" }
+        }
+    }
 
     private fun hold(now: Long) { holding = true; holdSince = now; calm = 0; opening = true }
 
@@ -318,8 +380,58 @@ class StageScene(private val graph: Graph) {
     /** The piece a piece panel shows. */
     private fun pieceOf(id: String): Int = assigned[slotOf(id)] ?: 0
 
-    private fun leave(id: String, to: FloatArray, now: Long, ms: Long) {
-        exits[id] = to; exitUntil[id] = now + ms; feels[id] = Motion.GATHER
+    private fun leave(id: String, to: FloatArray, now: Long, ms: Long, feel: Motion.Feel = Motion.GATHER, asPile: Boolean = false) {
+        exits[id] = to; exitUntil[id] = now + ms; feels[id] = feel; frozen[id] = asPile
+    }
+
+    /** [place] moved by [by] (x, y, z, yaw; [part] of it). */
+    private fun shifted(place: FloatArray, by: FloatArray, part: Float = 1f): FloatArray =
+        place.copyOf().also { for (i in intArrayOf(Motion.X, Motion.Y, Motion.Z, Motion.YAW)) it[i] += by[i] * part }
+
+    private fun between(from: FloatArray, to: FloatArray): FloatArray? {
+        val d = FloatArray(Motion.SIZE)
+        for (i in intArrayOf(Motion.X, Motion.Y, Motion.Z)) d[i] = to[i] - from[i]
+        d[Motion.YAW] = Motion.shortest(to[Motion.YAW] - from[Motion.YAW])
+        return d.takeIf { kotlin.math.abs(d[0]) + kotlin.math.abs(d[1]) + kotlin.math.abs(d[2]) > 0.005f }
+    }
+
+    private fun same(a: FloatArray, b: FloatArray): Boolean =
+        kotlin.math.abs(a[0] - b[0]) < 0.03f && kotlin.math.abs(a[1] - b[1]) < 0.03f && kotlin.math.abs(a[2] - b[2]) < 0.03f
+
+    /** How far the piece that stands at [place] now has come since the last frame's layout; null when none of [movers] stands there. */
+    private fun cameBy(place: FloatArray, nowWant: Map<Int, FloatArray>, movers: Set<Int>): FloatArray? {
+        for (q in movers) { val to = nowWant[q] ?: continue; val was = prevWant[q] ?: continue; if (same(to, place)) return between(was, to) }
+        return null
+    }
+
+    /** How far the piece that stood at [place] has gone on; null when none of [movers] stood there. */
+    private fun wentBy(place: FloatArray, nowWant: Map<Int, FloatArray>, movers: Set<Int>): FloatArray? {
+        for (q in movers) { val to = nowWant[q] ?: continue; val was = prevWant[q] ?: continue; if (same(was, place)) return between(was, to) }
+        return null
+    }
+
+    /** A panel's place seen from the seat: direction (degrees), height, distance. */
+    private fun polar(p: FloatArray, st: Seat): FloatArray {
+        val dx = p[Motion.X] - st.x; val dz = p[Motion.Z] - st.z
+        return floatArrayOf(Math.toDegrees(kotlin.math.atan2(dx, -dz).toDouble()).toFloat(), p[Motion.Y], kotlin.math.hypot(dx, dz))
+    }
+
+    /** True when the move a → b is the move fa → fb of the piece in front: the same turn round the seat (a ring), or the same shift (a straight row). */
+    private fun withFocus(a: FloatArray, b: FloatArray, fa: FloatArray, fb: FloatArray, st: Seat): Boolean {
+        val pa = polar(a, st); val pb = polar(b, st); val qa = polar(fa, st); val qb = polar(fb, st)
+        val turn = Math.toDegrees(Motion.shortest(Math.toRadians((pb[0] - pa[0] - (qb[0] - qa[0])).toDouble()).toFloat()).toDouble())
+        if (kotlin.math.abs(turn) < 0.7 && kotlin.math.abs((pb[1] - pa[1]) - (qb[1] - qa[1])) < 0.012f && kotlin.math.abs((pb[2] - pa[2]) - (qb[2] - qa[2])) < 0.03f) return true
+        return (0..2).all { kotlin.math.abs((b[it] - a[it]) - (fb[it] - fa[it])) < 0.015f }
+    }
+
+    private fun endRelays() { relays.clear(); relayUntil.clear(); relayStart.clear(); relayDelay.clear() }
+
+    /** [p] a little further from the seat ([by] metres; below 0 = nearer): two panels never lie in one plane while one fades over the other. */
+    private fun back(p: FloatArray, st: Seat, by: Float): FloatArray {
+        val dx = p[Motion.X] - st.x; val dz = p[Motion.Z] - st.z
+        val len = kotlin.math.sqrt(dx * dx + dz * dz).coerceAtLeast(1e-4f)
+        p[Motion.X] += dx / len * by; p[Motion.Z] += dz / len * by
+        return p
     }
 
     /**
@@ -327,12 +439,17 @@ class StageScene(private val graph: Graph) {
      * how long each waits and how each moves; [Motion.step] does the rest.
      * - entering the spread: the pieces are dealt out of one stack at the focused place, the focused one first;
      * - another arrangement: the pieces leave for their new places one after the other, from the focus outwards;
-     * - another piece in front: it comes with a small give, the rest glide;
-     * - another chapter in front (storyline by chapters): the slides of the old chapter close into its pile, the new
-     *   chapter's slides are dealt out of its pile, the other piles move up;
-     * - a front template (three across, grid, crown, main): stepping moves every piece one place on; the piece that
- *   comes into view fades in at its place, the one that leaves fades where it is;
- * - rehearsal: the slide in front grows into the big screen, notes and next slide come in from the sides, the bar rises;
+     * - another piece in front: the whole row moves on as one, every piece at the same speed (pieces stand edge to
+     *   edge: one that is quicker than its neighbour runs into it). A piece that is pushed out at the end of the row
+     *   goes on the same way and is gone before it gets anywhere; the one that comes in follows the row the same way.
+     *   Where a chapter's pile stands at that end, the piece shrinks away into the gap instead;
+     * - another chapter in front (storyline by chapters): the row moves on by the way the new piece in front has to
+     *   go; the old chapter's slides go with it and are gone on the way, the piles move up, then the new chapter's
+     *   slides appear in their places. No piece comes out from under another;
+     * - another page of the grid: the old four fade where they are, then the new four fade in;
+     * - a piece that would have to cross the others to get to its new place (up into the top row, into a side column,
+     *   to the far ring) does not travel: it goes out where it is and comes in where it belongs;
+     * - rehearsal: the slide in front grows into the big screen, notes and next slide come in from the sides, the bar rises;
      * - leaving: everything gathers back into the stack within the 350 ms before the Stage closes.
      */
     private fun choreograph(st: Seat?, mode: StageMode?, wanted: HashMap<String, FloatArray>, now: Long) {
@@ -370,28 +487,121 @@ class StageScene(private val graph: Graph) {
             } else if (!entering && prevFocus != focus && prevFocus >= 0) {
                 began("focus $prevFocus -> $focus", now)
             }
-            if (!entering) {
-                // a piece that is no longer laid out: into its chapter's pile when that pile is shown, else it fades where it is
+            // every piece → where it is to stand now
+            val nowWant = HashMap<Int, FloatArray>()
+            for ((slot, piece) in assigned) wanted[StagePanels.piece(slot)]?.let { nowWant[piece] = it }
+            val sameLayout = !entering && prevArrangement == graph.arrangement
+            val chapterChanged = sameLayout && chapter >= 0 && prevChapter >= 0 && chapter != prevChapter
+            val stepping = sameLayout && !chapterChanged && prevFocus != focus && prevFocus >= 0
+            if (chapterChanged) endRelays()
+            if (chapterChanged && focusPose != null) {
+                // Another chapter in front. The whole row moves on by the way the new piece in front has to go ([row]):
+                // the old chapter's slides go with it and are gone on the way, the piles move up, and only then do the new
+                // chapter's slides appear in their places. Nothing comes out from under another piece.
+                val was = { piece: Int -> io.embodit.spatialoffice.core.pptx.Chapters.indexOf(chapters, piece) != prevChapter } // it showed as a pile
+                val pileOfNew = prevWant[chapters[chapter].first]
+                val row = (prevWant[focus] ?: pileOfNew)?.let { between(it, focusPose) }
                 for ((id, piece) in leavers) {
                     val body = bodies[id] ?: continue
-                    val home = if (chapter >= 0) io.embodit.spatialoffice.core.pptx.Chapters.indexOf(chapters, piece) else -1
-                    val pile = if (home >= 0 && home != chapter) idOf(chapters[home].first)?.let { wanted[it] } else null
-                    val to = pile?.copyOf()?.also { it[Motion.ALPHA] = 0f } ?: body.pos.copyOf().also { it[Motion.SCALE] *= 0.85f; it[Motion.ALPHA] = 0f }
+                    val place = prevWant[piece] ?: body.pos
                     body.delay = 0f
-                    leave(id, to, now, if (pile != null) CHAPTER_MS else FADE_MS)
+                    val to = (if (row != null) shifted(place, row) else place.copyOf()).also { it[Motion.ALPHA] = -1f }
+                    // the pile of the chapter that opens goes with the slide that comes out of it, at that slide's size:
+                    // one turns into the other (it fades more slowly, so the room never shows through the two)
+                    val opening = piece == chapters[chapter].first
+                    if (opening) { to[Motion.SCALE] = focusPose[Motion.SCALE]; to[Motion.ALPHA] = -0.3f }
+                    leave(id, back(to, st, 0.015f), now, if (opening) MORPH_MS else GONE_MS, Motion.GLIDE, asPile = was(piece))
                 }
-                // a piece that just got a panel: out of its chapter's pile when it belongs to the chapter in front, else it fades in where it belongs
+                for ((slot, piece) in assigned.toMap()) {
+                    val id = StagePanels.piece(slot)
+                    val to = wanted[id] ?: continue
+                    val before = prevWant[piece] ?: continue
+                    val body = bodies[id] ?: continue
+                    if (id in newcomers || piece == focus || piece == prevFocus) continue
+                    val isPile = io.embodit.spatialoffice.core.pptx.Chapters.indexOf(chapters, piece) != chapter
+                    if (was(piece) == isPile) { if (same(before, to).not()) body.delay = 0.1f; continue } // a pile that moves up: after the row has started
+                    // slide ↔ pile: out with the row, then in at its new place
+                    val out = (if (row != null) shifted(before, row) else before.copyOf()).also { it[Motion.ALPHA] = -1f }
+                    if (was(piece)) { out[Motion.SCALE] = focusPose[Motion.SCALE]; out[Motion.ALPHA] = -0.3f }
+                    relays[id] = back(out, st, 0.015f); relayUntil[id] = now + (if (was(piece)) MORPH_MS else GONE_MS); frozen[id] = was(piece); body.delay = 0f
+                }
                 for ((id, piece) in newcomers) {
                     val w = wanted[id] ?: continue
-                    val mine = chapter >= 0 && piece in chapters[chapter]
-                    val pile = if (mine) idOf(chapters[chapter].first)?.takeIf { it != id }?.let { bodies[it] } else null
-                    starts[id] = pile?.pos?.copyOf()?.also { it[Motion.ALPHA] = Motion.STACK_ALPHA }
-                        ?: w.copyOf().also { it[Motion.SCALE] *= 0.85f; it[Motion.ALPHA] = 0f }
-                    delays[id] = if (pile != null) Motion.fanDelay(piece, focus, stepMs = 35, maxMs = 280) else 0f
+                    val mine = piece in chapters[chapter]
+                    if (piece == focus && pileOfNew != null) {
+                        // the slide in front comes out of its chapter's pile, with the pile
+                        starts[id] = back(pileOfNew.copyOf(), st, -0.012f).also { it[Motion.ALPHA] = 0f }; delays[id] = 0f
+                    } else {
+                        starts[id] = w.copyOf().also { it[Motion.SCALE] *= if (mine) 0.92f else 0.85f; it[Motion.ALPHA] = 0f }
+                        delays[id] = if (mine) minOf(0.2f + (kotlin.math.abs(piece - focus) - 1).coerceAtLeast(0) * 0.04f, 0.36f) else 0.15f
+                    }
                     bodies.remove(id)
                 }
+            } else if (!entering) {
+                // Another piece in front. What moves is the piece in front and every piece that makes the same move
+                // (the row); a piece of a ring further away slides along its own ring. A piece that would have to
+                // cross the others to get to its new place (up into the top row, into the side column, to the far
+                // ring) does not travel: it goes out where it is and comes in where it belongs ([turns]).
+                val movers = HashSet<Int>(); val sliders = HashSet<Int>(); val turns = ArrayList<Int>()
+                val fFrom = prevWant[focus]; val fTo = nowWant[focus]
+                if (stepping) for ((q, to) in nowWant) {
+                    val from = prevWant[q] ?: continue
+                    val still = between(from, to) == null && kotlin.math.abs(from[Motion.SCALE] - to[Motion.SCALE]) < 0.01f * to[Motion.SCALE]
+                    if (still) continue
+                    val slide = kotlin.math.abs(from[Motion.Y] - to[Motion.Y]) < 0.012f && kotlin.math.abs(from[Motion.SCALE] - to[Motion.SCALE]) < 0.01f * to[Motion.SCALE]
+                    val inRow = q == focus || (fFrom != null && fTo != null && withFocus(from, to, fFrom, fTo, st))
+                    val otherRing = slide && fTo != null && kotlin.math.abs(polar(to, st)[2] - polar(fTo, st)[2]) > 0.3f
+                    if (inRow || otherRing) { movers += q; if (slide) sliders += q } else turns += q
+                }
+                if (stepping) endRelays()
+                for ((id, piece) in leavers) {
+                    val body = bodies[id] ?: continue
+                    val place = prevWant[piece] ?: body.pos
+                    body.delay = 0f
+                    // the piece that takes its place pushes it on: it goes the same way, at the same speed, and is gone before it gets anywhere
+                    val by = cameBy(place, nowWant, sliders)
+                    val pileThere = chapter >= 0 && chapters.getOrNull(chapter + if (piece < focus) -1 else 1) != null
+                    when {
+                        // a chapter's pile stands next to it: it shrinks away into the gap between the pile and its neighbour
+                        by != null && pileThere -> leave(id, shifted(place, by, Motion.SQUEEZE).also { it[Motion.SCALE] *= Motion.SQUEEZE_SCALE; it[Motion.ALPHA] = -0.3f }, now, CARRY_MS, Motion.GLIDE)
+                        by != null -> leave(id, shifted(place, by).also { it[Motion.ALPHA] = -0.5f }, now, CARRY_MS, Motion.GLIDE)
+                        // nothing takes its place (another page of the grid, another arrangement): it fades where it is, a little behind
+                        else -> leave(id, back(body.pos.copyOf(), st, 0.03f).also { it[Motion.SCALE] *= 0.9f; it[Motion.ALPHA] = -1f }, now, GONE_MS)
+                    }
+                }
+                for ((id, piece) in newcomers) {
+                    val w = wanted[id] ?: continue
+                    // the piece that stood here has moved on: the new one comes after it, the same way at the same speed
+                    val by = wentBy(w, nowWant, sliders)
+                    val pileThere = chapter >= 0 && chapters.getOrNull(chapter + if (piece < focus) -1 else 1) != null
+                    starts[id] = when {
+                        by != null && pileThere -> shifted(w, by, -Motion.SQUEEZE).also { it[Motion.SCALE] *= Motion.SQUEEZE_SCALE; it[Motion.ALPHA] = 0f }
+                        by != null -> shifted(w, by, -1f).also { it[Motion.ALPHA] = 0f }
+                        else -> w.copyOf().also { it[Motion.SCALE] *= 0.9f; it[Motion.ALPHA] = 0f }
+                    }
+                    // in the place of a piece that fades out: after it has gone
+                    delays[id] = if (by == null && (leavers.isNotEmpty() || turns.isNotEmpty())) (if (turns.isNotEmpty()) TURN_IN else 0.13f) else 0f
+                    bodies.remove(id)
+                }
+                for (q in turns) {
+                    val id = idOf(q) ?: continue
+                    val body = bodies[id] ?: continue
+                    val place = prevWant[q] ?: continue; val w = nowWant[q] ?: continue
+                    // out like a piece that leaves, in like a piece that comes
+                    val outBy = cameBy(place, nowWant, sliders)
+                    relays[id] = (outBy?.let { shifted(place, it) } ?: back(place.copyOf(), st, 0.015f).also { it[Motion.SCALE] *= 0.94f }).also { it[Motion.ALPHA] = -1f }
+                    relayUntil[id] = now + GONE_MS; frozen[id] = false; body.delay = 0f
+                    val inBy = wentBy(w, nowWant, sliders)
+                    relayStart[id] = (inBy?.let { shifted(w, it, -1f) } ?: w.copyOf().also { it[Motion.SCALE] *= 0.9f }).also { it[Motion.ALPHA] = 0f }
+                    relayDelay[id] = if (inBy != null) 0.02f else TURN_IN - GONE_MS / 1000f
+                }
+                // the pieces that go out where they are get a head start on the row that moves into their places
+                if (turns.isNotEmpty()) for (q in movers) idOf(q)?.let { bodies[it] }?.let { if (it.delay < ROW_WAITS) it.delay = ROW_WAITS }
             }
-            for (id in wanted.keys) feels[id] = if (id == focusId) Motion.FOCUS else Motion.GLIDE
+            // One feel for every piece: the row moves as one. (A quicker piece in front ran into the one before it and lay
+            // over it for a third of a second: user on the headset, 2026-11-24.)
+            for (id in wanted.keys) feels[id] = Motion.GLIDE
+            prevWant.clear(); prevWant.putAll(nowWant)
             prevArrangement = graph.arrangement
             prevChapter = chapter
         } else if (st != null && mode == StageMode.REHEARSAL) {
@@ -434,7 +644,7 @@ class StageScene(private val graph: Graph) {
             val focusPose = lastFocusPose
             val shownNow = bodies.keys.filter { shown[it] == true }
             val pieces = shownNow.filter { it.startsWith("piece-") }.sortedBy { pieceOf(it) }
-            val focusAt = pieces.indexOfFirst { feels[it] == Motion.FOCUS }.coerceAtLeast(0)
+            val focusAt = pieces.indexOfFirst { pieceOf(it) == focus }.coerceAtLeast(0)
             for (id in shownNow) {
                 val body = bodies[id] ?: continue
                 val to = when {
@@ -457,7 +667,7 @@ class StageScene(private val graph: Graph) {
             val keep = if (mode == StageMode.SPREAD) exits.keys.filter { it.startsWith("piece-") && wanted[it] == null }.toSet() else emptySet()
             exits.keys.retainAll(keep); exitUntil.keys.retainAll(keep)
         }
-        if (mode != StageMode.SPREAD) prevChapter = -1
+        if (mode != StageMode.SPREAD) { prevChapter = -1; prevWant.clear(); endRelays() }
         if (seat != null && seenRecenterForMotion != graph.recenterTick) {
             if (seenRecenterForMotion >= 0 && mode != null) began("recenter", now)
             seenRecenterForMotion = graph.recenterTick
@@ -520,5 +730,15 @@ class StageScene(private val graph: Graph) {
         /** Longest the slides of a chapter take to close into its pile, and a piece takes to fade out of the layout. */
         const val CHAPTER_MS = 340L
         const val FADE_MS = 240L
+        /** A piece that goes out with the row is no longer seen after about 135 ms (its alpha heads for −1); its panel is free after this long. */
+        const val GONE_MS = 170L
+        /** The same for a pile that turns into the slide coming out of it (alpha heads for −0.3: gone after about 220 ms). */
+        const val MORPH_MS = 240L
+        /** Seconds after a step at which a piece that changed its part comes in at its new place: the row has passed by then. */
+        const val TURN_IN = 0.34f
+        /** Seconds the row waits when pieces go out where they stand: they are faint before the row reaches their places. */
+        const val ROW_WAITS = 0.08f
+        /** Longest a piece that is pushed out of the row at its end is still drawn. */
+        const val CARRY_MS = 260L
     }
 }

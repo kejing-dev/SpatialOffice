@@ -842,4 +842,5 @@
     <string name="arr_grid" formatted="false">Grid</string>
     <string name="arr_crown" formatted="false">Top row</string>
     <string name="arr_main" formatted="false">Main</string>
+    <string name="read_only" formatted="false">Read-only</string>
 </resources>

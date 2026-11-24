@@ -40,6 +40,17 @@ class StageMotionTest {
 /** The layout bar's templates, and a window drawn smaller than it was designed for. */
 class TemplatesTest {
     @Test
+    fun theSpreadIsReadOnlyUntilTheUserSaysOtherwise() {
+        // a controller's ray clicks where one did not mean to: looking is the default, editing is switched on (user, 2026-11-24)
+        org.junit.Assert.assertTrue(Settings().spreadReadOnly)
+        val screen = java.io.File("src/main/java/io/embodit/spatialoffice/ui/space/StageScreen.kt").readText()
+        // the piece in front gets its caret / cell editor / shape handles only when the spread is not read-only
+        org.junit.Assert.assertTrue(screen.contains("val focused = inFront && !graph.readOnly"))
+        for (use in listOf("if (focused) focus else null", "if (focused) edit else null", "editable = focused")) org.junit.Assert.assertTrue(use, screen.contains(use))
+        org.junit.Assert.assertTrue(screen.contains("graph.toggleReadOnly()"))
+    }
+
+    @Test
     fun sevenTemplatesPerKindEachWithAPictureInsideItsFrame() {
         for (deck in listOf(true, false)) {
             val t = io.embodit.spatialoffice.ui.space.templates(deck)

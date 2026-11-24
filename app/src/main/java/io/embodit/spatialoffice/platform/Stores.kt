@@ -24,6 +24,8 @@ data class Settings(
     val hintSeen: Boolean = false,
     /** M5: the name written on my comments and tracked changes ("" = not asked yet). */
     val myName: String = "",
+    /** The spread is for looking: nothing in it is edited until the user turns this off on the layout bar (a controller's ray clicks by mistake). */
+    val spreadReadOnly: Boolean = true,
 ) {
     val zh: Boolean get() = lang == Lang.ZH
 }
@@ -43,6 +45,7 @@ class SettingsStore(context: Context) {
             radius = prefs.getInt("radius", d.radius).coerceIn(0, 2),
             hintSeen = prefs.getBoolean("hint", false),
             myName = prefs.getString("name", "") ?: "",
+            spreadReadOnly = prefs.getBoolean("spreadRo", d.spreadReadOnly),
         )
     }
 
@@ -50,7 +53,7 @@ class SettingsStore(context: Context) {
         val s = f(value)
         value = s
         prefs.edit().putString("lang", s.lang.name).putString("open", s.openMode.name).putString("store", s.layoutStore.name)
-            .putBoolean("keep", s.keepBackup).putInt("radius", s.radius).putBoolean("hint", s.hintSeen).putString("name", s.myName).apply()
+            .putBoolean("keep", s.keepBackup).putInt("radius", s.radius).putBoolean("hint", s.hintSeen).putString("name", s.myName).putBoolean("spreadRo", s.spreadReadOnly).apply()
     }
 }
 

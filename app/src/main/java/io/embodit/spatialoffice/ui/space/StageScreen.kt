@@ -111,7 +111,7 @@ fun StageScreen() {
             attachments = {
                 for (slot in 0 until StagePanels.MAX_PIECES) {
                     val id = StagePanels.piece(slot)
-                    AttachmentPanel(id) { Pooled(graph, scene, id) { PiecePanel(graph, scene.assigned[slot]) } }
+                    AttachmentPanel(id) { Pooled(graph, scene, id) { PiecePanel(graph, scene.assigned[slot], scene.frozen[id]) } }
                 }
                 AttachmentPanel(StagePanels.BAR) { Pooled(graph, scene, StagePanels.BAR) { if (graph.stageMode == StageMode.REHEARSAL) RehearsalBar(graph) else LayoutBar(graph) } }
                 AttachmentPanel(StagePanels.SCREEN) { Pooled(graph, scene, StagePanels.SCREEN) { RehearsalScreen(graph) } }
@@ -192,23 +192,29 @@ private fun rehearsalStep(graph: Graph, delta: Int) {
     graph.rehearsalTyped = ""
 }
 
-/** One piece of the file. The focused piece is edited in place; any other piece comes to the front when clicked. */
+/**
+ * One piece of the file. The focused piece is edited in place unless the spread is read-only ([Graph.readOnly]); any
+ * other piece comes to the front when clicked. [frozen] = the panel is on its way out of the layout: it keeps showing
+ * what it showed (true = its chapter's pile, false = the plain piece) and takes no clicks.
+ */
 @Composable
-private fun PiecePanel(graph: Graph, index: Int?) {
+private fun PiecePanel(graph: Graph, index: Int?, frozen: Boolean? = null) {
     index ?: return
     val s = graph.stageSession ?: return
     s.version
-    val focused = index == graph.focus
+    val inFront = index == graph.focus && frozen == null
+    // read-only: the piece in front is looked at, never edited (a controller's ray clicks where one did not mean to)
+    val focused = inFront && !graph.readOnly
     val (w, h) = StagePanels.pieceDp(graph.stageKind)
     val far = graph.arrangement == Arr.LAYERS && kotlin.math.abs(index - graph.focus) > 1
     // storyline by chapters: a slide of another chapter stands for that whole chapter (its pile)
     val chapters = if (graph.arrangement == Arr.CHAPTERS && s is DeckSession) s.chapters() else emptyList()
     val home = if (chapters.isEmpty()) -1 else Chapters.indexOf(chapters, index)
-    val pile = home >= 0 && home != Chapters.indexOf(chapters, graph.focus)
-    if (pile) { PilePanel(graph, s as DeckSession, chapters[home], home, w, h); return }
+    val pile = frozen ?: (home >= 0 && home != Chapters.indexOf(chapters, graph.focus))
+    if (pile && home >= 0) { PilePanel(graph, s as DeckSession, chapters[home], home, w, h); return }
     Box(
         Modifier.size(w.dp, h.dp).alpha(if (far) 0.72f else 1f).clip(RoundedCornerShape(20.dp)).background(Ink.Paper)
-            .border(if (focused) 4.dp else 1.dp, if (focused) Ink.Select else Ink.Line, RoundedCornerShape(20.dp))
+            .border(if (inFront) 4.dp else 1.dp, if (inFront) Ink.Select else Ink.Line, RoundedCornerShape(20.dp))
             .semantics { contentDescription = "piece-${index + 1}" },
     ) {
         when (s) {
@@ -231,7 +237,11 @@ private fun PiecePanel(graph: Graph, index: Int?) {
             else -> {}
         }
         // a piece that is not in front is one big target: click it and it turns to the front
-        if (!focused) Box(Modifier.fillMaxSize().dragToStep(graph, index) { graph.focusOn(index) }.noKeyFocus().clickable { graph.focusOn(index) }.semantics { contentDescription = "to-front-${index + 1}" })
+        if (frozen != null) return@Box
+        if (!inFront) Box(Modifier.fillMaxSize().dragToStep(graph, index) { graph.focusOn(index) }.noKeyFocus().clickable { graph.focusOn(index) }.semantics { contentDescription = "to-front-${index + 1}" })
+        // read-only: a slide in front takes a sideways drag like the others and a click does nothing (documents and
+        // sheets keep their own scrolling: they are drawn without a caret, so nothing in them can be changed)
+        else if (graph.readOnly && s is DeckSession) Box(Modifier.fillMaxSize().dragToStep(graph, index) {}.noKeyFocus().clickable {}.semantics { contentDescription = "read-only-${index + 1}" })
     }
 }
 
@@ -337,7 +347,7 @@ private fun TemplateTile(a: Arr, selected: Boolean, modifier: Modifier, onClick:
 
 /**
  * Layout bar under the pieces in front: the template in use (press it and the bar shows all seven to choose from),
- * previous / next piece, bring back to front, collapse.
+ * previous / next piece, read-only (on: nothing in the spread can be edited), bring back to front, collapse.
  */
 @Composable
 private fun LayoutBar(graph: Graph) {
@@ -365,6 +375,17 @@ private fun LayoutBar(graph: Graph) {
             Txt(tr(R.string.piece_n, graph.focus + 1, count), "stage/piece-n", Modifier.width(72.dp), style = PicoTheme.typography.titleMedium, align = androidx.compose.ui.text.style.TextAlign.Center)
             ToolIcon(R.drawable.ic_arrow_right, tr(R.string.focus_next), onClick = { graph.focusBy(1) }, enabled = graph.focus < count - 1)
             Box(Modifier.weight(1f))
+            // read-only on: filled, like a switch that is on. Six things to press on the bar (B31: seven at most).
+            val locked = graph.readOnly
+            Row(
+                Modifier.height(64.dp).clip(RoundedCornerShape(32.dp)).background(if (locked) Ink.Select else PicoTheme.colorScheme.fillSecondary)
+                    .noKeyFocus().clickable { graph.toggleReadOnly() }.semantics { contentDescription = if (locked) "stage/read-only-on" else "stage/read-only-off" }.padding(horizontal = 22.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                val fg = if (locked) androidx.compose.ui.graphics.Color.White else PicoTheme.colorScheme.labelPrimary
+                com.pico.spatial.ui.design.Icon(painter = androidx.compose.ui.res.painterResource(R.drawable.ic_lock), contentDescription = null, modifier = Modifier.size(22.dp), tint = fg)
+                Txt(tr(R.string.read_only), "stage/read-only", style = PicoTheme.typography.titleMedium, color = fg)
+            }
             SecondaryButton(tr(R.string.recenter), "stage/recenter", icon = R.drawable.ic_rotate, onClick = { graph.recenter() })
             PrimaryButton(tr(R.string.collapse), "stage/collapse", icon = R.drawable.ic_collapse, onClick = { graph.collapse() })
         }

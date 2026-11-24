@@ -66,6 +66,7 @@ object DebugReceiver {
             "arr" -> g.arrange(Arrangement.values().first { it.name.equals(arg, true) })
             "focus" -> g.focusOn(arg.toInt())
             "recenter" -> g.recenter()
+            "read-only" -> if (g.readOnly != (arg != "off")) g.toggleReadOnly()
             "chart" -> g.sheet?.let { io.embodit.spatialoffice.ui.sheet.openChart(g, it) }
             "chart-type" -> g.chartScatter = arg == "scatter"
             "chart-yaw" -> g.chartYaw = arg.toFloat()
